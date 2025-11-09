@@ -64,7 +64,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     title: 'ยิ่งร่วม ยิ่งได้\nแต้มพุ่ง รางวัลปัง!!',
                     description:
                         'แพลตฟอร์มเพื่อการเรียนรู้และเติบโต. เข้าร่วมกิจกรรม, สะสมแต้ม, \nแลกรางวัล เพื่อศักยภาพที่ไร้ขีดจำกัดของคุณ',
-                    imageHeight: 456,
+                    imageHeight: 380,
                   ),
                   // Page 2
                   _buildInfoPage(
@@ -72,6 +72,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     title: 'กิจกรรมดี ๆ\nเพื่อทีมที่แข็งแรง',
                     description:
                         'ค้นหากิจกรรมที่น่าสนใจภายในองค์กร และเข้าร่วมเพื่อเก็บแต้มและพัฒนาความสัมพันธ์ในทีม',
+                    imageHeight: 380,
                   ),
                   // Page 3
                   _buildInfoPage(
@@ -79,6 +80,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     title: 'เปลี่ยนกิจกรรม\nให้เป็นโอกาส',
                     description:
                         'ทุกกิจกรรมที่คุณเข้าร่วมคือการเปิดโอกาสใหม่ๆ ให้กับตัวเอง สะสมแต้มเพื่อแลกของรางวัลสุดพิเศษ!',
+                    imageHeight: 380,
                   ),
                 ],
               ),
@@ -98,12 +100,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     double imageHeight = 250,
   }) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 40.0, vertical: 20.0),
+      padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 16.0),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Image.asset(imagePath, height: imageHeight),
-          const SizedBox(height: 40),
+          Image.asset(imagePath, height: imageHeight, fit: BoxFit.contain),
+          const SizedBox(height: 24),
+          // Move page indicator to be under the image (ตามภาพ Figma)
+          SmoothPageIndicator(
+            controller: _pageController,
+            count: 3,
+            effect: WormEffect(
+              dotHeight: 8,
+              dotWidth: 8,
+              activeDotColor: Colors.black, // #000000
+              dotColor: Colors.grey[300]!,
+            ),
+          ),
+          const SizedBox(height: 24),
           Text(
             title,
             textAlign: TextAlign.center,
@@ -120,7 +134,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             style: GoogleFonts.mulish(
               fontSize: 12,
               fontWeight: FontWeight.w400,
-              color: Colors.black,
+              color: Colors.black54,
             ),
           ),
         ],
@@ -137,28 +151,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       height: 120,
       child: Column(
         children: [
-          // 1. Page Indicator (จุดๆ)
-          SmoothPageIndicator(
-            controller: _pageController,
-            count: 3,
-            effect: WormEffect(
-              dotHeight: 10,
-              dotWidth: 10,
-              // <-- 5. อัปเดตสี Indicator ตาม CSS
-              activeDotColor: Colors.black, // CSS คือ #000000
-              dotColor:
-                  Colors.grey[300]!, // CSS ของ Inactive คือ border #000000
-            ),
-          ),
           const Spacer(),
 
           // 2. Buttons
           isLastPage
               // (หน้า Info 3) - ปุ่ม START
-              ? _buildActionButton(
-                  text: 'START',
-                  isPrimary: true, // Style สีดำ
-                  onTap: _onDone,
+              ? SizedBox(
+                  width: double.infinity,
+                  child: _buildActionButton(
+                    text: 'START',
+                    isPrimary: true, // Style สีดำ
+                    onTap: _onDone,
+                  ),
                 )
               // (หน้า Info 1 & 2) - ปุ่ม SKIP และ NEXT
               : Row(
@@ -203,16 +207,16 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       style: ElevatedButton.styleFrom(
         backgroundColor: backgroundColor,
         foregroundColor: textColor,
-        elevation: 5, // สร้างเงา (BoxShadow)
+        elevation: 8, // สร้างเงา (ตาม Figma shadow ที่เด่นขึ้นเล็กน้อย)
+        shadowColor: Colors.black.withOpacity(0.15),
         minimumSize: const Size(118, 68), // ขนาดตาม CSS (w: 118, h: 68)
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(50), // border-radius: 50px
         ),
-        // (CSS มี border สีดำสำหรับปุ่ม SKIP แต่ดีไซน์ในรูปไม่มี,
-        // ถ้าต้องการเพิ่ม ให้ uncomment บรรทัดข้างล่าง)
-        // side: isPrimary
-        //     ? BorderSide.none
-        //     : const BorderSide(color: Colors.black, width: 1),
+        // เพิ่มเส้นขอบบางสำหรับปุ่ม SKIP ให้คล้าย Figma
+        side: isPrimary
+            ? BorderSide.none
+            : const BorderSide(color: Colors.black, width: 1),
       ),
       child: Text(
         text,
