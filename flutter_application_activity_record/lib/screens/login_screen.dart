@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 // *** 1. Import หน้า Register ***
 import 'organization_register_screen.dart';
+// *** 2. Import หน้า Forgot Password ***
+import 'forgot_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -90,16 +92,20 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           prefixIcon: const Icon(Icons.email, size: 20),
                           contentPadding: const EdgeInsets.symmetric(
-                              vertical: 14, horizontal: 14),
+                            vertical: 14,
+                            horizontal: 14,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(16),
-                            borderSide:
-                                const BorderSide(color: Color(0xFFE0E0E0)),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFE0E0E0),
+                            ),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(16),
-                            borderSide:
-                                const BorderSide(color: Color(0xFFE0E0E0)),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFE0E0E0),
+                            ),
                           ),
                         ),
                         keyboardType: TextInputType.emailAddress,
@@ -124,16 +130,20 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           prefixIcon: const Icon(Icons.lock, size: 20),
                           contentPadding: const EdgeInsets.symmetric(
-                              vertical: 14, horizontal: 14),
+                            vertical: 14,
+                            horizontal: 14,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(16),
-                            borderSide:
-                                const BorderSide(color: Color(0xFFE0E0E0)),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFE0E0E0),
+                            ),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(16),
-                            borderSide:
-                                const BorderSide(color: Color(0xFFE0E0E0)),
+                            borderSide: const BorderSide(
+                              color: Color(0xFFE0E0E0),
+                            ),
                           ),
                         ),
                         obscureText: true,
@@ -149,7 +159,13 @@ class _LoginScreenState extends State<LoginScreen> {
                         alignment: Alignment.centerRight,
                         child: GestureDetector(
                           onTap: () {
-                            /* TODO: forgot-password flow */
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    const ForgotPasswordScreen(),
+                              ),
+                            );
                           },
                           child: Text(
                             'Forgot Password?',
@@ -203,7 +219,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) => const OrganizationRegisterScreen(),
+                                builder: (_) =>
+                                    const OrganizationRegisterScreen(),
                               ),
                             );
                           },

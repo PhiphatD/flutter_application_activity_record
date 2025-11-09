@@ -26,11 +26,17 @@ class _OrganizationRegisterScreenState
   bool _isLoading = false;
   final List<String> _businessTypes = [
     'Technology',
+    'Finance & Insurance',
+    'Healthcare',
     'Retail',
+    'Manufacturing',
+    'Services & Consulting',
     'Education',
-    'Construction & Real Estate', // เพิ่มจากรูป
+    'Real Estate & Construction',
+    'Non-Profit',
     'Other',
   ];
+  String? _selectedBusinessType;
 
   @override
   void dispose() {
@@ -253,6 +259,7 @@ class _OrganizationRegisterScreenState
                       _businessType = value;
                     });
                   },
+                  prefixIcon: Icons.business,
                 ),
                 const SizedBox(height: 24),
                 _buildSectionTitle('Administrator Account'),
@@ -425,6 +432,7 @@ class _OrganizationRegisterScreenState
     required String? value,
     required List<String> items,
     required void Function(String?)? onChanged,
+    IconData? prefixIcon,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -435,12 +443,28 @@ class _OrganizationRegisterScreenState
           const SizedBox(height: 6),
           DropdownButtonFormField<String>(
             value: value,
+            isExpanded: true,
+            isDense: true,
+            menuMaxHeight: 280,
+            icon: Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: Colors.grey[700],
+            ),
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              color: const Color(0xFF222222),
+            ),
+            dropdownColor: Colors.white,
             items: items.map((String item) {
               return DropdownMenuItem<String>(value: item, child: Text(item));
             }).toList(),
             onChanged: onChanged,
             decoration: InputDecoration(
+              prefixIcon: prefixIcon != null
+                  ? Icon(prefixIcon, color: Colors.grey[600])
+                  : null,
               hintText: hint,
+              hintStyle: GoogleFonts.inter(color: Colors.grey[500]),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide(color: Colors.grey[300]!),
@@ -449,8 +473,19 @@ class _OrganizationRegisterScreenState
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide(color: Colors.grey[300]!),
               ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(
+                  color: Color(0xFF222222),
+                  width: 1.6,
+                ),
+              ),
               filled: true,
               fillColor: Colors.grey[50],
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 14,
+              ),
             ),
           ),
         ],
