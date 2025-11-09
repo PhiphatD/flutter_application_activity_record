@@ -4,6 +4,7 @@ import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_fonts/google_fonts.dart'; // <-- 1. Import google_fonts
 import 'login_screen.dart';
+import 'package:lottie/lottie.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({Key? key}) : super(key: key);
@@ -60,7 +61,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 children: [
                   // Page 1: New design from Figma
                   _buildInfoPage(
-                    imagePath: 'assets/images/intro1.png',
+                    lottiePath: 'assets/animations/Welcome.json',
                     title: 'ยิ่งร่วม ยิ่งได้\nแต้มพุ่ง รางวัลปัง!!',
                     description:
                         'แพลตฟอร์มเพื่อการเรียนรู้และเติบโต. เข้าร่วมกิจกรรม, สะสมแต้ม, \nแลกรางวัล เพื่อศักยภาพที่ไร้ขีดจำกัดของคุณ',
@@ -68,7 +69,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   ),
                   // Page 2
                   _buildInfoPage(
-                    imagePath: 'assets/images/intro2.png',
+                    lottiePath: 'assets/animations/Business team.json',
                     title: 'กิจกรรมดี ๆ\nเพื่อทีมที่แข็งแรง',
                     description:
                         'ค้นหากิจกรรมที่น่าสนใจภายในองค์กร และเข้าร่วมเพื่อเก็บแต้มและพัฒนาความสัมพันธ์ในทีม',
@@ -76,7 +77,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   ),
                   // Page 3
                   _buildInfoPage(
-                    imagePath: 'assets/images/intro3.png',
+                    lottiePath: 'assets/animations/Businessman flies up with rocket.json',
                     title: 'เปลี่ยนกิจกรรม\nให้เป็นโอกาส',
                     description:
                         'ทุกกิจกรรมที่คุณเข้าร่วมคือการเปิดโอกาสใหม่ๆ ให้กับตัวเอง สะสมแต้มเพื่อแลกของรางวัลสุดพิเศษ!',
@@ -94,7 +95,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   // Widget for creating content on each page
   Widget _buildInfoPage({
-    required String imagePath,
+    required String lottiePath,
     required String title,
     required String description,
     double imageHeight = 250,
@@ -104,7 +105,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Image.asset(imagePath, height: imageHeight, fit: BoxFit.contain),
+          Lottie.asset(lottiePath, height: imageHeight, fit: BoxFit.contain),
           const SizedBox(height: 24),
           // Move page indicator to be under the image (ตามภาพ Figma)
           SmoothPageIndicator(
