@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'onboarding_screen.dart';
 import 'login_screen.dart';
+import 'package:lottie/lottie.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -48,14 +49,10 @@ class _SplashScreenState extends State<SplashScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // TODO: ใส่โลโก้ "GROW PERKS" ของคุณที่นี่
-            //             Image.asset('assets/images/logo.png', width: 150), // สมมติว่านี่คือโลโก้
-            const SizedBox(height: 20),
-            const CircularProgressIndicator(),
-          ],
+        child: Lottie.asset(
+          'assets/animations/Material wave loading.json',
+          width: 200,
+          height: 200,
         ),
       ),
     );

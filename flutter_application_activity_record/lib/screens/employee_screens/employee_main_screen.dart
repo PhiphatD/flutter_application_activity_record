@@ -14,13 +14,13 @@ class EmployeeMainScreen extends StatefulWidget {
 }
 
 class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
-  int _selectedIndex = 0; 
+  int _selectedIndex = 0;
 
   // รายการของ 3 หน้าที่จะสลับไปมา
   static const List<Widget> _widgetOptions = <Widget>[
     ActivityFeedScreen(), // หน้าแท็บที่ 1
-    TodoScreen(),         // หน้าแท็บที่ 2
-    RewardScreen(),       // หน้าแท็บที่ 3
+    TodoScreen(), // หน้าแท็บที่ 2
+    RewardScreen(), // หน้าแท็บที่ 3
   ];
 
   void _onItemTapped(int index) {
@@ -31,13 +31,10 @@ class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const Color primaryColor = Color(0xFF4A80FF); 
+    const Color primaryColor = Color(0xFF4A80FF);
 
     return Scaffold(
-      body: IndexedStack(
-        index: _selectedIndex,
-        children: _widgetOptions,
-      ),
+      body: IndexedStack(index: _selectedIndex, children: _widgetOptions),
       bottomNavigationBar: BottomNavigationBar(
         items: <BottomNavigationBarItem>[
           BottomNavigationBarItem(
@@ -57,8 +54,8 @@ class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
           ),
         ],
         currentIndex: _selectedIndex,
-        selectedItemColor: primaryColor, 
-        unselectedItemColor: Colors.grey, 
+        selectedItemColor: primaryColor,
+        unselectedItemColor: Colors.grey,
         onTap: _onItemTapped,
         selectedLabelStyle: GoogleFonts.poppins(fontWeight: FontWeight.bold),
         unselectedLabelStyle: GoogleFonts.poppins(),

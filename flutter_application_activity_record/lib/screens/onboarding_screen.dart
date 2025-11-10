@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:google_fonts/google_fonts.dart'; // <-- 1. Import google_fonts
 import 'login_screen.dart';
 import 'package:lottie/lottie.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({Key? key}) : super(key: key);
@@ -77,7 +77,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   ),
                   // Page 3
                   _buildInfoPage(
-                    lottiePath: 'assets/animations/Businessman flies up with rocket.json',
+                    lottiePath:
+                        'assets/animations/Businessman flies up with rocket.json',
                     title: 'เปลี่ยนกิจกรรม\nให้เป็นโอกาส',
                     description:
                         'ทุกกิจกรรมที่คุณเข้าร่วมคือการเปิดโอกาสใหม่ๆ ให้กับตัวเอง สะสมแต้มเพื่อแลกของรางวัลสุดพิเศษ!',
@@ -122,7 +123,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           Text(
             title,
             textAlign: TextAlign.center,
-            style: GoogleFonts.mulish(
+            style: GoogleFonts.kanit(
               fontSize: 35,
               fontWeight: FontWeight.w600,
               color: Colors.black,
@@ -132,8 +133,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           Text(
             description,
             textAlign: TextAlign.center,
-            style: GoogleFonts.mulish(
-              fontSize: 12,
+            style: GoogleFonts.kanit(
+              fontSize: 22,
               fontWeight: FontWeight.w400,
               color: Colors.black54,
             ),
@@ -222,7 +223,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       child: Text(
         text,
         // <-- 7. อัปเดต Font ปุ่มตาม CSS
-        style: GoogleFonts.roboto(fontSize: 18, fontWeight: FontWeight.w500),
+        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
       ),
     );
   }

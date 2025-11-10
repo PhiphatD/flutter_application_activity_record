@@ -14,6 +14,8 @@ dependencies:
   google_fonts: ^6.2.1
   lottie: ^3.1.2
   pinput: ^4.0.0
+  qr_flutter: ^4.1.0
+  flip_card: ^0.7.0
 
 dev_dependencies:
   flutter_test:
@@ -28,6 +30,7 @@ flutter:
     - assets/images/intro2.png
     - assets/images/intro3.png
     - assets/images/login_ellipse.png
+    - assets/images/card_background.png
     - assets/animations/
     - assets/fonts/
 fonts:

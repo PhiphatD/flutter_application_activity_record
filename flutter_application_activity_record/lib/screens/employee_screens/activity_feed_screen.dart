@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'activity_card.dart'; // <--- Import การ์ดใหม่
+import 'profile_screen.dart'; // <--- Import ProfileScreen
 
 class ActivityFeedScreen extends StatefulWidget {
   const ActivityFeedScreen({super.key});
@@ -89,14 +90,22 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           // รูปโปรไฟล์
-          CircleAvatar(
-            radius: 22,
-            backgroundColor: Colors.grey.shade200,
-            // child: Icon(Icons.person, color: Colors.grey.shade400),
-            // TODO: ใส่รูปจริง
-            backgroundImage: NetworkImage(
-              'https://i.pravatar.cc/150?img=32',
-            ), // <--- รูปตัวอย่าง
+          GestureDetector(
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const ProfileScreen()),
+              );
+            },
+            child: CircleAvatar(
+              radius: 22,
+              backgroundColor: Colors.grey.shade200,
+              // child: Icon(Icons.person, color: Colors.grey.shade400),
+              // TODO: ใส่รูปจริง
+              backgroundImage: NetworkImage(
+                'https://i.pravatar.cc/150?img=32',
+              ), // <--- รูปตัวอย่าง
+            ),
           ),
 
           // ชื่อหน้า "Activity"
