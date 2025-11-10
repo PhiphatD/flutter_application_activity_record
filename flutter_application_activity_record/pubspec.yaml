@@ -47,3 +47,12 @@ fonts:
       - asset: assets/fonts/Prompt-Light.ttf
         weight: 300
 
+  - family: Kanit
+    fonts:
+      - asset: assets/fonts/Kanit-Regular.ttf
+      - asset: assets/fonts/Kanit-Medium.ttf
+        weight: 500
+      - asset: assets/fonts/Kanit-SemiBold.ttf
+        weight: 600
+      - asset: assets/fonts/Kanit-Bold.ttf
+        weight: 700

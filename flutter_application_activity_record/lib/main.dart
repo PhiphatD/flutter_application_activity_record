@@ -16,6 +16,8 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
+        fontFamily: 'Kanit',
+        fontFamilyFallback: ['Poppins'],
       ),
       // ตั้งค่าหน้าแรกให้เป็น SplashScreen
       home: const SplashScreen(),
