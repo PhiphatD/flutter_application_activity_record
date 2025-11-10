@@ -4,6 +4,12 @@ import 'package:google_fonts/google_fonts.dart';
 import 'organization_register_screen.dart';
 // *** 2. Import หน้า Forgot Password ***
 import 'forgot_password_screen.dart';
+import 'employee_screens/employee_main_screen.dart';
+
+// --- 1. เพิ่ม Import (แบบคอมเมนต์) สำหรับหน้า Admin/Organizer ---
+// (เมื่อคุณสร้างเสร็จ ค่อยลบ // ออก)
+// import 'admin_screens/admin_main_screen.dart';
+// import 'organizer_screens/organizer_main_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -18,6 +24,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
 
+  // --- 2. แก้ไขเมธอด _login() ---
   void _login() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -26,17 +33,58 @@ class _LoginScreenState extends State<LoginScreen> {
       _isLoading = true;
     });
 
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      final email = _emailController.text;
+      final password = _passwordController.text;
 
-    print("Email: ${_emailController.text}");
-    print("Password: ${_passwordController.text}");
+      // TODO: เมื่อเชื่อมต่อ API จริง ให้ส่ง email/password ไปตรวจสอบ
+      // !!! ทดสอบโดยเปลี่ยนค่า "Employee" เป็น "Admin" หรือ "Organizer"
+      String userRole = await _mockLoginAndGetRole(email, "Employee");
 
-    setState(() {
-      _isLoading = false;
-    });
+      _navigateToUserMainScreen(userRole);
+      // ไม่ต้อง setState หยุดโหลด เพราะจะย้ายไปหน้าใหม่แล้ว
+    } catch (e) {
+      print("Login error: $e");
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
 
-    // TODO: ถ้า Login สำเร็จ ให้ Navigate ไปหน้า Home
-    // Navigator.pushReplacement( ... );
+  // --- 3. เพิ่มฟังก์ชันจำลอง API ---
+  Future<String> _mockLoginAndGetRole(String email, String roleToTest) async {
+    await Future.delayed(const Duration(seconds: 1));
+    return roleToTest; // ในอนาคตจะมาจาก API จริง
+  }
+
+  // --- 4. เพิ่มฟังก์ชันนำทาง ---
+  void _navigateToUserMainScreen(String role) {
+    Widget destinationScreen;
+
+    switch (role.toLowerCase()) {
+      case 'Admin':
+        // destinationScreen = const AdminMainScreen(); // Uncomment เมื่อมีหน้า Admin
+        destinationScreen =
+            const EmployeeMainScreen(); // ใช้หน้า Employee แทนชั่วคราว
+        print('Login as: Admin');
+        break;
+      case 'Organizer':
+        // destinationScreen = const OrganizerMainScreen(); // Uncomment เมื่อมีหน้า Organizer
+        destinationScreen =
+            const EmployeeMainScreen(); // ใช้หน้า Employee แทนชั่วคราว
+        print('Login as: Organizer');
+        break;
+      case 'Employee':
+      default:
+        destinationScreen = const EmployeeMainScreen();
+        print('Login as: Employee');
+        break;
+    }
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => destinationScreen),
+    );
   }
 
   @override
@@ -63,7 +111,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       const SizedBox(height: 76),
-                      // Decorative ellipse / placeholder image
                       Image.asset(
                         'assets/images/login_ellipse.png',
                         height: 200,
@@ -81,7 +128,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
-                      // Email field
                       TextFormField(
                         controller: _emailController,
                         decoration: InputDecoration(
@@ -119,7 +165,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         },
                       ),
                       const SizedBox(height: 20),
-                      // Password field
                       TextFormField(
                         controller: _passwordController,
                         decoration: InputDecoration(
@@ -179,7 +224,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      // Log In button
                       SizedBox(
                         width: double.infinity,
                         height: 52,
@@ -210,7 +254,6 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      // Register button
                       SizedBox(
                         width: double.infinity,
                         height: 52,
