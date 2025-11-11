@@ -64,9 +64,9 @@ class ActivityCard extends StatelessWidget {
               Text(
                 title,
                 style: GoogleFonts.kanit(
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w400,
                   fontSize: 16,
-                  color: Colors.black87,
+                  color: Colors.black,
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -107,7 +107,7 @@ class ActivityCard extends StatelessWidget {
                 '$currentParticipants/$maxParticipants',
                 style: GoogleFonts.kanit(
                   fontSize: 13,
-                  fontWeight: FontWeight.w500,
+                  fontWeight: FontWeight.w400,
                   color: Colors.black54,
                 ),
               ),

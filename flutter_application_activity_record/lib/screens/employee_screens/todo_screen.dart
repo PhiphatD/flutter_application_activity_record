@@ -4,7 +4,7 @@ import 'todo_activity_card.dart'; // <--- Import การ์ดใหม่
 // --- ------------------------- ---
 import 'profile_screen.dart';
 import 'package:intl/intl.dart';
-
+import 'package:google_fonts/google_fonts.dart';
 // --- 2. (แก้ไข) ย้าย enum ไปไว้ใน todo_activity_card.dart แล้ว ---
 // (ลบ enum ActivityStatus ออกจากหน้านี้)
 
@@ -193,21 +193,44 @@ class _TodoScreenState extends State<TodoScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text(
-            'To do',
-            style: TextStyle(
-              // <-- แก้ฟอนต์
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.person_outline, size: 30),
-            onPressed: () {
+          // รูปโปรไฟล์
+          GestureDetector(
+            onTap: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => const ProfileScreen()),
               );
+            },
+            child: CircleAvatar(
+              radius: 22,
+              backgroundColor: Colors.grey.shade200,
+              // child: Icon(Icons.person, color: Colors.grey.shade400),
+              // TODO: ใส่รูปจริง
+              backgroundImage: NetworkImage(
+                'https://i.pravatar.cc/150?img=32',
+              ), // <--- รูปตัวอย่าง
+            ),
+          ),
+
+          // ชื่อหน้า "Activity"
+          Text(
+            'To do',
+            style: GoogleFonts.poppins(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.black,
+            ),
+          ),
+
+          // ไอคอนแจ้งเตือน
+          IconButton(
+            icon: Icon(
+              Icons.notifications_outlined,
+              color: Colors.black54,
+              size: 28,
+            ),
+            onPressed: () {
+              // TODO: เปิดหน้า Notification
             },
           ),
         ],
@@ -219,16 +242,28 @@ class _TodoScreenState extends State<TodoScreen> {
   Widget _buildSearchBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: TextField(
-        decoration: InputDecoration(
-          hintText: 'Search...',
-          hintStyle: TextStyle(color: Colors.grey.shade600), // <-- แก้ฟอนต์
-          prefixIcon: Icon(Icons.search, color: Colors.grey.shade600),
-          filled: true,
-          fillColor: Colors.grey.shade200,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(30.0),
-            borderSide: BorderSide.none,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12.0),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 10.0,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: TextField(
+          decoration: InputDecoration(
+            hintText: 'Search activities...',
+            hintStyle: GoogleFonts.poppins(),
+            prefixIcon: Icon(Icons.search, color: Colors.grey.shade500),
+            border: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 20.0,
+              vertical: 15.0,
+            ),
           ),
         ),
       ),
@@ -236,69 +271,77 @@ class _TodoScreenState extends State<TodoScreen> {
   }
 
   // --- 10. (แก้ไข) Filter Section (ลบ GoogleFonts) ---
+  // ไฟล์: todo_screen.dart
+
+  // --- 10. (แก้ไข) Filter Section ---
   Widget _buildFilterSection() {
     final List<String> filters = ['Upcoming', 'Unattended', 'History'];
 
-    return Container(
-      height: 50,
-      padding: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 20.0),
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: filters.length,
-        itemBuilder: (context, index) {
-          final filter = filters[index];
-          final bool isSelected = _selectedFilter == filter;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
+      child: Container(
+        height: 40,
+        child: ListView.builder(
+          scrollDirection: Axis.horizontal,
+          itemCount: filters.length,
+          itemBuilder: (context, index) {
+            final filter = filters[index];
+            final bool isSelected = _selectedFilter == filter;
 
-          // --- Logic สีปุ่ม Filter (เหมือนเดิม) ---
-          Color selectedColor = const Color(0xFF375987);
-          Color labelColor = isSelected ? Colors.white : Colors.black87;
-          Color borderColor = isSelected ? selectedColor : Colors.grey.shade400;
+            // --- Logic สีปุ่ม Filter (เหมือนเดิม) ---
+            Color selectedColor = const Color(0xFF375987);
+            Color labelColor = isSelected ? Colors.white : Colors.black87;
+            Color borderColor = isSelected
+                ? selectedColor
+                : Colors.grey.shade400;
 
-          if (filter == 'History') {
-            selectedColor = const Color(0xFF06A710);
-            if (isSelected) {
-              labelColor = Colors.white;
-              borderColor = const Color(0xFF06A710);
+            if (filter == 'History') {
+              selectedColor = const Color(0xFF06A710);
+              if (isSelected) {
+                labelColor = Colors.white;
+                borderColor = const Color(0xFF06A710);
+              }
+            } else if (filter == 'Unattended') {
+              selectedColor = const Color(0xFFD91A1A);
+              if (isSelected) {
+                labelColor = Colors.white;
+                borderColor = const Color(0xFFD91A1A);
+              }
             }
-          } else if (filter == 'Unattended') {
-            selectedColor = const Color(0xFFD91A1A);
-            if (isSelected) {
-              labelColor = Colors.white;
-              borderColor = const Color(0xFFD91A1A);
-            }
-          }
-          // ---------------------------------
+            // ---------------------------------
 
-          return Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: ChoiceChip(
-              label: Text(filter),
-              labelStyle: TextStyle(
-                // <-- แก้ฟอนต์
-                color: labelColor,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            return Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: ChoiceChip(
+                label: Text(filter),
+                labelStyle: TextStyle(
+                  // <-- แก้ฟอนต์
+                  color: labelColor,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                ),
+                selected: isSelected,
+                onSelected: (bool selected) {
+                  if (selected) {
+                    setState(() {
+                      _selectedFilter = filter;
+                      _filterActivities(); // <-- กรองข้อมูลใหม่
+                    });
+                  }
+                },
+                backgroundColor: Colors.white,
+                selectedColor: selectedColor,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20.0),
+                  side: BorderSide(color: borderColor),
+                ),
+                showCheckmark: false,
               ),
-              selected: isSelected,
-              onSelected: (bool selected) {
-                if (selected) {
-                  setState(() {
-                    _selectedFilter = filter;
-                    _filterActivities(); // <-- กรองข้อมูลใหม่
-                  });
-                }
-              },
-              backgroundColor: Colors.white,
-              selectedColor: selectedColor,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20.0),
-                side: BorderSide(color: borderColor),
-              ),
-              showCheckmark: false,
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   }
 
   // --- 11. (แก้ไข) ฟังก์ชันเดิม (ลบ GoogleFonts และเปลี่ยน Type) ---
