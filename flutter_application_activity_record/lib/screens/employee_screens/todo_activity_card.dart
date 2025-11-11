@@ -1,252 +1,231 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-// --- 1. (เพิ่ม) สร้าง enum สถานะ ---
+// 1. (เหมือนเดิม) enum สำหรับสถานะของกิจกรรม
 enum ActivityStatus {
-  upcoming, // ลงทะเบียนแล้ว แต่ยังไม่ถึงวัน
+  upcoming, // กำลังจะมาถึง
   attended, // เข้าร่วมแล้ว
-  unattended, // ไม่ได้เข้าร่วม
+  unattended, // ขาดเข้าร่วม
 }
 
-class ActivityCard extends StatefulWidget {
-  final String type; // <--- เรายังเก็บ type ไว้เผื่อใช้กับไอคอน
+// 2. (เหมือนเดิม) ActivityCard Widget
+class ActivityCard extends StatelessWidget {
+  final String type;
   final String title;
   final String location;
   final String organizer;
   final int points;
-  final int currentParticipants;
-  final int maxParticipants;
-  final bool isCompulsory;
-
-  // --- 2. (เพิ่ม) Property ใหม่ ---
   final ActivityStatus status;
 
+  // (Dummy data - ไม่ได้ใช้ในหน้านี้ แต่รับค่ามาเพื่อให้สอดคล้องกับ constructor)
+  final int currentParticipants;
+  final int maxParticipants;
+
   const ActivityCard({
-    super.key,
+    Key? key,
     required this.type,
     required this.title,
     required this.location,
     required this.organizer,
     required this.points,
+    required this.status,
     required this.currentParticipants,
     required this.maxParticipants,
-    this.isCompulsory = false,
-    this.status = ActivityStatus.upcoming, // <-- ค่าเริ่มต้น
-  });
-
-  @override
-  State<ActivityCard> createState() => _ActivityCardState();
-}
-
-class _ActivityCardState extends State<ActivityCard> {
-  // --- 3. (ลบ) โค้ด Animation ของหัวใจ ---
-  // (ลบ _isFavorited, _animationController, _scaleAnimation, initState, dispose)
-
-  IconData _getIconForType(String type) {
-    switch (type.toLowerCase()) {
-      case 'training':
-        return Icons.model_training;
-      case 'seminar':
-        return Icons.campaign_outlined;
-      case 'workshop':
-        return Icons.construction;
-      default:
-        return Icons.event;
-    }
-  }
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    const Color defaultBorderColor = Color.fromRGBO(0, 0, 0, 0.2);
-    const Color secondaryTextColor = Colors.black54;
-    const Color cardBackgroundColor = Colors.white;
+    // (เหมือนเดิม) กำหนดสีขอบตามสถานะ
+    Color borderColor = Colors.white;
 
     return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 0),
       padding: const EdgeInsets.all(16.0),
       decoration: BoxDecoration(
-        color: cardBackgroundColor,
-        borderRadius: BorderRadius.circular(16.0),
-        border: Border.all(color: defaultBorderColor, width: 1.5),
+        color: Colors.white,
+        border: Border.all(
+          color: const Color.fromRGBO(0, 0, 0, 0.2),
+          width: 1.0,
+        ),
         boxShadow: [
           BoxShadow(
-            color: defaultBorderColor.withOpacity(0.5),
+            color: Colors.black.withOpacity(0.25),
             blurRadius: 4.0,
             offset: const Offset(0, 4),
           ),
         ],
+        borderRadius: BorderRadius.circular(20.0),
       ),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // --- ส่วนเนื้อหาหลัก (ซ้าย) ---
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildHeader(), // <-- 4. (แก้ไข) เรียก Header ใหม่
-                  const SizedBox(height: 12.0),
-                  Text(
-                    widget.title,
-                    // --- 5. (แก้ไข) ลบ GoogleFonts ---
-                    style: GoogleFonts.kanit(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                      color: Colors.black,
-                      height: 1.3,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 12.0),
-                  _buildInfoRow(
-                    icon: Icons.location_on_outlined,
-                    text: widget.location,
-                    secondaryTextColor: secondaryTextColor,
-                  ),
-                  const SizedBox(height: 8.0),
-                  _buildInfoRow(
-                    icon: Icons.person_outline,
-                    text: widget.organizer,
-                    secondaryTextColor: secondaryTextColor,
-                  ),
-                ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // --- 3. (แก้ไข) แถวบนสุด ---
+          Row(
+            children: [
+              Text(
+                title,
+                style: GoogleFonts.kanit(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.black87,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
-            ),
-
-            // --- เส้นคั่นกลาง (เหมือนเดิม) ---
-            const VerticalDivider(
-              color: defaultBorderColor,
-              thickness: 1.5,
-              width: 32.0,
-            ),
-
-            // --- ส่วนคะแนน (ขวา) (เหมือนเดิม) ---
-            _buildPointsAndParticipants(),
-          ],
-        ),
+              const Spacer(),
+              // (แก้ไข) ส่ง points เข้าไปใน _buildStatusPill
+              _buildStatusPill(status, points),
+            ],
+          ),
+          const Divider(color: Colors.grey),
+          const SizedBox(height: 12),
+          // (เหมือนเดิม) สถานที่
+          _buildInfoRow(icon: Icons.location_on_outlined, text: location),
+          const SizedBox(height: 8),
+          // --- 4. (แก้ไข) แถวล่างสุด ---
+          _buildInfoRow(
+            icon: Icons.person_outline,
+            text: 'Organizers : $organizer',
+          ),
+          const SizedBox(height: 8),
+          // (เหมือนเดิม) แถวล่างสุด: Type (เช่น Training, Workshop)
+          _buildInfoRow(
+            icon: Icons.star_border_purple500_outlined,
+            text: 'Points : $points',
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _buildTypePill(type),
+              const Spacer(),
+              const Icon(
+                Icons.people_alt_outlined,
+                color: Colors.black54,
+                size: 20,
+              ),
+              const SizedBox(width: 4.0),
+              Text(
+                '$currentParticipants/$maxParticipants',
+                style: GoogleFonts.kanit(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.black54,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 
-  // --- 6. (แก้ไข) Header ---
-  Widget _buildHeader() {
+  // Helper widget for info rows
+  Widget _buildInfoRow({required String text, IconData? icon}) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        _buildStatusPill(), // <-- 7. (แก้ไข) เรียกฟังก์ชันใหม่
-        // (ลบปุ่ม Favorite ออก)
-      ],
-    );
-  }
-
-  // (ลบ _buildFavoriteButton() ทั้งฟังก์ชัน)
-
-  Widget _buildInfoRow({
-    required IconData icon,
-    required String text,
-    required Color secondaryTextColor,
-  }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, color: secondaryTextColor, size: 20.0),
-        const SizedBox(width: 12.0),
+        if (icon != null) ...[
+          Icon(icon, color: Colors.black, size: 22),
+          const SizedBox(width: 12.0),
+        ],
         Expanded(
           child: Text(
             text,
-            // --- 5. (แก้ไข) ลบ GoogleFonts ---
             style: GoogleFonts.kanit(
               fontWeight: FontWeight.w400,
               fontSize: 14,
               color: Colors.black,
-              height: 1.4,
             ),
+            overflow: TextOverflow.ellipsis,
           ),
         ),
       ],
     );
   }
 
-  // --- Widget ส่วนคะแนน (ขวา) (เหมือนเดิม) ---
-  Widget _buildPointsAndParticipants() {
-    final NumberFormat formatter = NumberFormat("#,###");
-    return SizedBox(
-      width: 70,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            '${widget.currentParticipants}/${widget.maxParticipants}',
-            // --- 5. (แก้ไข) ลบ GoogleFonts ---
-            style: GoogleFonts.kanit(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.black54,
-          ),
-          ),  
-        ],
+  // (เหมือนเดิม) ป้าย Type (เช่น Training, Workshop)
+  Widget _buildTypePill(String type) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20.0),
+        border: Border.all(color: Colors.grey.shade400),
+      ),
+      child: Text(
+        'TYPE: $type',
+        style: const TextStyle(
+          color: Colors.black54,
+          fontWeight: FontWeight.bold,
+          fontSize: 10,
+        ),
       ),
     );
   }
 
-  // --- 8. (เพิ่ม) Widget ย่อยสำหรับป้าย Status (แทนป้าย Type) ---
-  Widget _buildStatusPill() {
-    String text;
-    Color pillColor;
+  // --- 5. (แก้ไข) เมธอดสร้างป้ายสถานะ (รับ points) ---
+  Widget _buildStatusPill(ActivityStatus status, int points) {
+    String label;
+    Color bgColor;
     Color textColor;
-    IconData? icon;
+    Widget content;
 
-    switch (widget.status) {
+    switch (status) {
+      // (แก้ไข) กรณีเข้าร่วมแล้ว: แสดงคะแนน
       case ActivityStatus.attended:
-        text = '+${NumberFormat("#,###").format(widget.points)} P.';
-        pillColor = const Color(0xFF06A710).withOpacity(0.20); // เขียว
-        textColor = const Color(0xFF06A710);
-        icon = Icons.check_circle_outline;
+        label = '+$points P.'; // <--- เปลี่ยนเป็นคะแนน
+        bgColor = const Color(0xFFE6F6E7); // Light green
+        textColor = const Color(0xFF06A710); // Dark green
+        content = Text(
+          label,
+          style: TextStyle(
+            color: textColor,
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
+        );
         break;
+
+      // (เหมือนเดิม) กรณีขาดเข้าร่วม
       case ActivityStatus.unattended:
-        text = 'Unattended';
-        pillColor = const Color(0xFFD91A1A).withOpacity(0.15); // แดง
-        textColor = const Color(0xFFD91A1A);
-        icon = Icons.cancel_outlined;
+        label = 'Unattended';
+        bgColor = const Color(0xFFFBE7E7); // Light red
+        textColor = const Color(0xFFD91A1A); // Dark red
+        content = Text(
+          label,
+          style: TextStyle(
+            color: textColor,
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
+        );
         break;
+
+      // (เหมือนเดิม) กรณีกำลังจะมาถึง
       case ActivityStatus.upcoming:
       default:
-        text = 'Upcoming';
-        pillColor = const Color(0xFFA1C1D6); // สีฟ้า (เหมือน Type เดิม)
-        textColor = Colors.black;
-        icon = Icons.schedule; // ไอคอนนาฬิกา
+        label = 'Upcoming';
+        bgColor = const Color(0xFFE6EFFF); // Light blue
+        textColor = const Color(0xFF4A80FF); // Dark blue
+        content = Text(
+          label,
+          style: TextStyle(
+            color: textColor,
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
+        );
         break;
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
+      padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 5.0),
       decoration: BoxDecoration(
-        color: pillColor,
-        border: Border.all(color: textColor.withOpacity(0.5)),
-        borderRadius: BorderRadius.circular(20.0),
+        color: bgColor,
+        borderRadius: BorderRadius.circular(8.0),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) // แสดงไอคอน
-            Icon(icon, size: 14, color: textColor),
-          if (icon != null) const SizedBox(width: 6.0),
-          Text(
-            text,
-            // --- 5. (แก้ไข) ลบ GoogleFonts ---
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-              color: textColor,
-            ),
-          ),
-        ],
-      ),
+      child: content,
     );
   }
+
+  // --- 6. (ลบ) เมธอด _buildPointsText ---
+  // (เมธอดนี้ถูกลบออกไปทั้งหมด)
 }

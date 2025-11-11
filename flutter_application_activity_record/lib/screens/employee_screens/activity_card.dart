@@ -59,7 +59,7 @@ class _ActivityCardState extends State<ActivityCard>
     _animationController.forward().then((_) {
       _animationController.reverse();
     });
-  } 
+  }
 
   IconData _getIconForType(String type) {
     switch (type.toLowerCase()) {
@@ -259,31 +259,20 @@ class _ActivityCardState extends State<ActivityCard>
 
   // --- Widget ย่อยสำหรับป้าย Type ---
   Widget _buildTypePill(String type) {
-    final Color pillColor = widget.isCompulsory
-        ? const Color(0xFFEAA11F).withOpacity(0.7)
-        : const Color(0xFFA1C1D6);
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
       decoration: BoxDecoration(
-        color: pillColor,
-        border: Border.all(color: Colors.black),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(20.0),
+        border: Border.all(color: Colors.grey.shade400),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(_getIconForType(type), size: 14),
-          const SizedBox(width: 6.0),
-          Text(
-            'TYPE : $type',
-            style: GoogleFonts.kanit(
-              fontWeight: FontWeight.w500,
-              fontSize: 11,
-              color: Colors.black,
-            ),
-          ),
-        ],
+      child: Text(
+        'TYPE: $type',
+        style: GoogleFonts.kanit(
+          color: Colors.black54,
+          fontWeight: FontWeight.bold,
+          fontSize: 10,
+        ),
       ),
     );
   }
