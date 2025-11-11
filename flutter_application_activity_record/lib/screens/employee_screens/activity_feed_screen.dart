@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'activity_card.dart'; // <--- Import การ์ดใหม่
 import 'profile_screen.dart'; // <--- Import ProfileScreen
+import 'package:intl/intl.dart';
 
 class ActivityFeedScreen extends StatefulWidget {
   const ActivityFeedScreen({super.key});
@@ -38,40 +39,54 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
                   vertical: 10.0,
                 ),
                 children: [
-                  // --- Card 1 (Normal) ---
-                  ActivityCard(
-                    type: 'Training',
-                    title: 'ฝึกอบรม กลยุทธ์การสร้างแบรนด์',
-                    location: 'ห้องประชุม A3-403 at : 13.00 PM',
-                    organizer: 'Thanuay',
-                    points: 200,
-                    currentParticipants: 20,
-                    maxParticipants: 40,
-                    isCompulsory: false,
+                  _buildActivityGroup(
+                    activityDate: formatActivityDate(DateTime(2025, 7, 23)),
+                    relativeDate: getRelativeDateString(DateTime(2025, 7, 23)),
+                    cards: Column(
+                      children: [
+                        const SizedBox(height: 16), // Add space between cards
+                        ActivityCard(
+                          type: 'Training',
+                          title: 'ฝึกอบรม กลยุทธ์การสร้างแบรนด์',
+                          location: 'ห้องประชุม A3-403 at : 13.00 PM',
+                          organizer: 'Thanuay',
+                          points: 200,
+                          currentParticipants: 20,
+                          maxParticipants: 40,
+                          isCompulsory: false,
+                        ),
+                        SizedBox(height: 16), // Add space between cards
+                        ActivityCard(
+                          type: 'Seminar',
+                          title: 'งานสัมนาเทคโนโลยีรอบตัวเรา',
+                          location: 'ห้องประชุม B6-310 at : 14.00 PM',
+                          organizer: 'Thanuay',
+                          points: 300,
+                          currentParticipants: 12,
+                          maxParticipants: 40,
+                          isCompulsory: true,
+                        ),
+                      ],
+                    ),
                   ),
-
-                  // --- Card 2 (Compulsory) ---
-                  ActivityCard(
-                    type: 'Seminar',
-                    title: 'งานสัมนาเทคโนโลยีรอบตัวเรา',
-                    location: 'ห้องประชุม B6-310 at : 14.00 PM',
-                    organizer: 'Thanuay',
-                    points: 300,
-                    currentParticipants: 12,
-                    maxParticipants: 40,
-                    isCompulsory: true,
-                  ),
-
-                  // --- Card 3 (ตัวอย่างเต็ม) ---
-                  ActivityCard(
-                    type: 'Workshop',
-                    title: 'Workshop Microsoft365',
-                    location: 'ห้องประชุม C9-203 at : 11.00 AM',
-                    organizer: 'Thanuay',
-                    points: 500,
-                    currentParticipants: 40,
-                    maxParticipants: 40,
-                    isCompulsory: false,
+                  _buildActivityGroup(
+                    activityDate: formatActivityDate(DateTime(2026, 1, 24)),
+                    relativeDate: getRelativeDateString(DateTime(2026, 1, 24)),
+                    cards: Column(
+                      children: [
+                        const SizedBox(height: 16), // Add space between cards
+                        ActivityCard(
+                          type: 'Workshop',
+                          title: 'Workshop Microsoft365',
+                          location: 'ห้องประชุม C9-203 at : 11.00 AM',
+                          organizer: 'Thanuay',
+                          points: 500,
+                          currentParticipants: 40,
+                          maxParticipants: 40,
+                          isCompulsory: false,
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -230,5 +245,83 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
         ],
       ),
     );
+  }
+
+  // --- Widget for grouping activities by date ---
+  Widget _buildActivityGroup({
+    required String activityDate,
+    required String relativeDate,
+    required Widget cards,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 16.0, bottom: 8.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: [
+              Text(
+                activityDate,
+                style: const TextStyle(fontSize: 16, color: Colors.black),
+              ),
+              const SizedBox(width: 16),
+              Text(
+                relativeDate,
+                style: const TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+        cards,
+      ],
+    );
+  }
+}
+
+// --- ฟังก์ชันที่ 1: สำหรับจัดรูปแบบวันที่ ---
+// Input: DateTime(2025, 7, 23)
+// Output: "23 July 2025"
+String formatActivityDate(DateTime eventDate) {
+  // 'd MMMM y' คือการจัดรูปแบบ (เช่น 23 July 2025)
+  // 'en_US' เพื่อบังคับให้เป็นชื่อเดือนภาษาอังกฤษ (July)
+  final formatter = DateFormat('d MMMM y', 'en_US');
+  return formatter.format(eventDate);
+}
+
+// --- ฟังก์ชันที่ 2: สำหรับคำนวณระยะเวลาที่เหลือ ---
+// Input: DateTime(2025, 7, 23)
+// Output: "Next 2 Months"
+String getRelativeDateString(DateTime eventDate) {
+  final now = DateTime.now();
+  // ล้างค่าเวลา (ชั่วโมง, นาที) เพื่อเปรียบเทียบเฉพาะ "วัน"
+  final today = DateTime(now.year, now.month, now.day);
+  final cleanEventDate = DateTime(
+    eventDate.year,
+    eventDate.month,
+    eventDate.day,
+  );
+
+  // คำนวณส่วนต่างของวัน
+  final differenceInDays = cleanEventDate.difference(today).inDays;
+
+  if (differenceInDays < 0) {
+    return "Past Event"; // กิจกรรมที่ผ่านมาแล้ว
+  } else if (differenceInDays == 0) {
+    return "Today"; // วันนี้
+  } else if (differenceInDays == 1) {
+    return "Tomorrow"; // พรุ่งนี้
+  } else if (differenceInDays <= 7) {
+    return "This Week"; // ภายใน 7 วัน
+  } else if (differenceInDays <= 30) {
+    return "This Month"; // ภายใน 30 วัน
+  } else if (differenceInDays <= 60) {
+    return "Next 2 Months"; // ภายใน 60 วัน (ตรงกับตัวอย่าง)
+  } else if (differenceInDays <= 90) {
+    return "Next 3 Months"; // ภายใน 90 วัน
+  } else {
+    // ถ้าไกลกว่า 3 เดือน
+    final formatter = DateFormat('MMMM y', 'en_US'); // "July 2025"
+    return "in ${formatter.format(eventDate)}";
   }
 }
