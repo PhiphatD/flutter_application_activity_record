@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'activity_detail_screen.dart';
 
 // 1. (เหมือนเดิม) enum สำหรับสถานะของกิจกรรม
 enum ActivityStatus {
@@ -10,6 +11,7 @@ enum ActivityStatus {
 
 // 2. (เหมือนเดิม) ActivityCard Widget
 class ActivityCard extends StatelessWidget {
+  final String id;
   final String type;
   final String title;
   final String location;
@@ -23,6 +25,7 @@ class ActivityCard extends StatelessWidget {
 
   const ActivityCard({
     Key? key,
+    required this.id,
     required this.type,
     required this.title,
     required this.location,
@@ -38,82 +41,95 @@ class ActivityCard extends StatelessWidget {
     // (เหมือนเดิม) กำหนดสีขอบตามสถานะ
     Color borderColor = Colors.white;
 
-    return Container(
-      padding: const EdgeInsets.all(16.0),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(
-          color: const Color.fromRGBO(0, 0, 0, 0.2),
-          width: 1.0,
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ActivityDetailScreen(activityId: id),
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.all(16.0),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(
+            color: const Color.fromRGBO(0, 0, 0, 0.2),
+            width: 1.0,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.25),
+              blurRadius: 4.0,
+              offset: const Offset(0, 4),
+            ),
+          ],
+          borderRadius: BorderRadius.circular(20.0),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.25),
-            blurRadius: 4.0,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        borderRadius: BorderRadius.circular(20.0),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // --- 3. (แก้ไข) แถวบนสุด ---
-          Row(
-            children: [
-              Text(
-                title,
-                style: GoogleFonts.kanit(
-                  fontWeight: FontWeight.w400,
-                  fontSize: 16,
-                  color: Colors.black,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // --- 3. (แก้ไข) แถวบนสุด ---
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: GoogleFonts.kanit(
+                      fontWeight: FontWeight.w400,
+                      fontSize: 16,
+                      color: Colors.black,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              const Spacer(),
-              // (แก้ไข) ส่ง points เข้าไปใน _buildStatusPill
-              _buildStatusPill(status, points),
-            ],
-          ),
-          const Divider(color: Colors.grey),
-          const SizedBox(height: 12),
-          // (เหมือนเดิม) สถานที่
-          _buildInfoRow(icon: Icons.location_on_outlined, text: location),
-          const SizedBox(height: 8),
-          // --- 4. (แก้ไข) แถวล่างสุด ---
-          _buildInfoRow(
-            icon: Icons.person_outline,
-            text: 'Organizers : $organizer',
-          ),
-          const SizedBox(height: 8),
-          // (เหมือนเดิม) แถวล่างสุด: Type (เช่น Training, Workshop)
-          _buildInfoRow(
-            icon: Icons.star_border_purple500_outlined,
-            text: 'Points : $points',
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              _buildTypePill(type),
-              const Spacer(),
-              const Icon(
-                Icons.people_alt_outlined,
-                color: Colors.black54,
-                size: 20,
-              ),
-              const SizedBox(width: 4.0),
-              Text(
-                '$currentParticipants/$maxParticipants',
-                style: GoogleFonts.kanit(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w400,
+                const SizedBox(width: 8),
+                // (แก้ไข) ส่ง points เข้าไปใน _buildStatusPill
+                _buildStatusPill(status, points),
+              ],
+            ),
+            const Divider(color: Colors.grey),
+            const SizedBox(height: 12),
+            // (เหมือนเดิม) สถานที่
+            _buildInfoRow(icon: Icons.location_on_outlined, text: location),
+            const SizedBox(height: 8),
+            // --- 4. (แก้ไข) แถวล่างสุด ---
+            _buildInfoRow(
+              icon: Icons.person_outline,
+              text: 'Organizers : $organizer',
+            ),
+            const SizedBox(height: 8),
+            // (เหมือนเดิม) แถวล่างสุด: Type (เช่น Training, Workshop)
+            _buildInfoRow(
+              icon: Icons.star_border_purple500_outlined,
+              text: 'Points : $points',
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                _buildTypePill(type),
+                const Spacer(),
+                const Icon(
+                  Icons.people_alt_outlined,
                   color: Colors.black54,
+                  size: 20,
                 ),
-              ),
-            ],
-          ),
-        ],
+                const SizedBox(width: 4.0),
+                Text(
+                  '$currentParticipants/$maxParticipants',
+                  style: GoogleFonts.kanit(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w400,
+                    color: Colors.black54,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

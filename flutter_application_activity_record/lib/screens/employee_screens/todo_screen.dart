@@ -148,6 +148,8 @@ class _TodoScreenState extends State<TodoScreen> {
 
                   // --- 7. (แก้ไข) เรียกใช้ ActivityCard ให้ถูกต้อง ---
                   final activityCard = ActivityCard(
+                    // (เพิ่ม) 6. ส่ง ID มาด้วย
+                    id: activity.id,
                     type: activity.type,
                     title: activity.title,
                     location: activity.location,
