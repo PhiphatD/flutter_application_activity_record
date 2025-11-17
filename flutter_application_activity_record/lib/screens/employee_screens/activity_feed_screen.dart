@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 // --- (ใหม่) 1. สร้าง Class Model สำหรับเก็บข้อมูล ---
 // (ใช้เก็บข้อมูลที่ดึงมาจาก Database หรือ List)
 class _Activity {
+  final String id;
   final String type;
   final String title;
   final String location;
@@ -18,6 +19,7 @@ class _Activity {
   final DateTime activityDate; // Key สำหรับจัดกลุ่ม
 
   _Activity({
+    required this.id,
     required this.type,
     required this.title,
     required this.location,
@@ -46,6 +48,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
   // (ย้ายข้อมูลที่เคย Hard-code ใน UI มาไว้ตรงนี้)
   final List<_Activity> _mockActivities = [
     _Activity(
+      id: '10',
       type: 'Training',
       title: 'ฝึกอบรม กลยุทธ์การสร้างแบรนด์',
       location: 'ห้องประชุม A3-403 at : 13.00 PM',
@@ -57,6 +60,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
       activityDate: DateTime(2025, 7, 23),
     ),
     _Activity(
+      id: '11',
       type: 'Seminar',
       title: 'งานสัมนาเทคโนโลยีรอบตัวเรา',
       location: 'ห้องประชุม B6-310 at : 14.00 PM',
@@ -68,6 +72,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
       activityDate: DateTime(2025, 7, 23), // วันที่เดียวกัน
     ),
     _Activity(
+      id: '12',
       type: 'Workshop',
       title: 'Workshop Microsoft365',
       location: 'ห้องประชุม C9-203 at : 11.00 AM',
@@ -80,6 +85,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
     ),
     // (ข้อมูลนี้ผมเพิ่มให้จากรอบที่แล้วเพื่อให้เห็นการ์ดอีกใบ)
     _Activity(
+      id: '4',
       type: 'Training',
       title: 'ฝึกอบรม กลยุทธ์การสร้างแบรนด์ 2',
       location: 'ห้องประชุม A3-403 at : 13.00 PM',
@@ -214,7 +220,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
             style: GoogleFonts.poppins(
               fontSize: 20,
               fontWeight: FontWeight.bold,
-              color: Colors.black,
+              color: Color(0xFF375987),
             ),
           ),
 
@@ -240,7 +246,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: const Color.fromARGB(255, 255, 255, 255),
           borderRadius: BorderRadius.circular(12.0),
           boxShadow: [
             BoxShadow(
@@ -376,6 +382,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
 
             // สร้างการ์ดขึ้นมาก่อน
             final cardWidget = ActivityCard(
+              id: activity.id,
               type: activity.type,
               title: activity.title,
               location: activity.location,

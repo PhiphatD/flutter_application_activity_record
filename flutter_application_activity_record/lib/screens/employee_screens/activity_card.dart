@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'activity_detail_screen.dart';
 
 class ActivityCard extends StatefulWidget {
+  final String id;
   final String type;
   final String title;
   final String location;
@@ -13,6 +15,7 @@ class ActivityCard extends StatefulWidget {
 
   const ActivityCard({
     super.key,
+    required this.id,
     required this.type,
     required this.title,
     required this.location,
@@ -78,6 +81,7 @@ class _ActivityCardState extends State<ActivityCard>
   Widget build(BuildContext context) {
     const Color secondaryTextColor = Colors.black54;
     const Color cardBackgroundColor = Colors.white;
+    const Color brandBlue = Color(0xFF375987);
 
     return Stack(
       children: [
@@ -86,16 +90,9 @@ class _ActivityCardState extends State<ActivityCard>
           margin: const EdgeInsets.only(bottom: 16.0),
           decoration: BoxDecoration(
             color: cardBackgroundColor,
-            border: Border.all(
-              color: const Color.fromRGBO(0, 0, 0, 0.2),
-              width: 1.0,
-            ),
+            border: Border.all(color: const Color.fromRGBO(0, 0, 0, 0.15), width: 1.0),
             boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.25),
-                blurRadius: 4.0,
-                offset: const Offset(0, 4),
-              ),
+              BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 6.0, offset: const Offset(0, 3)),
             ],
             borderRadius: BorderRadius.circular(20.0),
           ),
@@ -103,7 +100,14 @@ class _ActivityCardState extends State<ActivityCard>
             color: Colors.transparent,
             child: InkWell(
               onTap: () {
-                print('Tapped on: ${widget.title}');
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ActivityDetailScreen(
+                      activityId: widget.id,
+                    ),
+                  ),
+                );
               },
               borderRadius: BorderRadius.circular(20.0),
               child: Padding(
@@ -159,7 +163,7 @@ class _ActivityCardState extends State<ActivityCard>
                         const Spacer(),
                         const Icon(
                           Icons.people_alt_outlined,
-                          color: secondaryTextColor,
+                          color: brandBlue,
                           size: 20,
                         ),
                         const SizedBox(width: 4.0),
@@ -168,7 +172,9 @@ class _ActivityCardState extends State<ActivityCard>
                           style: GoogleFonts.kanit(
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
-                            color: secondaryTextColor,
+                            color: widget.currentParticipants >= widget.maxParticipants
+                                ? const Color(0xFFD91A1A)
+                                : brandBlue,
                           ),
                         ),
                       ],
@@ -203,7 +209,7 @@ class _ActivityCardState extends State<ActivityCard>
     return Row(
       children: [
         if (icon != null) ...[
-          Icon(icon, color: Colors.black, size: 22),
+          Icon(icon, color: const Color(0xFF375987), size: 22),
           const SizedBox(width: 12.0),
         ],
         Expanded(

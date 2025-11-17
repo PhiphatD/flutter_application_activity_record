@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'dart:async';
-import 'package:flip_card/flip_card.dart'; 
+import 'package:flip_card/flip_card.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({Key? key}) : super(key: key);
@@ -37,13 +37,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   void _startTimer() {
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) { 
+      if (mounted) {
         setState(() {
           if (_duration.inSeconds > 0) {
             _duration = _duration - const Duration(seconds: 1);
           } else {
-            _duration = const Duration(minutes: 10); 
-            qrData = "1650702200_REFRESH_${DateTime.now().millisecondsSinceEpoch}";
+            _duration = const Duration(minutes: 10);
+            qrData =
+                "1650702200_REFRESH_${DateTime.now().millisecondsSinceEpoch}";
           }
         });
       }
@@ -91,7 +92,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                
                 // --- 1. เพิ่มข้อความ "Employee ID" ---
                 const Text(
                   "Employee ID",
@@ -104,34 +104,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 8),
                 // --- 2. เพิ่มเส้นคั่น ---
                 Container(
-                  margin: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 180),
+                  margin: const EdgeInsets.symmetric(
+                    vertical: 8.0,
+                    horizontal: 180,
+                  ),
                   height: 4, // ความหนาของเส้น
                   color: const Color.fromARGB(255, 0, 0, 0).withOpacity(0.5),
                 ),
                 SizedBox(height: 15),
                 // --- 3. บัตร FlipCard (เหมือนเดิม) ---
                 SizedBox(
-                  height: 450, 
+                  height: 450,
                   child: FlipCard(
-                    front: _buildInfoCard(), 
-                    back: _buildQrCard(),   
+                    front: _buildInfoCard(),
+                    back: _buildQrCard(),
                   ),
                 ),
-                
+
                 const SizedBox(height: 20),
-                
+
                 // --- 4. ข้อความ "แตะเพื่อพลิก" (เหมือนเดิม) ---
                 const Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.touch_app_outlined, color: Colors.grey, size: 18,),
+                    Icon(
+                      Icons.touch_app_outlined,
+                      color: Colors.grey,
+                      size: 18,
+                    ),
                     SizedBox(width: 8),
                     Text(
                       "แตะที่บัตรเพื่อพลิก",
-                      style: TextStyle(color: Colors.grey), 
+                      style: TextStyle(color: Colors.grey),
                     ),
                   ],
-                )
+                ),
               ],
             ),
           ),
@@ -179,50 +186,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Text(
             companyName,
             textAlign: TextAlign.center,
-            style: const TextStyle( 
+            style: const TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
               color: Color(0xFF375987),
             ),
           ),
           const SizedBox(height: 15),
-          CircleAvatar(
-            radius: 60,
-            backgroundImage: NetworkImage(avatarUrl),
-          ),
+          CircleAvatar(radius: 60, backgroundImage: NetworkImage(avatarUrl)),
           const SizedBox(height: 15),
           Text(
             empName,
             textAlign: TextAlign.center,
-            style: const TextStyle( 
+            style: const TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.bold,
               color: Color(0xFF375987),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32.0, vertical: 8.0),
-            child: Divider(
-              color: Colors.black.withOpacity(0.4),
-              thickness: 1,
+            padding: const EdgeInsets.symmetric(
+              horizontal: 32.0,
+              vertical: 8.0,
             ),
+            child: Divider(color: Colors.black.withOpacity(0.4), thickness: 1),
           ),
           Text(
             empPosition,
             textAlign: TextAlign.center,
-            style: const TextStyle( 
-              fontSize: 19,
-              color: Color(0xFF375987),
-            ),
+            style: const TextStyle(fontSize: 19, color: Color(0xFF375987)),
           ),
           const SizedBox(height: 5),
           Text(
             'Department : $empDepartment',
             textAlign: TextAlign.center,
-            style: const TextStyle( 
-              fontSize: 19,
-              color: Color(0xFF375987),
-            ),
+            style: const TextStyle(fontSize: 19, color: Color(0xFF375987)),
           ),
         ],
       ),
@@ -255,7 +253,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         children: [
           const Text(
             "DIGITAL KEYPASS",
-            style: TextStyle( 
+            style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
               color: Color(0xFF375987),
@@ -272,10 +270,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const Text(
             'Show this to Organizer to check-in',
             textAlign: TextAlign.center,
-            style: TextStyle( 
-              fontSize: 13,
-              color: Color(0xFF375987),
-            ),
+            style: TextStyle(fontSize: 13, color: Color(0xFF375987)),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(
@@ -291,10 +286,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(width: 8),
               Text(
                 _formatDuration(_duration),
-                style: const TextStyle( 
-                  fontSize: 20,
-                  color: Color(0xFF375987),
-                ),
+                style: const TextStyle(fontSize: 20, color: Color(0xFF375987)),
               ),
             ],
           ),

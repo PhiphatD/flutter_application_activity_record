@@ -34,6 +34,7 @@ class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
     const Color primaryColor = Color(0xFF4A80FF);
 
     return Scaffold(
+      backgroundColor: const Color(0x4DE2F3FF),
       body: IndexedStack(index: _selectedIndex, children: _widgetOptions),
       bottomNavigationBar: BottomNavigationBar(
         items: <BottomNavigationBarItem>[

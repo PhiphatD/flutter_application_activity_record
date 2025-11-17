@@ -220,7 +220,7 @@ class _TodoScreenState extends State<TodoScreen> {
             style: GoogleFonts.poppins(
               fontSize: 20,
               fontWeight: FontWeight.bold,
-              color: Colors.black,
+              color: Color(0xFF375987),
             ),
           ),
 
