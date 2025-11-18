@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 // --- 1. (แก้ไข) Import Card ใหม่ ---
-import 'todo_activity_card.dart'; // <--- Import การ์ดใหม่
+import '../widgets/todo_activity_card.dart'; // <--- Import การ์ดใหม่
 // --- ------------------------- ---
-import 'profile_screen.dart';
+import '../profile/profile_screen.dart';
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_application_activity_record/theme/app_colors.dart';
 // --- 2. (แก้ไข) ย้าย enum ไปไว้ใน todo_activity_card.dart แล้ว ---
 // (ลบ enum ActivityStatus ออกจากหน้านี้)
 
@@ -120,7 +121,7 @@ class _TodoScreenState extends State<TodoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: employeeBg,
       body: SafeArea(
         child: Column(
           children: [

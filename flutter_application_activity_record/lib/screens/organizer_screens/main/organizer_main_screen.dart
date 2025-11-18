@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_application_activity_record/theme/app_colors.dart';
 
 // Import organizer screens
 import '../activities/activities_management_screen.dart';
@@ -32,7 +33,7 @@ class _OrganizerMainScreenState extends State<OrganizerMainScreen> {
     const Color primaryColor = Color(0xFF4A80FF);
 
     return Scaffold(
-      backgroundColor: const Color(0x4DE2F3FF),
+      backgroundColor: organizerBg,
       body: IndexedStack(index: _selectedIndex, children: _widgetOptions),
       bottomNavigationBar: BottomNavigationBar(
         items: const <BottomNavigationBarItem>[

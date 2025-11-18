@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'profile_screen.dart';
+import '../profile/profile_screen.dart';
+import 'package:flutter_application_activity_record/theme/app_colors.dart';
 import 'reward_detail_screen.dart';
 import 'redeemed_detail_screen.dart';
 
@@ -221,7 +222,7 @@ class _RewardScreenState extends State<RewardScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: employeeBg,
       body: SafeArea(
         child: Column(
           children: [

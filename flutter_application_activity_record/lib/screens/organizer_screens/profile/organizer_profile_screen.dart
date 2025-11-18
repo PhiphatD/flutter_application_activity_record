@@ -105,6 +105,11 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
                     back: _buildQrCard(),
                   ),
                 ),
+                SizedBox(width: 15),
+                Text(
+                  'แตะที่บัตรเพื่อพลิก',
+                  style: TextStyle(color: Colors.grey),
+                ),
               ],
             ),
           ),
@@ -117,7 +122,7 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [Color(0xFFE6EFFF), Colors.white],
+          colors: [Color(0xFFFFF6CC), Colors.white],
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
         ),
@@ -132,6 +137,10 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
+        image: const DecorationImage(
+          image: AssetImage('assets/images/card_background_oganize.png'),
+          fit: BoxFit.cover,
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.1),
@@ -195,6 +204,10 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
+        image: const DecorationImage(
+          image: AssetImage('assets/images/card_background_oganize.png'),
+          fit: BoxFit.cover,
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.1),

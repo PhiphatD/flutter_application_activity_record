@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_application_activity_record/theme/app_colors.dart';
 import 'activity_create_screen.dart';
 import 'activity_edit_screen.dart';
-import '../../employee_screens/employee_screens/activity_detail_screen.dart';
+import '../../employee_screens/activities/activity_detail_screen.dart';
 import '../profile/organizer_profile_screen.dart';
 
 class ActivityManagementScreen extends StatefulWidget {
@@ -17,6 +18,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchText = '';
   final int _currentOrgId = 1;
+  int _selectedSegment = 0;
 
   late List<Activity> _activities;
   late Map<int, List<ActivitySession>> _sessionsByActId;
@@ -129,46 +131,26 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        backgroundColor: Colors.white,
-        floatingActionButton: FloatingActionButton(
-          onPressed: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const CreateActivityScreen()),
-            );
-          },
-          backgroundColor: const Color(0xFF4A80FF),
-          child: const Icon(Icons.add, color: Colors.white),
-        ),
-        body: SafeArea(
-          child: Column(
-            children: [
-              _buildCustomAppBar(),
-              _buildSearchBar(),
-              Container(
-                color: Colors.white,
-                child: TabBar(
-                  indicatorColor: const Color(0xFF4A80FF),
-                  labelColor: const Color(0xFF4A80FF),
-                  unselectedLabelColor: Colors.grey,
-                  labelStyle: GoogleFonts.poppins(fontWeight: FontWeight.bold),
-                  unselectedLabelStyle: GoogleFonts.poppins(),
-                  tabs: const [
-                    Tab(text: 'My Activities'),
-                    Tab(text: 'Other Organizers'),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: TabBarView(
-                  children: [_buildList(true), _buildList(false)],
-                ),
-              ),
-            ],
-          ),
+    return Scaffold(
+      backgroundColor: organizerBg,
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const CreateActivityScreen()),
+          );
+        },
+        backgroundColor: const Color(0xFF4A80FF),
+        child: const Icon(Icons.add, color: Colors.white),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildCustomAppBar(),
+            _buildSearchBar(),
+            _buildViewSwitcher(),
+            Expanded(child: _buildList(_selectedSegment == 0)),
+          ],
         ),
       ),
     );
@@ -251,8 +233,10 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) =>
-                    ActivityDetailScreen(activityId: a.actId.toString()),
+                builder: (context) => ActivityDetailScreen(
+                  activityId: a.actId.toString(),
+                  isOrganizerView: true,
+                ),
               ),
             );
           },
@@ -264,43 +248,54 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   Widget _buildCustomAppBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          GestureDetector(
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const OrganizerProfileScreen(),
+      child: SizedBox(
+        height: 56,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const OrganizerProfileScreen(),
+                    ),
+                  );
+                },
+                child: CircleAvatar(
+                  radius: 22,
+                  backgroundColor: Colors.grey.shade200,
+                  backgroundImage: const NetworkImage(
+                    'https://i.pravatar.cc/150?img=32',
+                  ),
                 ),
-              );
-            },
-            child: CircleAvatar(
-              radius: 22,
-              backgroundColor: Colors.grey.shade200,
-              backgroundImage: const NetworkImage(
-                'https://i.pravatar.cc/150?img=32',
               ),
             ),
-          ),
-          Text(
-            'Management',
-            style: GoogleFonts.poppins(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF375987),
+            Center(
+              child: Text(
+                'Management',
+                style: GoogleFonts.poppins(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: const Color(0xFF375987),
+                ),
+              ),
             ),
-          ),
-          IconButton(
-            icon: const Icon(
-              Icons.notifications_outlined,
-              color: Colors.black54,
-              size: 28,
+            Align(
+              alignment: Alignment.centerRight,
+              child: IconButton(
+                icon: const Icon(
+                  Icons.notifications_outlined,
+                  color: Colors.black54,
+                  size: 28,
+                ),
+                onPressed: () {},
+              ),
             ),
-            onPressed: () {},
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -333,6 +328,65 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildViewSwitcher() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
+      child: Row(
+        children: [
+          ChoiceChip(
+            label: const Text('My Activities'),
+            labelStyle: TextStyle(
+              color: _selectedSegment == 0 ? Colors.black : Colors.black87,
+              fontWeight: _selectedSegment == 0
+                  ? FontWeight.bold
+                  : FontWeight.normal,
+            ),
+            selected: _selectedSegment == 0,
+            onSelected: (selected) {
+              if (selected) setState(() => _selectedSegment = 0);
+            },
+            backgroundColor: Colors.white,
+            selectedColor: const Color(0xFFFFD600),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24.0),
+              side: BorderSide(
+                color: _selectedSegment == 0
+                    ? const Color(0xFFFFD600)
+                    : Colors.grey.shade400,
+              ),
+            ),
+            showCheckmark: false,
+          ),
+          const SizedBox(width: 8.0),
+          ChoiceChip(
+            label: const Text('Other Organizers'),
+            labelStyle: TextStyle(
+              color: _selectedSegment == 1 ? Colors.black : Colors.black87,
+              fontWeight: _selectedSegment == 1
+                  ? FontWeight.bold
+                  : FontWeight.normal,
+            ),
+            selected: _selectedSegment == 1,
+            onSelected: (selected) {
+              if (selected) setState(() => _selectedSegment = 1);
+            },
+            backgroundColor: Colors.white,
+            selectedColor: const Color(0xFFFFD600),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24.0),
+              side: BorderSide(
+                color: _selectedSegment == 1
+                    ? const Color(0xFFFFD600)
+                    : Colors.grey.shade400,
+              ),
+            ),
+            showCheckmark: false,
+          ),
+        ],
       ),
     );
   }
@@ -474,21 +528,99 @@ class _OrganizerActivityCard extends StatelessWidget {
                     ),
                     const Divider(color: Colors.grey),
                     const SizedBox(height: 8.0),
-                    _buildInfoRow(
-                      text: location,
-                      icon: Icons.location_on_outlined,
+
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            children: [
+                              _buildInfoRow(
+                                text: location,
+                                icon: Icons.location_on_outlined,
+                              ),
+                              const SizedBox(height: 8.0),
+                              _buildInfoRow(
+                                text: 'Organizers : $organizer',
+                                icon: Icons.person_outline,
+                              ),
+                              const SizedBox(height: 8.0),
+                              _buildInfoRow(
+                                text: 'Points : $points',
+                                icon: Icons.star_border_purple500_outlined,
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        if (showActions) ...[
+                          const SizedBox(width: 12.0),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              InkWell(
+                                onTap: onEdit,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 4,
+                                    horizontal: 4,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.edit,
+                                        size: 18,
+                                        color: Color(0xFF4A80FF),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Edit',
+                                        style: GoogleFonts.poppins(
+                                          color: const Color(0xFF4A80FF),
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16.0),
+                              InkWell(
+                                onTap: onDelete,
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 4,
+                                    horizontal: 4,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.delete_outline,
+                                        size: 18,
+                                        color: Colors.redAccent,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Delete',
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.redAccent,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
                     ),
-                    const SizedBox(height: 8.0),
-                    _buildInfoRow(
-                      text: 'Organizers : $organizer',
-                      icon: Icons.person_outline,
-                    ),
-                    const SizedBox(height: 8.0),
-                    _buildInfoRow(
-                      text: 'Points : $points',
-                      icon: Icons.star_border_purple500_outlined,
-                    ),
-                    const SizedBox(height: 8.0),
+
+                    const SizedBox(height: 12.0),
+
                     Row(
                       children: [
                         _buildTypePill(type, isCompulsory),
@@ -511,59 +643,6 @@ class _OrganizerActivityCard extends StatelessWidget {
                         ),
                       ],
                     ),
-                    if (showActions) ...[
-                      const SizedBox(height: 12.0),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          TextButton.icon(
-                            onPressed: onEdit,
-                            icon: const Icon(
-                              Icons.edit,
-                              size: 18,
-                              color: Color(0xFF4A80FF),
-                            ),
-                            label: Text(
-                              'Edit',
-                              style: GoogleFonts.poppins(
-                                color: const Color(0xFF4A80FF),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          TextButton.icon(
-                            onPressed: onDelete,
-                            icon: const Icon(
-                              Icons.delete_outline,
-                              size: 18,
-                              color: Colors.redAccent,
-                            ),
-                            label: Text(
-                              'Delete',
-                              style: GoogleFonts.poppins(
-                                color: Colors.redAccent,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
                   ],
                 ),
               ),

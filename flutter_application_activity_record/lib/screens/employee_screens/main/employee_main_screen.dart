@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_application_activity_record/theme/app_colors.dart';
 
 // อัปเดต import ให้เรียกจากในโฟลเดอร์เดียวกัน
-import 'activity_feed_screen.dart';
-import 'reward_screen.dart';
-import 'todo_screen.dart';
+import '../activities/activity_feed_screen.dart';
+import '../rewards/reward_screen.dart';
+import '../activities/todo_screen.dart';
 
 class EmployeeMainScreen extends StatefulWidget {
   const EmployeeMainScreen({super.key});
@@ -34,7 +35,7 @@ class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
     const Color primaryColor = Color(0xFF4A80FF);
 
     return Scaffold(
-      backgroundColor: const Color(0x4DE2F3FF),
+      backgroundColor: employeeBg,
       body: IndexedStack(index: _selectedIndex, children: _widgetOptions),
       bottomNavigationBar: BottomNavigationBar(
         items: <BottomNavigationBarItem>[

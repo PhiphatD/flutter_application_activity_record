@@ -4,12 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'organization_register_screen.dart';
 // *** 2. Import หน้า Forgot Password ***
 import 'forgot_password_screen.dart';
-import 'employee_screens/employee_main_screen.dart';
-
-// --- 1. เพิ่ม Import (แบบคอมเมนต์) สำหรับหน้า Admin/Organizer ---
-// (เมื่อคุณสร้างเสร็จ ค่อยลบ // ออก)
-// import 'admin_screens/admin_main_screen.dart';
-// import 'organizer_screens/organizer_main_screen.dart';
+import 'employee_screens/main/employee_main_screen.dart';
+import 'organizer_screens/main/organizer_main_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -39,7 +35,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       // TODO: เมื่อเชื่อมต่อ API จริง ให้ส่ง email/password ไปตรวจสอบ
       // !!! ทดสอบโดยเปลี่ยนค่า "Employee" เป็น "Admin" หรือ "Organizer"
-      String userRole = await _mockLoginAndGetRole(email, "Employee");
+      String userRole = await _mockLoginAndGetRole(email, "organizer");
 
       _navigateToUserMainScreen(userRole);
       // ไม่ต้อง setState หยุดโหลด เพราะจะย้ายไปหน้าใหม่แล้ว
@@ -62,19 +58,19 @@ class _LoginScreenState extends State<LoginScreen> {
     Widget destinationScreen;
 
     switch (role.toLowerCase()) {
-      case 'Admin':
+      case 'admin':
         // destinationScreen = const AdminMainScreen(); // Uncomment เมื่อมีหน้า Admin
         destinationScreen =
-            const EmployeeMainScreen(); // ใช้หน้า Employee แทนชั่วคราว
+            const OrganizerMainScreen(); // ใช้หน้า Employee แทนชั่วคราว
         print('Login as: Admin');
         break;
-      case 'Organizer':
+      case 'organizer':
         // destinationScreen = const OrganizerMainScreen(); // Uncomment เมื่อมีหน้า Organizer
         destinationScreen =
-            const EmployeeMainScreen(); // ใช้หน้า Employee แทนชั่วคราว
+            const OrganizerMainScreen(); // ใช้หน้า Employee แทนชั่วคราว
         print('Login as: Organizer');
         break;
-      case 'Employee':
+      case 'employee':
       default:
         destinationScreen = const EmployeeMainScreen();
         print('Login as: Employee');

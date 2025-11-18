@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'activity_card.dart'; // <--- Import การ์ดใหม่
-import 'profile_screen.dart'; // <--- Import ProfileScreen
+import '../widgets/activity_card.dart'; // <--- Import การ์ดใหม่
+import '../profile/profile_screen.dart'; // <--- Import ProfileScreen
 import 'package:intl/intl.dart';
+import 'package:flutter_application_activity_record/theme/app_colors.dart';
 
 // --- (ใหม่) 1. สร้าง Class Model สำหรับเก็บข้อมูล ---
 // (ใช้เก็บข้อมูลที่ดึงมาจาก Database หรือ List)
@@ -145,7 +146,7 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: employeeBg,
       body: SafeArea(
         child: Column(
           children: [

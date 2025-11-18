@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'activity_detail_screen.dart';
+import '../activities/activity_detail_screen.dart';
 
 // 1. (เหมือนเดิม) enum สำหรับสถานะของกิจกรรม
 enum ActivityStatus {

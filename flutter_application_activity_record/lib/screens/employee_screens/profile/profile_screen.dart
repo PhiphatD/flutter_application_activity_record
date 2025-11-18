@@ -14,7 +14,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late Timer _timer;
   Duration _duration = const Duration(minutes: 10);
 
-  // --- ข้อมูลจำลอง (Mock Data) ---
   final String empName = "Ms. Cherliya Wattanaissararat";
   final String empId = "1650702200";
   final String empPosition = "Software Developer";
@@ -69,7 +68,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         title: const Text(
           'My Profile',
           style: TextStyle(
-            // --- ลบ fontFamily: 'Poppins' ออก ใช้ Kanit จาก Theme ---
             fontWeight: FontWeight.bold,
             fontSize: 22,
             color: Color(0xFF375987),
@@ -79,9 +77,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout, color: Color(0xFF375987)),
-            onPressed: () {
-              // Handle logout
-            },
+            onPressed: () {},
           ),
         ],
       ),
@@ -92,9 +88,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // --- 1. เพิ่มข้อความ "Employee ID" ---
                 const Text(
-                  "Employee ID",
+                  'Employee ID',
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
@@ -102,17 +97,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                // --- 2. เพิ่มเส้นคั่น ---
                 Container(
                   margin: const EdgeInsets.symmetric(
                     vertical: 8.0,
                     horizontal: 180,
                   ),
-                  height: 4, // ความหนาของเส้น
+                  height: 4,
                   color: const Color.fromARGB(255, 0, 0, 0).withOpacity(0.5),
                 ),
                 SizedBox(height: 15),
-                // --- 3. บัตร FlipCard (เหมือนเดิม) ---
                 SizedBox(
                   height: 450,
                   child: FlipCard(
@@ -120,10 +113,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     back: _buildQrCard(),
                   ),
                 ),
-
                 const SizedBox(height: 20),
-
-                // --- 4. ข้อความ "แตะเพื่อพลิก" (เหมือนเดิม) ---
                 const Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -134,7 +124,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     SizedBox(width: 8),
                     Text(
-                      "แตะที่บัตรเพื่อพลิก",
+                      'แตะที่บัตรเพื่อพลิก',
                       style: TextStyle(color: Colors.grey),
                     ),
                   ],
@@ -159,7 +149,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // --- _buildInfoCard (ไม่เปลี่ยนแปลง) ---
   Widget _buildInfoCard() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 30.0),
@@ -227,7 +216,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // --- _buildQrCard (ไม่เปลี่ยนแปลง) ---
   Widget _buildQrCard() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 30.0),
@@ -252,7 +240,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text(
-            "DIGITAL KEYPASS",
+            'DIGITAL KEYPASS',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
