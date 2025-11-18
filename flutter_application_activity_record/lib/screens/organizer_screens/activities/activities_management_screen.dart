@@ -133,15 +133,21 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: organizerBg,
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const CreateActivityScreen()),
-          );
-        },
-        backgroundColor: const Color(0xFF4A80FF),
-        child: const Icon(Icons.add, color: Colors.white),
+      floatingActionButton: SafeArea(
+        bottom: true,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 8.0),
+          child: FloatingActionButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const CreateActivityScreen()),
+              );
+            },
+            backgroundColor: const Color(0xFF4A80FF),
+            child: const Icon(Icons.add, color: Colors.white),
+          ),
+        ),
       ),
       body: SafeArea(
         child: Column(

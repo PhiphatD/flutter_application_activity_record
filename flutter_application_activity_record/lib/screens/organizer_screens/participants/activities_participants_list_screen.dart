@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_application_activity_record/theme/app_colors.dart';
 import 'participants_details_screen.dart';
 import 'models.dart';
+import '../profile/organizer_profile_screen.dart';
 
 class ActivitiesParticipantsListScreen extends StatefulWidget {
   const ActivitiesParticipantsListScreen({super.key});
@@ -17,6 +18,7 @@ class _ActivitiesParticipantsListScreenState
   final int currentOrgId = 1;
   final TextEditingController _search = TextEditingController();
   String _query = '';
+  bool _showJoined = false;
 
   final List<_Activity> _activities = [
     _Activity(
@@ -28,7 +30,9 @@ class _ActivitiesParticipantsListScreenState
       isCompulsory: true,
       location: 'ห้องประชุม B6-310',
       startTime: const TimeOfDay(hour: 14, minute: 0),
-      date: DateTime(2025, 7, 23),
+      date: DateTime.now().subtract(const Duration(days: 10)),
+      registeredCount: 2,
+      joinedCount: 1,
     ),
     _Activity(
       id: 1002,
@@ -39,18 +43,22 @@ class _ActivitiesParticipantsListScreenState
       isCompulsory: false,
       location: 'ห้องประชุม A3-403',
       startTime: const TimeOfDay(hour: 13, minute: 0),
-      date: DateTime(2025, 7, 23),
+      date: DateTime.now().add(const Duration(days: 5)),
+      registeredCount: 3,
+      joinedCount: 0,
     ),
     _Activity(
       id: 1003,
-      orgId: 2,
+      orgId: 1,
       name: 'Workshop Microsoft365',
       type: 'Workshop',
       point: 500,
       isCompulsory: false,
       location: 'ห้องประชุม C9-203',
       startTime: const TimeOfDay(hour: 11, minute: 0),
-      date: DateTime(2026, 1, 24),
+      date: DateTime.now().add(const Duration(days: 30)),
+      registeredCount: 5,
+      joinedCount: 0,
     ),
   ];
 
@@ -67,13 +75,26 @@ class _ActivitiesParticipantsListScreenState
   }
 
   List<_Activity> get _filtered {
+    final now = DateTime.now();
+    bool isStarted(_Activity a) {
+      final start = DateTime(
+        a.date.year,
+        a.date.month,
+        a.date.day,
+        a.startTime.hour,
+        a.startTime.minute,
+      );
+      return !start.isAfter(now); // started or finished
+    }
+
     return _activities
+        .where((a) => a.orgId == currentOrgId)
         .where(
           (a) =>
-              a.orgId == currentOrgId &&
-              (_query.isEmpty ||
-                  a.name.toLowerCase().contains(_query.toLowerCase())),
+              _query.isEmpty ||
+              a.name.toLowerCase().contains(_query.toLowerCase()),
         )
+        .where((a) => _showJoined ? isStarted(a) : !isStarted(a))
         .toList();
   }
 
@@ -89,9 +110,11 @@ class _ActivitiesParticipantsListScreenState
             _buildModeChips(),
             Expanded(
               child: ListView.builder(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20.0,
-                  vertical: 10.0,
+                padding: EdgeInsets.only(
+                  left: 20.0,
+                  right: 20.0,
+                  top: 10.0,
+                  bottom: 16.0 + MediaQuery.of(context).padding.bottom,
                 ),
                 itemCount: _filtered.length,
                 itemBuilder: (context, index) {
@@ -105,6 +128,8 @@ class _ActivitiesParticipantsListScreenState
                       points: a.point,
                       location: a.location,
                       timeText: '${a.startTime.format(context)}',
+                      registeredCount: a.registeredCount,
+                      joinedCount: a.joinedCount,
                       onTap: () {
                         final summary = ActivitySummary(
                           id: a.id,
@@ -119,8 +144,10 @@ class _ActivitiesParticipantsListScreenState
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) =>
-                                ParticipantsDetailsScreen(activity: summary),
+                            builder: (_) => ParticipantsDetailsScreen(
+                              activity: summary,
+                              isJoinedView: _showJoined,
+                            ),
                           ),
                         );
                       },
@@ -132,6 +159,7 @@ class _ActivitiesParticipantsListScreenState
           ],
         ),
       ),
+      floatingActionButton: null,
     );
   }
 
@@ -145,11 +173,21 @@ class _ActivitiesParticipantsListScreenState
           children: [
             Align(
               alignment: Alignment.centerLeft,
-              child: CircleAvatar(
-                radius: 22,
-                backgroundColor: Colors.grey.shade200,
-                backgroundImage: const NetworkImage(
-                  'https://i.pravatar.cc/150?img=32',
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const OrganizerProfileScreen(),
+                    ),
+                  );
+                },
+                child: CircleAvatar(
+                  radius: 22,
+                  backgroundColor: Colors.grey.shade200,
+                  backgroundImage: const NetworkImage(
+                    'https://i.pravatar.cc/150?img=32',
+                  ),
                 ),
               ),
             ),
@@ -219,31 +257,38 @@ class _ActivitiesParticipantsListScreenState
         children: [
           ChoiceChip(
             label: const Text('Registered'),
-            labelStyle: const TextStyle(
-              color: Colors.black,
-              fontWeight: FontWeight.bold,
+            labelStyle: TextStyle(
+              color: _showJoined ? Colors.black87 : Colors.black,
+              fontWeight: _showJoined ? FontWeight.normal : FontWeight.bold,
             ),
-            selected: true,
-            onSelected: (_) {},
+            selected: !_showJoined,
+            onSelected: (s) => setState(() => _showJoined = false),
             backgroundColor: Colors.white,
             selectedColor: chipSelectedYellow,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(24.0),
-              side: const BorderSide(color: chipSelectedYellow),
+              side: BorderSide(
+                color: _showJoined ? Colors.grey.shade400 : chipSelectedYellow,
+              ),
             ),
             showCheckmark: false,
           ),
           const SizedBox(width: 8),
           ChoiceChip(
             label: const Text('Joined'),
-            labelStyle: const TextStyle(color: Colors.black87),
-            selected: false,
-            onSelected: (_) {},
+            labelStyle: TextStyle(
+              color: _showJoined ? Colors.black : Colors.black87,
+              fontWeight: _showJoined ? FontWeight.bold : FontWeight.normal,
+            ),
+            selected: _showJoined,
+            onSelected: (s) => setState(() => _showJoined = true),
             backgroundColor: Colors.white,
             selectedColor: chipSelectedYellow,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(24.0),
-              side: BorderSide(color: Colors.grey.shade400),
+              side: BorderSide(
+                color: _showJoined ? chipSelectedYellow : Colors.grey.shade400,
+              ),
             ),
             showCheckmark: false,
           ),
@@ -262,6 +307,8 @@ class _ActivityCard extends StatelessWidget {
   final int points;
   final String location;
   final String timeText;
+  final int registeredCount;
+  final int joinedCount;
   final VoidCallback onTap;
 
   const _ActivityCard({
@@ -272,6 +319,8 @@ class _ActivityCard extends StatelessWidget {
     required this.points,
     required this.location,
     required this.timeText,
+    required this.registeredCount,
+    required this.joinedCount,
     required this.onTap,
   });
 
@@ -388,6 +437,17 @@ class _ActivityCard extends StatelessWidget {
                 ),
               ],
             ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.people_alt_outlined, size: 18, color: Color(0xFF375987)),
+                const SizedBox(width: 6),
+                Text(
+                  'Registered: $registeredCount • Joined: $joinedCount',
+                  style: GoogleFonts.poppins(color: Colors.black54),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -405,6 +465,8 @@ class _Activity {
   final String location;
   final TimeOfDay startTime;
   final DateTime date;
+  final int registeredCount;
+  final int joinedCount;
   const _Activity({
     required this.id,
     required this.orgId,
@@ -415,5 +477,7 @@ class _Activity {
     required this.location,
     required this.startTime,
     required this.date,
+    required this.registeredCount,
+    required this.joinedCount,
   });
 }

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 // *** 1. Import หน้า Login และ Google Fonts ***
-import 'login_screen.dart';
+import '../login_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'registration_successful_screen.dart';
 

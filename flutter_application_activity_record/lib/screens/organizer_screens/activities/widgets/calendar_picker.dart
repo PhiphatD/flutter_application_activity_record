@@ -129,14 +129,21 @@ class _CalendarPickerState extends State<CalendarPicker> {
     }
     final isSelected = _isSelected(day);
     final isInRange = _inRange(day);
-    final bgColor = isSelected ? chipSelectedYellow : (isInRange ? chipSelectedYellow.withOpacity(0.25) : Colors.transparent);
-    final textColor = isSelected ? Colors.black : Colors.black87;
+    final isPast = _stripTime(day).isBefore(_stripTime(DateTime.now()));
+    final bgColor = isSelected
+        ? chipSelectedYellow
+        : (isInRange ? chipSelectedYellow.withOpacity(0.25) : Colors.transparent);
+    final textColor = isPast ? Colors.grey : (isSelected ? Colors.black : Colors.black87);
     return GestureDetector(
-      onTap: () => _onTapDay(day),
+      onTap: isPast ? null : () => _onTapDay(day),
       child: Container(
         height: 40,
         margin: const EdgeInsets.symmetric(horizontal: 2),
-        decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(8)),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(8),
+          border: isPast ? Border.all(color: Colors.grey.withOpacity(0.3)) : null,
+        ),
         alignment: Alignment.center,
         child: Text('${day.day}', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: textColor)),
       ),

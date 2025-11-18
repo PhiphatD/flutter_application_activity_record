@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart'; // <-- 1. Import Lottie
-import 'login_screen.dart';
+import '../login_screen.dart';
 
 class RegistrationSuccessfulScreen extends StatefulWidget {
   const RegistrationSuccessfulScreen({Key? key}) : super(key: key);

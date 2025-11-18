@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 // *** 1. Import หน้า Register ***
-import 'organization_register_screen.dart';
+import 'register/organization_register_screen.dart';
 // *** 2. Import หน้า Forgot Password ***
-import 'forgot_password_screen.dart';
-import 'employee_screens/main/employee_main_screen.dart';
-import 'organizer_screens/main/organizer_main_screen.dart';
+import 'password/forgot_password_screen.dart';
+import '../employee_screens/main/employee_main_screen.dart';
+import '../organizer_screens/main/organizer_main_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -32,15 +32,15 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final email = _emailController.text;
       final password = _passwordController.text;
-
-      // TODO: เมื่อเชื่อมต่อ API จริง ให้ส่ง email/password ไปตรวจสอบ
-      // !!! ทดสอบโดยเปลี่ยนค่า "Employee" เป็น "Admin" หรือ "Organizer"
-      String userRole = await _mockLoginAndGetRole(email, "organizer");
+      String userRole = await _mockLoginAndGetRole(email, password);
 
       _navigateToUserMainScreen(userRole);
       // ไม่ต้อง setState หยุดโหลด เพราะจะย้ายไปหน้าใหม่แล้ว
     } catch (e) {
       print("Login error: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('อีเมลหรือรหัสผ่านไม่ถูกต้อง')),
+      );
       setState(() {
         _isLoading = false;
       });
@@ -48,9 +48,16 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // --- 3. เพิ่มฟังก์ชันจำลอง API ---
-  Future<String> _mockLoginAndGetRole(String email, String roleToTest) async {
-    await Future.delayed(const Duration(seconds: 1));
-    return roleToTest; // ในอนาคตจะมาจาก API จริง
+  Future<String> _mockLoginAndGetRole(String email, String password) async {
+    await Future.delayed(const Duration(milliseconds: 600));
+    final users = <String, Map<String, String>>{
+      'employee@company.com': {'password': '123456', 'role': 'employee'},
+      'organizer@company.com': {'password': '123456', 'role': 'organizer'},
+    };
+    final u = users[email.trim().toLowerCase()];
+    if (u == null) throw Exception('user not found');
+    if (u['password'] != password) throw Exception('invalid password');
+    return u['role']!;
   }
 
   // --- 4. เพิ่มฟังก์ชันนำทาง ---

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'registration_successful_screen.dart';
+import '../register/registration_successful_screen.dart';
 
 // เราใช้ StatefulWidget เพราะต้องมีการสลับค่า (state) การซ่อน/แสดงรหัสผ่าน
 class ResetPasswordScreen extends StatefulWidget {

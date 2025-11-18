@@ -287,7 +287,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
       backgroundColor: Colors.white,
       appBar: _buildAppBar(),
       body: _buildBody(),
-      bottomNavigationBar: _buildBottomActionButton(),
+      bottomNavigationBar: SafeArea(bottom: true, child: _buildBottomActionButton()),
     );
   }
 

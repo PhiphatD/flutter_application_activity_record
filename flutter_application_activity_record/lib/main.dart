@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'screens/splash_screen.dart'; // <-- import หน้านี้
+import 'screens/onboarding/splash_screen.dart'; // <-- import หน้านี้
 
 void main() {
   runApp(const MyApp());
