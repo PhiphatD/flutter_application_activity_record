@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 // removed external bottom sheet import; implement local confirm bottom sheet
+import 'package:flutter_application_activity_record/widgets/reward_confirmation_bottom_sheet.dart';
 
 class RewardDetailScreen extends StatefulWidget {
   final String rewardName;
@@ -61,41 +62,17 @@ class _RewardDetailScreenState extends State<RewardDetailScreen> {
       return;
     }
 
-    showModalBottomSheet(
+    RewardConfirmationBottomSheet.show(
       context: context,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      builder: (_) {
-        return Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Confirm Redemption', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Text(widget.rewardName, style: GoogleFonts.poppins()),
-              const SizedBox(height: 4),
-              Text('Cost: ${widget.pointsCost} points', style: GoogleFonts.poppins(color: Colors.grey[700])),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: GoogleFonts.poppins())),
-                  const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      Navigator.pop(context);
-                      widget.onRedeem();
-                    },
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4A80FF)),
-                    child: Text('Confirm', style: GoogleFonts.poppins(color: Colors.white)),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
+      rewardName: widget.rewardName,
+      pointsCost: widget.pointsCost,
+      description: widget.description,
+      imageUrl: widget.imageUrls.isNotEmpty ? widget.imageUrls.first : null,
+      category: widget.category,
+      onConfirm: () {
+        Navigator.pop(context); // close bottom sheet
+        Navigator.pop(context); // close detail page
+        widget.onRedeem();
       },
     );
   }
@@ -206,7 +183,9 @@ class _RewardDetailScreenState extends State<RewardDetailScreen> {
           ),
         ],
       ),
-      bottomNavigationBar: Container(
+      bottomNavigationBar: SafeArea(
+        bottom: true,
+        child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, -5))]),
         child: ElevatedButton(
@@ -217,6 +196,7 @@ class _RewardDetailScreenState extends State<RewardDetailScreen> {
             const SizedBox(width: 8),
             Text(canRedeem ? 'Redeem for ${widget.pointsCost} points' : widget.stock <= 0 ? 'Out of Stock' : 'Insufficient Points', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold, color: canRedeem ? Colors.white : Colors.grey[600])),
           ]),
+        ),
         ),
       ),
     );

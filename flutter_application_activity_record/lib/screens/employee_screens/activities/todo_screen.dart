@@ -132,9 +132,11 @@ class _TodoScreenState extends State<TodoScreen> {
             // --- 6. (แก้ไข) ListView.builder ---
             Expanded(
               child: ListView.builder(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20.0,
-                  vertical: 10.0,
+                padding: EdgeInsets.only(
+                  left: 20.0,
+                  right: 20.0,
+                  top: 10.0,
+                  bottom: 16.0 + MediaQuery.of(context).padding.bottom,
                 ),
                 itemCount: _filteredActivities.length,
                 itemBuilder: (context, index) {

@@ -163,9 +163,11 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
             Expanded(
               // (แก้ไข) เปลี่ยนจาก ListView -> ListView.builder
               child: ListView.builder(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20.0,
-                  vertical: 10.0,
+                padding: EdgeInsets.only(
+                  left: 20.0,
+                  right: 20.0,
+                  top: 10.0,
+                  bottom: 16.0 + MediaQuery.of(context).padding.bottom,
                 ),
                 // (แก้ไข) นับจำนวน "วัน" (กลุ่ม) ที่มีกิจกรรม
                 itemCount: _groupedActivities.keys.length,

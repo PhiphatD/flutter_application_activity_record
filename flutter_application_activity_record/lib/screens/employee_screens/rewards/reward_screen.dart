@@ -462,7 +462,10 @@ class _RewardScreenState extends State<RewardScreen> {
     final items = _filteredAvailableRewards;
     return GridView.builder(
       itemCount: items.length,
-      padding: const EdgeInsets.only(top: 10.0, bottom: 20.0),
+      padding: EdgeInsets.only(
+        top: 10.0,
+        bottom: 20.0 + MediaQuery.of(context).padding.bottom,
+      ),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         mainAxisSpacing: 16.0,
@@ -484,7 +487,10 @@ class _RewardScreenState extends State<RewardScreen> {
     final items = _filteredRedeemedRewards;
     return ListView.builder(
       itemCount: items.length,
-      padding: const EdgeInsets.only(top: 10.0, bottom: 20.0),
+      padding: EdgeInsets.only(
+        top: 10.0,
+        bottom: 20.0 + MediaQuery.of(context).padding.bottom,
+      ),
       itemBuilder: (context, index) {
         final item = items[index];
         return Padding(
