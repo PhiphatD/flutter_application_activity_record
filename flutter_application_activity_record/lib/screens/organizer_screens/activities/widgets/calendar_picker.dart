@@ -11,6 +11,8 @@ class CalendarPicker extends StatefulWidget {
   final List<DateTime>? initialMulti;
   final ValueChanged<DateTimeRange?>? onRangeChanged;
   final ValueChanged<List<DateTime>>? onMultiChanged;
+  final bool allowPast;
+  final bool singleSelection;
 
   const CalendarPicker({
     super.key,
@@ -20,6 +22,8 @@ class CalendarPicker extends StatefulWidget {
     this.initialMulti,
     this.onRangeChanged,
     this.onMultiChanged,
+    this.allowPast = false,
+    this.singleSelection = false,
   });
 
   @override
@@ -52,7 +56,7 @@ class _CalendarPickerState extends State<CalendarPicker> {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8)]),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(8),
       child: Column(
         children: [
           Row(
@@ -61,23 +65,31 @@ class _CalendarPickerState extends State<CalendarPicker> {
               IconButton(onPressed: _prevMonth, icon: const Icon(Icons.chevron_left)),
               Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(color: organizerBg, borderRadius: BorderRadius.circular(12)),
-                    child: Text(_monthName(_visibleMonth.month), style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                  InkWell(
+                    onTap: _pickMonth,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(color: organizerBg, borderRadius: BorderRadius.circular(12)),
+                      child: Text(_monthName(_visibleMonth.month), style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                    ),
                   ),
                   const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(color: organizerBg, borderRadius: BorderRadius.circular(12)),
-                    child: Text('${_visibleMonth.year}', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                  InkWell(
+                    onTap: _pickYear,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(color: organizerBg, borderRadius: BorderRadius.circular(12)),
+                      child: Text('${_visibleMonth.year}', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                    ),
                   ),
                 ],
               ),
               IconButton(onPressed: _nextMonth, icon: const Icon(Icons.chevron_right)),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -89,7 +101,7 @@ class _CalendarPickerState extends State<CalendarPicker> {
                 ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           ..._buildWeeks(),
         ],
       ),
@@ -118,7 +130,7 @@ class _CalendarPickerState extends State<CalendarPicker> {
           for (int j = 0; j < 7; j++) Expanded(child: _buildDayCell(cells[i + j])),
         ],
       ));
-      rows.add(const SizedBox(height: 6));
+      rows.add(const SizedBox(height: 4));
     }
     return rows;
   }
@@ -133,20 +145,85 @@ class _CalendarPickerState extends State<CalendarPicker> {
     final bgColor = isSelected
         ? chipSelectedYellow
         : (isInRange ? chipSelectedYellow.withOpacity(0.25) : Colors.transparent);
-    final textColor = isPast ? Colors.grey : (isSelected ? Colors.black : Colors.black87);
+    final textColor = (!widget.allowPast && isPast)
+        ? Colors.grey
+        : (isSelected ? Colors.black : Colors.black87);
     return GestureDetector(
-      onTap: isPast ? null : () => _onTapDay(day),
+      onTap: (!widget.allowPast && isPast) ? null : () => _onTapDay(day),
       child: Container(
-        height: 40,
+        height: 36,
         margin: const EdgeInsets.symmetric(horizontal: 2),
         decoration: BoxDecoration(
           color: bgColor,
           borderRadius: BorderRadius.circular(8),
-          border: isPast ? Border.all(color: Colors.grey.withOpacity(0.3)) : null,
+          border: (!widget.allowPast && isPast)
+              ? Border.all(color: Colors.grey.withOpacity(0.3))
+              : null,
         ),
         alignment: Alignment.center,
         child: Text('${day.day}', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: textColor)),
       ),
+    );
+  }
+
+  void _pickMonth() async {
+    final months = List<int>.generate(12, (i) => i + 1);
+    await showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: GridView.count(
+            crossAxisCount: 3,
+            padding: const EdgeInsets.all(12),
+            mainAxisSpacing: 8,
+            crossAxisSpacing: 8,
+            children: months.map((m) {
+              return InkWell(
+                onTap: () {
+                  setState(() {
+                    _visibleMonth = DateTime(_visibleMonth.year, m, 1);
+                  });
+                  Navigator.pop(ctx);
+                },
+                child: Container(
+                  decoration: BoxDecoration(color: organizerBg, borderRadius: BorderRadius.circular(12)),
+                  alignment: Alignment.center,
+                  child: Text(_monthName(m), style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                ),
+              );
+            }).toList(),
+          ),
+        );
+      },
+    );
+  }
+
+  void _pickYear() async {
+    final current = DateTime.now().year;
+    final years = List<int>.generate(current - 1900 + 1, (i) => current - i);
+    await showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: ListView.separated(
+            padding: const EdgeInsets.all(12),
+            itemBuilder: (c, i) {
+              final y = years[i];
+              return ListTile(
+                title: Text('$y', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                onTap: () {
+                  setState(() {
+                    _visibleMonth = DateTime(y, _visibleMonth.month, 1);
+                  });
+                  Navigator.pop(ctx);
+                },
+              );
+            },
+            separatorBuilder: (c, i) => const Divider(height: 1),
+            itemCount: years.length,
+          ),
+        );
+      },
     );
   }
 
@@ -165,10 +242,16 @@ class _CalendarPickerState extends State<CalendarPicker> {
       }
       widget.onRangeChanged?.call(_start != null && _end != null ? DateTimeRange(start: _start!, end: _end!) : null);
     } else {
-      if (_multi.contains(d)) {
-        _multi.remove(d);
+      if (widget.singleSelection) {
+        _multi
+          ..clear()
+          ..add(d);
       } else {
-        _multi.add(d);
+        if (_multi.contains(d)) {
+          _multi.remove(d);
+        } else {
+          _multi.add(d);
+        }
       }
       widget.onMultiChanged?.call(_multi.toList()..sort((a, b) => a.compareTo(b)));
     }

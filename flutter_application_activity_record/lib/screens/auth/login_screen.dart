@@ -25,7 +25,7 @@ class _LoginScreenState extends State<LoginScreen> {
   // *** API URL: ใช้ 10.0.2.2:8000 สำหรับ Android Emulator ***
   // ถ้าใช้ iOS Simulator ใช้ http://localhost:8000
   // ถ้าใช้เครื่องจริง ใช้ IP เครื่องคอมฯ เช่น http://192.168.1.x:8000
-  final String apiUrl = "http://10.0.2.2:8000";
+  final String apiUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
 
   void _login() async {
     if (!_formKey.currentState!.validate()) return;

@@ -1,139 +1,106 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'activity_create_screen.dart';
 
-class EditActivityScreen extends StatelessWidget {
-  final int actId;
+class EditActivityScreen extends StatefulWidget {
+  final String actId;
   const EditActivityScreen({super.key, required this.actId});
 
-  Map<String, dynamic> _loadMock(int id) {
-    final base = {
-      1001: {
-        'ACTIVITY': {
-          'ACT_NAME': 'Leadership Seminar',
-          'ACT_TYPE': 'Seminar',
-          'ACT_DESCRIPTIONS': 'สัมมนาแนวทางภาวะผู้นำ',
-          'ACT_POINT': 10,
-          'ACT_GUEST_SPEAKER': 'Mr. John Doe',
-          'ACT_EVENT_HOST': 'Leadership Institute',
-          'ACT_MAX_PARTICIPANTS': 30,
-          'DEP_ID': 'All Departments',
-          'ACT_COST': 0.0,
-          'ACT_TRAVEL_INFO': '',
-          'ACT_FOOD_INFO': '',
-          'ACT_MORE_DETAILS': '',
-          'ACT_PARTICIPATION_CONDITION': '',
-          'ACT_ISCOMPULSORY': 1,
-        },
-        'ORGANIZER': {
-          'ORG_NAME': 'You',
-          'ORG_CONTACT_INFO': 'organizer@example.com',
-        },
-        'SESSIONS': [
-          {
-            'SESSION_DATE': DateTime.now().add(const Duration(days: 2)).toIso8601String(),
-            'START_TIME': '14:00',
-            'END_TIME': '16:00',
-            'LOCATION': 'HQ Room A',
-          },
-        ],
+  @override
+  State<EditActivityScreen> createState() => _EditActivityScreenState();
+}
+
+class _EditActivityScreenState extends State<EditActivityScreen> {
+  bool _isLoading = true;
+  Map<String, dynamic>? _initialData;
+  // URL API
+  final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchData();
+  }
+
+  Future<void> _fetchData() async {
+    try {
+      final url = Uri.parse('$baseUrl/activities/${widget.actId}');
+      final response = await http.get(url);
+
+      if (response.statusCode == 200) {
+        final data = json.decode(utf8.decode(response.bodyBytes));
+        // แปลงโครงสร้างข้อมูลจาก API ให้เป็นโครงสร้างที่ Form ต้องการ
+        final formattedData = _transformData(data);
+
+        if (mounted) {
+          setState(() {
+            _initialData = formattedData;
+            _isLoading = false;
+          });
+        }
+      } else {
+        // Error handling
+        if (mounted) Navigator.pop(context);
+      }
+    } catch (e) {
+      // Error handling
+      if (mounted) Navigator.pop(context);
+    }
+  }
+
+  // แปลงข้อมูล API Response -> Form Data Structure
+  Map<String, dynamic> _transformData(Map<String, dynamic> apiData) {
+    // เตรียม Sessions list
+    List<Map<String, dynamic>> sessions = [];
+    if (apiData['sessions'] != null) {
+      for (var s in apiData['sessions']) {
+        sessions.add({
+          'SESSION_DATE': s['date'],
+          'START_TIME': s['startTime'],
+          'END_TIME': s['endTime'],
+          'LOCATION': s['location'],
+        });
+      }
+    }
+
+    return {
+      'ACTIVITY': {
+        'ACT_NAME': apiData['name'],
+        'ACT_TYPE': apiData['actType'],
+        'ACT_DESCRIPTIONS': apiData['description'],
+        'ACT_POINT': apiData['point'],
+        'ACT_GUEST_SPEAKER': apiData['guestSpeaker'],
+        'ACT_EVENT_HOST': apiData['eventHost'],
+        'ACT_MAX_PARTICIPANTS': apiData['maxParticipants'],
+        'DEP_ID':
+            apiData['depName'], // ระวังตรงนี้ Form อาจจะต้องการ ID หรือ Name
+        'ACT_COST': apiData['cost'],
+        'ACT_TRAVEL_INFO': apiData['travelInfo'],
+        'ACT_FOOD_INFO': apiData['foodInfo'],
+        'ACT_MORE_DETAILS': apiData['moreDetails'],
+        'ACT_PARTICIPATION_CONDITION': apiData['condition'],
+        'ACT_ISCOMPULSORY': apiData['isCompulsory'],
+        'ACT_STATUS': apiData['status'],
       },
-      1002: {
-        'ACTIVITY': {
-          'ACT_NAME': 'Agile Workshop',
-          'ACT_TYPE': 'Workshop',
-          'ACT_DESCRIPTIONS': 'เวิร์กชอป Agile และ Scrum',
-          'ACT_POINT': 15,
-          'ACT_GUEST_SPEAKER': 'Agile Coach Team',
-          'ACT_EVENT_HOST': 'Agile Guild',
-          'ACT_MAX_PARTICIPANTS': 25,
-          'DEP_ID': 'All Departments',
-          'ACT_COST': 0.0,
-          'ACT_TRAVEL_INFO': '',
-          'ACT_FOOD_INFO': '',
-          'ACT_MORE_DETAILS': '',
-          'ACT_PARTICIPATION_CONDITION': '',
-          'ACT_ISCOMPULSORY': 0,
-        },
-        'ORGANIZER': {
-          'ORG_NAME': 'You',
-          'ORG_CONTACT_INFO': 'organizer@example.com',
-        },
-        'SESSIONS': [
-          {
-            'SESSION_DATE': DateTime.now().add(const Duration(days: 5)).toIso8601String(),
-            'START_TIME': '09:00',
-            'END_TIME': '12:00',
-            'LOCATION': 'HQ Room B',
-          },
-        ],
+      'ORGANIZER': {
+        'ORG_NAME': apiData['organizerName'],
+        'ORG_CONTACT_INFO': apiData['organizerContact'],
       },
-      1003: {
-        'ACTIVITY': {
-          'ACT_NAME': 'Tech Trends 2025',
-          'ACT_TYPE': 'Seminar',
-          'ACT_DESCRIPTIONS': 'แนวโน้มเทคโนโลยีปี 2025',
-          'ACT_POINT': 8,
-          'ACT_GUEST_SPEAKER': 'Industry Experts',
-          'ACT_EVENT_HOST': 'Tech Assoc.',
-          'ACT_MAX_PARTICIPANTS': 40,
-          'DEP_ID': 'All Departments',
-          'ACT_COST': 0.0,
-          'ACT_TRAVEL_INFO': '',
-          'ACT_FOOD_INFO': '',
-          'ACT_MORE_DETAILS': '',
-          'ACT_PARTICIPATION_CONDITION': '',
-          'ACT_ISCOMPULSORY': 0,
-        },
-        'ORGANIZER': {
-          'ORG_NAME': 'Alice Wong',
-          'ORG_CONTACT_INFO': 'alice@example.com',
-        },
-        'SESSIONS': [
-          {
-            'SESSION_DATE': DateTime.now().add(const Duration(days: 1)).toIso8601String(),
-            'START_TIME': '13:00',
-            'END_TIME': '15:00',
-            'LOCATION': 'Auditorium',
-          },
-        ],
-      },
-      1004: {
-        'ACTIVITY': {
-          'ACT_NAME': 'Security Best Practices',
-          'ACT_TYPE': 'Workshop',
-          'ACT_DESCRIPTIONS': 'แนวทางความปลอดภัยไซเบอร์',
-          'ACT_POINT': 20,
-          'ACT_GUEST_SPEAKER': 'CyberSec Team',
-          'ACT_EVENT_HOST': 'CyberSec Lab',
-          'ACT_MAX_PARTICIPANTS': 28,
-          'DEP_ID': 'All Departments',
-          'ACT_COST': 0.0,
-          'ACT_TRAVEL_INFO': '',
-          'ACT_FOOD_INFO': '',
-          'ACT_MORE_DETAILS': '',
-          'ACT_PARTICIPATION_CONDITION': '',
-          'ACT_ISCOMPULSORY': 1,
-        },
-        'ORGANIZER': {
-          'ORG_NAME': 'Raj Patel',
-          'ORG_CONTACT_INFO': 'raj@example.com',
-        },
-        'SESSIONS': [
-          {
-            'SESSION_DATE': DateTime.now().add(const Duration(days: 7)).toIso8601String(),
-            'START_TIME': '10:00',
-            'END_TIME': '12:00',
-            'LOCATION': 'Lab 2',
-          },
-        ],
-      },
+      'SESSIONS': sessions,
     };
-    return base[id] ?? base[1001]!;
   }
 
   @override
   Widget build(BuildContext context) {
-    final initial = _loadMock(actId);
-    return CreateActivityScreen(initialData: initial, isEdit: true);
+    if (_isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    return CreateActivityScreen(
+      initialData: _initialData,
+      isEdit: true,
+      actId: widget.actId,
+    );
   }
 }

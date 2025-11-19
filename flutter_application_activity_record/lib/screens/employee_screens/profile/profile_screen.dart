@@ -36,7 +36,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String serviceDuration = "-";
 
   // API URL
-  final String apiUrl = "http://10.0.2.2:8000";
+  final String apiUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
 
   @override
   void initState() {
@@ -211,53 +211,53 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       body: SafeArea(
         child: Stack(
-        children: [
-          _buildBackground(topGradientColor), // ส่งสีเข้าไป
-          SingleChildScrollView(
-            // 3. ปรับ Padding หลังย้ายหัวข้อขึ้น AppBar
-            padding: const EdgeInsets.only(bottom: 20),
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const SizedBox(height: 20),
+          children: [
+            _buildBackground(topGradientColor), // ส่งสีเข้าไป
+            SingleChildScrollView(
+              // 3. ปรับ Padding หลังย้ายหัวข้อขึ้น AppBar
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const SizedBox(height: 20),
 
-                  // --- Flip Card Section ---
-                  SizedBox(
-                    height: 450,
-                    child: FlipCard(
-                      direction: FlipDirection.HORIZONTAL,
-                      front: _buildInfoCard(),
-                      back: _buildQrCard(),
+                    // --- Flip Card Section ---
+                    SizedBox(
+                      height: 450,
+                      child: FlipCard(
+                        direction: FlipDirection.HORIZONTAL,
+                        front: _buildInfoCard(),
+                        back: _buildQrCard(),
+                      ),
                     ),
-                  ),
 
-                  const SizedBox(height: 16),
-                  const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.touch_app_outlined,
-                        color: Colors.grey,
-                        size: 18,
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        'Tap card to view QR Code',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                    ],
-                  ),
+                    const SizedBox(height: 16),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.touch_app_outlined,
+                          color: Colors.grey,
+                          size: 18,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'Tap card to view QR Code',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ],
+                    ),
 
-                  const SizedBox(height: 30),
+                    const SizedBox(height: 30),
 
-                  // --- Lower Section: Information List ---
-                  _buildInfoSection(),
-                ],
+                    // --- Lower Section: Information List ---
+                    _buildInfoSection(),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
         ),
       ),
     );

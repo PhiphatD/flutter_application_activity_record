@@ -1,15 +1,19 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_application_activity_record/theme/app_colors.dart';
-import 'widgets/calendar_picker.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
 
 class CreateActivityScreen extends StatefulWidget {
   final Map<String, dynamic>? initialData;
   final bool isEdit;
+  final String? actId;
+
   const CreateActivityScreen({
     super.key,
     this.initialData,
     this.isEdit = false,
+    this.actId,
   });
 
   @override
@@ -17,34 +21,59 @@ class CreateActivityScreen extends StatefulWidget {
 }
 
 class _CreateActivityScreenState extends State<CreateActivityScreen> {
-  final PageController _pageController = PageController();
-  int _step = 0;
+  // URL API (Ngrok)
+  final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
+  bool _isSubmitting = false;
+  bool _isLoadingData = true;
 
+  // --- Data Lists from DB ---
+  List<String> _dbDepartments = [];
+  List<String> _dbPositions = [];
+
+  // --- Controllers & State ---
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
+
+  // Hosting Department (Dropdown + Other)
+  String? _selectedHostDept;
+  final _customHostDeptCtrl = TextEditingController();
+
   final _locationCtrl = TextEditingController();
   final _pointsCtrl = TextEditingController();
-  String _type = 'Training';
-  bool _useRange = true;
-  DateTimeRange? _dateRange;
-  final List<DateTime> _multipleDates = [];
+
+  // Type Dropdown
+  String? _selectedType = 'Training';
+  final List<String> _activityTypes = [
+    'Training',
+    'Seminar',
+    'Workshop',
+    'Other',
+  ];
+  final _customTypeCtrl = TextEditingController();
+
+  // Status Dropdown
+  String? _selectedStatus = 'Open';
+  final List<String> _statuses = ['Open', 'Full', 'Closed', 'Cancelled'];
+
+  // Date & Time
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
+  DateTime? _selectedDate; // [NEW] เพิ่มตัวแปรวันที่
 
+  // Organizer Info
   final _guestCtrl = TextEditingController();
   final _hostCtrl = TextEditingController();
-  final _organizerCtrl = TextEditingController(text: 'You');
+  final _organizerNameCtrl = TextEditingController(); // จะดึงชื่อจาก Prefs
   final _contactCtrl = TextEditingController();
   final _maxParticipantsCtrl = TextEditingController();
-  String _department = 'IT';
-  final List<String> _departments = const [
-    'All Departments',
-    'IT',
-    'HR',
-    'Marketing',
-  ];
   final _feeCtrl = TextEditingController();
 
+  // Target Audience Logic
+  String _targetType = 'all'; // all, specific
+  List<String> _selectedTargetDepts = [];
+  List<String> _selectedTargetPositions = [];
+
+  // Details
   final _travelCtrl = TextEditingController();
   final _foodCtrl = TextEditingController();
   final _moreCtrl = TextEditingController();
@@ -52,15 +81,273 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   int _isCompulsory = 0;
 
   @override
+  void initState() {
+    super.initState();
+    _fetchInitialData();
+  }
+
+  // โหลดข้อมูลเริ่มต้น (Dropdown + User Info + Activity Data if Edit)
+  Future<void> _fetchInitialData() async {
+    try {
+      // 1. Fetch Departments
+      final depRes = await http.get(Uri.parse('$baseUrl/departments'));
+      if (depRes.statusCode == 200) {
+        final List data = jsonDecode(utf8.decode(depRes.bodyBytes));
+        setState(() {
+          _dbDepartments = data
+              .map<String>((e) => e['name'].toString())
+              .toList();
+          _dbDepartments.add('Other');
+        });
+      }
+
+      // 2. Fetch Positions
+      final posRes = await http.get(Uri.parse('$baseUrl/positions'));
+      if (posRes.statusCode == 200) {
+        final List data = jsonDecode(utf8.decode(posRes.bodyBytes));
+        setState(() {
+          _dbPositions = data.map<String>((e) => e.toString()).toList();
+        });
+      }
+
+      // 3. Load User Info from Prefs (Set default Organizer Name)
+      final prefs = await SharedPreferences.getInstance();
+      if (!widget.isEdit) {
+        _organizerNameCtrl.text = prefs.getString('name') ?? 'You';
+      }
+
+      // 4. Load Activity Data (ถ้าเป็น Edit)
+      if (widget.initialData != null) {
+        _loadActivityData();
+      }
+    } catch (e) {
+      print("Error fetching initial data: $e");
+    } finally {
+      if (mounted) setState(() => _isLoadingData = false);
+    }
+  }
+
+  void _loadActivityData() {
+    final act = widget.initialData!['ACTIVITY'];
+    final org = widget.initialData!['ORGANIZER'];
+    final sessions = widget.initialData!['SESSIONS'] as List?;
+
+    if (act != null) {
+      _nameCtrl.text = act['ACT_NAME'] ?? '';
+      _descCtrl.text = act['ACT_DESCRIPTIONS'] ?? '';
+      _pointsCtrl.text = (act['ACT_POINT'] ?? 0).toString();
+
+      // Load Type
+      String type = act['ACT_TYPE'] ?? 'Training';
+      if (!_activityTypes.contains(type)) {
+        _selectedType = 'Other';
+        _customTypeCtrl.text = type;
+      } else {
+        _selectedType = type;
+      }
+
+      _selectedStatus = act['ACT_STATUS'] ?? 'Open';
+
+      // Load Host Dept
+      String depName = act['DEP_ID'] ?? '';
+      if (_dbDepartments.contains(depName)) {
+        _selectedHostDept = depName;
+      } else {
+        _selectedHostDept = 'Other';
+        _customHostDeptCtrl.text = depName;
+      }
+
+      _guestCtrl.text = act['ACT_GUEST_SPEAKER'] ?? '';
+      _hostCtrl.text = act['ACT_EVENT_HOST'] ?? '';
+      _maxParticipantsCtrl.text = (act['ACT_MAX_PARTICIPANTS'] ?? 0).toString();
+      _feeCtrl.text = (act['ACT_COST'] ?? 0).toString();
+      _travelCtrl.text = act['ACT_TRAVEL_INFO'] ?? '';
+      _foodCtrl.text = act['ACT_FOOD_INFO'] ?? '';
+      _moreCtrl.text = act['ACT_MORE_DETAILS'] ?? '';
+      _conditionCtrl.text = act['ACT_PARTICIPATION_CONDITION'] ?? '';
+      _isCompulsory = (act['ACT_ISCOMPULSORY'] ?? 0) == 1 ? 1 : 0;
+
+      // Load Target Criteria
+      if (act['ACT_TARGET_CRITERIA'] != null) {
+        try {
+          // API อาจส่งมาเป็น String หรือ Map แล้วแต่การ parse
+          final criteria = act['ACT_TARGET_CRITERIA'] is String
+              ? jsonDecode(act['ACT_TARGET_CRITERIA'])
+              : act['ACT_TARGET_CRITERIA'];
+
+          _targetType = criteria['type'] ?? 'all';
+          if (_targetType == 'specific') {
+            _selectedTargetDepts = List<String>.from(
+              criteria['departments'] ?? [],
+            );
+            _selectedTargetPositions = List<String>.from(
+              criteria['positions'] ?? [],
+            );
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (org != null) {
+      _organizerNameCtrl.text = org['ORG_NAME'] ?? '';
+      _contactCtrl.text = org['ORG_CONTACT_INFO'] ?? '';
+    }
+
+    if (sessions != null && sessions.isNotEmpty) {
+      final first = sessions.first;
+      _locationCtrl.text = first['LOCATION'] ?? '';
+      // Load Date
+      if (first['SESSION_DATE'] != null) {
+        _selectedDate = DateTime.parse(first['SESSION_DATE']);
+      }
+      // Load Time
+      if (first['START_TIME'] != null)
+        _startTime = _parseTime(first['START_TIME']);
+      if (first['END_TIME'] != null) _endTime = _parseTime(first['END_TIME']);
+    }
+  }
+
+  TimeOfDay? _parseTime(String s) {
+    if (s.isEmpty) return null;
+    try {
+      final parts = s.split(':');
+      return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // --- Logic การบันทึกข้อมูล ---
+  Future<void> _submitData() async {
+    if (_nameCtrl.text.isEmpty || _locationCtrl.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please fill in Name and Location")),
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+
+    // 1. Prepare Data
+    final finalType = _selectedType == 'Other'
+        ? _customTypeCtrl.text
+        : _selectedType;
+    final finalHostDept = _selectedHostDept == 'Other'
+        ? _customHostDeptCtrl.text
+        : _selectedHostDept;
+
+    final targetCriteria = {
+      "type": _targetType,
+      "departments": _targetType == 'specific' ? _selectedTargetDepts : [],
+      "positions": _targetType == 'specific' ? _selectedTargetPositions : [],
+    };
+
+    // ใช้ _selectedDate หรือ Default อีก 5 วัน
+    final sessionDate =
+        _selectedDate ?? DateTime.now().add(const Duration(days: 5));
+
+    // Format Time to HH:mm
+    final startStr = _startTime != null
+        ? '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}'
+        : "09:00";
+    final endStr = _endTime != null
+        ? '${_endTime!.hour.toString().padLeft(2, '0')}:${_endTime!.minute.toString().padLeft(2, '0')}'
+        : "12:00";
+
+    final body = {
+      "ACTIVITY": {
+        "ACT_NAME": _nameCtrl.text,
+        "ACT_TYPE": finalType,
+        "ACT_DESCRIPTIONS": _descCtrl.text,
+        "ACT_POINT": int.tryParse(_pointsCtrl.text) ?? 0,
+        "ACT_MAX_PARTICIPANTS": int.tryParse(_maxParticipantsCtrl.text) ?? 0,
+        "DEP_ID": finalHostDept ?? 'General',
+        "ACT_TARGET_CRITERIA": jsonEncode(targetCriteria),
+        "ACT_STATUS": _selectedStatus,
+        "ACT_GUEST_SPEAKER": _guestCtrl.text,
+        "ACT_EVENT_HOST": _hostCtrl.text,
+        "ACT_COST": double.tryParse(_feeCtrl.text) ?? 0.0,
+        "ACT_TRAVEL_INFO": _travelCtrl.text,
+        "ACT_FOOD_INFO": _foodCtrl.text,
+        "ACT_MORE_DETAILS": _moreCtrl.text,
+        "ACT_PARTICIPATION_CONDITION": _conditionCtrl.text,
+        "ACT_ISCOMPULSORY": _isCompulsory,
+      },
+      "ORGANIZER": {
+        "ORG_NAME": _organizerNameCtrl.text,
+        "ORG_CONTACT_INFO": _contactCtrl.text,
+      },
+      "SESSIONS": [
+        {
+          "SESSION_DATE": sessionDate.toIso8601String(),
+          "START_TIME": startStr,
+          "END_TIME": endStr,
+          "LOCATION": _locationCtrl.text,
+        },
+      ],
+    };
+
+    // 2. Send API
+    try {
+      http.Response response;
+      final prefs = await SharedPreferences.getInstance();
+
+      if (widget.isEdit && widget.actId != null) {
+        // Update (PUT)
+        response = await http.put(
+          Uri.parse('$baseUrl/activities/${widget.actId}'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        );
+      } else {
+        // Create (POST)
+        // ดึง empId จากเครื่องเพื่อส่งไปผูกกับ Organizer
+        final empId = prefs.getString('empId') ?? '';
+
+        response = await http.post(
+          Uri.parse('$baseUrl/activities?emp_id=$empId'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        );
+      }
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                widget.isEdit ? "Updated Successfully" : "Created Successfully",
+              ),
+            ),
+          );
+          Navigator.pop(context, true);
+        }
+      } else {
+        final err = jsonDecode(utf8.decode(response.bodyBytes));
+        throw Exception(err['detail'] ?? 'Unknown Error');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Error: $e")));
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  @override
   void dispose() {
-    _pageController.dispose();
     _nameCtrl.dispose();
     _descCtrl.dispose();
+    _customHostDeptCtrl.dispose();
     _locationCtrl.dispose();
     _pointsCtrl.dispose();
+    _customTypeCtrl.dispose();
     _guestCtrl.dispose();
     _hostCtrl.dispose();
-    _organizerCtrl.dispose();
+    _organizerNameCtrl.dispose();
     _contactCtrl.dispose();
     _maxParticipantsCtrl.dispose();
     _feeCtrl.dispose();
@@ -73,92 +360,423 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoadingData) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     return Scaffold(
-      backgroundColor: organizerBg,
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: organizerBg,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
-        ),
+        backgroundColor: Colors.white,
+        leading: const BackButton(color: Colors.black),
         title: Text(
-          widget.isEdit ? 'Edit Activity' : 'Activity Management',
-          style: GoogleFonts.poppins(
+          widget.isEdit ? 'Edit Activity' : 'Create Activity',
+          style: GoogleFonts.inter(
+            color: Colors.black,
             fontWeight: FontWeight.bold,
-            color: const Color(0xFF375987),
           ),
         ),
         centerTitle: true,
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: PageView(
-                controller: _pageController,
-                physics: const NeverScrollableScrollPhysics(),
-                children: [_buildStep1(), _buildStep2(), _buildStep3()],
+        actions: [
+          if (_isSubmitting)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            TextButton(
+              onPressed: _submitData,
+              child: Text(
+                "Save",
+                style: GoogleFonts.inter(
+                  color: const Color(0xFF4A80FF),
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
-            _buildBottomBar(),
-          ],
+        ],
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // --- Section 1: Basic Info ---
+              _buildSectionTitle('Basic Information'),
+              _buildTextField(
+                controller: _nameCtrl,
+                label: 'Activity Name *',
+                hint: 'Ex. AI Workshop 2025',
+              ),
+
+              // Activity Type
+              _buildDropdownField(
+                label: 'Activity Type',
+                value: _selectedType,
+                items: _activityTypes,
+                onChanged: (val) => setState(() => _selectedType = val),
+                hint: 'Select Type',
+              ),
+              if (_selectedType == 'Other')
+                _buildTextField(
+                  controller: _customTypeCtrl,
+                  label: 'Specify Type *',
+                  hint: 'Ex. Outing',
+                ),
+
+              _buildTextField(
+                controller: _descCtrl,
+                label: 'Description',
+                hint: 'Brief detail...',
+                maxLines: 3,
+              ),
+
+              // Status
+              _buildDropdownField(
+                label: 'Status',
+                value: _selectedStatus,
+                items: _statuses,
+                onChanged: (val) => setState(() => _selectedStatus = val),
+                hint: 'Status',
+              ),
+
+              const SizedBox(height: 24),
+              // --- Section 2: Date & Location ---
+              _buildSectionTitle('Date & Location'),
+
+              // Date Picker Button
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Date',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w500),
+                    ),
+                    const SizedBox(height: 6),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: _selectedDate ?? DateTime.now(),
+                          firstDate: DateTime(2000),
+                          lastDate: DateTime(2100),
+                        );
+                        if (picked != null) {
+                          setState(() => _selectedDate = picked);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 14,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[50],
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.grey[300]!),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              _selectedDate != null
+                                  ? "${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}"
+                                  : "Select Date",
+                              style: GoogleFonts.inter(),
+                            ),
+                            const Icon(
+                              Icons.calendar_today,
+                              size: 18,
+                              color: Colors.grey,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildTimeButton('Start Time', _startTime, true),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildTimeButton('End Time', _endTime, false),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              _buildTextField(
+                controller: _locationCtrl,
+                label: 'Location *',
+                hint: 'Ex. Room 303',
+              ),
+
+              const SizedBox(height: 24),
+              // --- Section 3: Host & Organizer ---
+              _buildSectionTitle('Host & Organizer'),
+
+              // Hosting Dept
+              _buildDropdownField(
+                label: 'Hosting Department *',
+                value: _selectedHostDept,
+                items: _dbDepartments.isEmpty ? ['Other'] : _dbDepartments,
+                onChanged: (val) => setState(() => _selectedHostDept = val),
+                hint: 'Who is organizing?',
+              ),
+              if (_selectedHostDept == 'Other')
+                _buildTextField(
+                  controller: _customHostDeptCtrl,
+                  label: 'New Department Name *',
+                  hint: 'Ex. Innovation Lab',
+                ),
+
+              _buildTextField(
+                controller: _hostCtrl,
+                label: 'Event Host (Company/Unit)',
+                hint: 'Ex. Microsoft Thailand',
+              ),
+              _buildTextField(
+                controller: _guestCtrl,
+                label: 'Guest Speaker',
+                hint: 'Ex. Mr. John Doe',
+              ),
+              _buildTextField(
+                controller: _organizerNameCtrl,
+                label: 'Organizer Name',
+                hint: 'Your Name',
+              ),
+              _buildTextField(
+                controller: _contactCtrl,
+                label: 'Contact Info',
+                hint: 'Email or Phone',
+              ),
+
+              const SizedBox(height: 24),
+              // --- Section 4: Target Audience ---
+              _buildSectionTitle('Target Audience & Quota'),
+
+              Text(
+                'Who can join?',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w500),
+              ),
+              Row(
+                children: [
+                  Radio<String>(
+                    value: 'all',
+                    groupValue: _targetType,
+                    onChanged: (v) => setState(() => _targetType = v!),
+                  ),
+                  const Text('Everyone'),
+                  const SizedBox(width: 20),
+                  Radio<String>(
+                    value: 'specific',
+                    groupValue: _targetType,
+                    onChanged: (v) => setState(() => _targetType = v!),
+                  ),
+                  const Text('Specific Group'),
+                ],
+              ),
+
+              if (_targetType == 'specific') ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Departments:',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      Wrap(
+                        spacing: 8,
+                        children: _dbDepartments.where((d) => d != 'Other').map(
+                          (dep) {
+                            final isSel = _selectedTargetDepts.contains(dep);
+                            return FilterChip(
+                              label: Text(dep),
+                              selected: isSel,
+                              onSelected: (val) {
+                                setState(() {
+                                  if (val)
+                                    _selectedTargetDepts.add(dep);
+                                  else
+                                    _selectedTargetDepts.remove(dep);
+                                });
+                              },
+                            );
+                          },
+                        ).toList(),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Positions:',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+                      Wrap(
+                        spacing: 8,
+                        children: _dbPositions.map((pos) {
+                          final isSel = _selectedTargetPositions.contains(pos);
+                          return FilterChip(
+                            label: Text(pos),
+                            selected: isSel,
+                            onSelected: (val) {
+                              setState(() {
+                                if (val)
+                                  _selectedTargetPositions.add(pos);
+                                else
+                                  _selectedTargetPositions.remove(pos);
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildTextField(
+                      controller: _maxParticipantsCtrl,
+                      label: 'Max Participants',
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildTextField(
+                      controller: _pointsCtrl,
+                      label: 'Points',
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                ],
+              ),
+              _buildTextField(
+                controller: _feeCtrl,
+                label: 'Participation Fee (Baht)',
+                keyboardType: TextInputType.number,
+              ),
+
+              const SizedBox(height: 24),
+              // --- Section 5: More Details ---
+              _buildSectionTitle('More Details'),
+              _buildTextField(
+                controller: _foodCtrl,
+                label: 'Food Provided',
+                hint: 'Ex. Lunch Box',
+              ),
+              _buildTextField(
+                controller: _travelCtrl,
+                label: 'Travel Arrangement',
+                hint: 'Ex. Van at BTS Ari',
+              ),
+              _buildTextField(
+                controller: _moreCtrl,
+                label: 'Note / More Details',
+                maxLines: 2,
+              ),
+              _buildTextField(
+                controller: _conditionCtrl,
+                label: 'Condition',
+                hint: 'Ex. Bring your own laptop',
+              ),
+
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  "This is a Compulsory Activity",
+                  style: GoogleFonts.inter(),
+                ),
+                value: _isCompulsory == 1,
+                onChanged: (val) =>
+                    setState(() => _isCompulsory = val! ? 1 : 0),
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+
+              const SizedBox(height: 40),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildBottomBar() {
+  // --- Custom Widgets ---
+
+  Widget _buildSectionTitle(String title) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-      child: Row(
+      padding: const EdgeInsets.only(bottom: 16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (_step > 0)
-            ElevatedButton(
-              onPressed: () {
-                setState(() => _step -= 1);
-                _pageController.animateToPage(
-                  _step,
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeInOut,
-                );
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.black87,
-                elevation: 1,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12.0),
-                ),
+          Text(
+            title,
+            style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          Divider(color: Colors.grey[300], thickness: 1),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    String? hint,
+    TextInputType? keyboardType,
+    int maxLines = 1,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: GoogleFonts.inter(fontWeight: FontWeight.w500)),
+          const SizedBox(height: 6),
+          TextFormField(
+            controller: controller,
+            keyboardType: keyboardType,
+            maxLines: maxLines,
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: GoogleFonts.inter(color: Colors.grey[400]),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.grey[300]!),
               ),
-              child: Text('Previous', style: GoogleFonts.poppins()),
-            ),
-          const Spacer(),
-          ElevatedButton(
-            onPressed: () {
-              if (_step < 2) {
-                setState(() => _step += 1);
-                _pageController.animateToPage(
-                  _step,
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeInOut,
-                );
-              } else {
-                final result = _buildResult();
-                Navigator.pop(context, result);
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFFFD600),
-              foregroundColor: Colors.black87,
-              elevation: 1,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12.0),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.grey[300]!),
               ),
-            ),
-            child: Text(
-              _step < 2 ? 'Next' : (widget.isEdit ? 'Save' : 'Create'),
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+              filled: true,
+              fillColor: Colors.grey[50],
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 14,
+              ),
             ),
           ),
         ],
@@ -166,638 +784,96 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
     );
   }
 
-  Widget _buildLabel(String text) {
+  Widget _buildDropdownField({
+    required String label,
+    required String? value,
+    required List<String> items,
+    required void Function(String?)? onChanged,
+    String? hint,
+  }) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6.0),
-      child: Text(text, style: GoogleFonts.poppins(color: Colors.black87)),
-    );
-  }
-
-  InputDecoration _inputDecoration([String? hint]) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: GoogleFonts.poppins(),
-      filled: true,
-      fillColor: Colors.white,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFFE0E0E0)),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFFE0E0E0)),
-      ),
-    );
-  }
-
-  Widget _buildStep1() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: SingleChildScrollView(
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildLabel('Activity Name :'),
-                      TextField(
-                        controller: _nameCtrl,
-                        decoration: _inputDecoration(),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 130,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildLabel('Type :'),
-                      DropdownButtonFormField<String>(
-                        value: _type,
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'Training',
-                            child: Text('Training'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Seminar',
-                            child: Text('Seminar'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'Workshop',
-                            child: Text('Workshop'),
-                          ),
-                        ],
-                        onChanged: (v) => setState(() => _type = v ?? _type),
-                        decoration: _inputDecoration(),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: GoogleFonts.inter(fontWeight: FontWeight.w500)),
+          const SizedBox(height: 6),
+          DropdownButtonFormField<String>(
+            value: value,
+            isExpanded: true,
+            icon: const Icon(Icons.keyboard_arrow_down_rounded),
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              color: const Color(0xFF222222),
             ),
-            const SizedBox(height: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildLabel('Descriptions :'),
-                TextField(
-                  controller: _descCtrl,
-                  maxLines: 4,
-                  decoration: _inputDecoration(),
-                ),
-              ],
+            items: items.map((String item) {
+              return DropdownMenuItem<String>(value: item, child: Text(item));
+            }).toList(),
+            onChanged: onChanged,
+            decoration: InputDecoration(
+              hintText: hint,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.grey[300]!),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: Colors.grey[300]!),
+              ),
+              filled: true,
+              fillColor: Colors.grey[50],
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 14,
+              ),
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildLabel('Location :'),
-                      TextField(
-                        controller: _locationCtrl,
-                        decoration: _inputDecoration(),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildLabel('Points :'),
-                      TextField(
-                        controller: _pointsCtrl,
-                        keyboardType: const TextInputType.numberWithOptions(),
-                        decoration: _inputDecoration(),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Column(
-              children: [
-                Row(
-                  children: [
-                    Radio<int>(
-                      value: 1,
-                      groupValue: _useRange ? 1 : 0,
-                      onChanged: (_) => setState(() => _useRange = true),
-                    ),
-                    Expanded(
-                      child: Text(
-                        'Select Date Range',
-                        style: GoogleFonts.poppins(),
-                      ),
-                    ),
-                  ],
-                ),
-                Row(
-                  children: [
-                    Radio<int>(
-                      value: 0,
-                      groupValue: _useRange ? 1 : 0,
-                      onChanged: (_) => setState(() => _useRange = false),
-                    ),
-                    Expanded(
-                      child: Text(
-                        'Select Multiple Date',
-                        style: GoogleFonts.poppins(),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                CalendarPicker(
-                  mode: _useRange ? CalendarMode.range : CalendarMode.multi,
-                  initialRange: _dateRange,
-                  initialMulti: _multipleDates,
-                  onRangeChanged: (range) {
-                    setState(() => _dateRange = range);
-                  },
-                  onMultiChanged: (dates) {
-                    setState(() {
-                      _multipleDates
-                        ..clear()
-                        ..addAll(dates);
-                    });
-                  },
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildLabel('Start Time :'),
-                      _buildTimeButton(true),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildLabel('End Time :'),
-                      _buildTimeButton(false),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildStep2() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: SingleChildScrollView(
-        child: Column(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildLabel('Guest Speaker :'),
-                TextField(
-                  controller: _guestCtrl,
-                  decoration: _inputDecoration(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildLabel('Event Host :'),
-                TextField(
-                  controller: _hostCtrl,
-                  decoration: _inputDecoration(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildLabel('Organizer :'),
-                TextField(
-                  controller: _organizerCtrl,
-                  decoration: _inputDecoration(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildLabel('Organizer Contact Info :'),
-                TextField(
-                  controller: _contactCtrl,
-                  decoration: _inputDecoration(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildLabel('Max Participants :'),
-                      TextField(
-                        controller: _maxParticipantsCtrl,
-                        keyboardType: const TextInputType.numberWithOptions(),
-                        decoration: _inputDecoration(),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildLabel('Department :'),
-                      DropdownButtonFormField<String>(
-                        value: _departments.contains(_department)
-                            ? _department
-                            : _departments.first,
-                        items: _departments
-                            .map(
-                              (d) => DropdownMenuItem(value: d, child: Text(d)),
-                            )
-                            .toList(),
-                        onChanged: (v) =>
-                            setState(() => _department = v ?? _department),
-                        decoration: _inputDecoration(),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildLabel('Participation Fee :'),
-                TextField(
-                  controller: _feeCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: _inputDecoration(),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStep3() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: SingleChildScrollView(
-        child: Column(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildLabel('Travel Arrangement :'),
-                TextField(
-                  controller: _travelCtrl,
-                  decoration: _inputDecoration(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildLabel('Food Provided :'),
-                TextField(
-                  controller: _foodCtrl,
-                  decoration: _inputDecoration(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildLabel('More details :'),
-                TextField(
-                  controller: _moreCtrl,
-                  maxLines: 4,
-                  decoration: _inputDecoration(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildLabel('Participation Condition :'),
-                TextField(
-                  controller: _conditionCtrl,
-                  decoration: _inputDecoration(),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Radio<int>(
-                  value: 0,
-                  groupValue: _isCompulsory,
-                  onChanged: (v) => setState(() => _isCompulsory = v ?? 0),
-                ),
-                Text('Normal Activity', style: GoogleFonts.poppins()),
-                const SizedBox(width: 16),
-                Radio<int>(
-                  value: 1,
-                  groupValue: _isCompulsory,
-                  onChanged: (v) => setState(() => _isCompulsory = v ?? 0),
-                ),
-                Text('Compulsory Activity', style: GoogleFonts.poppins()),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _pickDateRange() async {
-    final now = DateTime.now();
-    final res = await showDateRangePicker(
-      context: context,
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 2),
-      initialDateRange: _dateRange,
-    );
-    if (res != null) {
-      setState(() {
-        _dateRange = res;
-        _multipleDates.clear();
-      });
-    }
-  }
-
-  Future<void> _pickMultipleDate() async {
-    final now = DateTime.now();
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: now,
-      firstDate: DateTime(now.year - 1),
-      lastDate: DateTime(now.year + 2),
-    );
-    if (picked != null) {
-      setState(() {
-        _multipleDates.add(DateTime(picked.year, picked.month, picked.day));
-        _dateRange = null;
-      });
-    }
-  }
-
-  Widget _buildTimeButton(bool start) {
-    final value = start ? _startTime : _endTime;
-    return OutlinedButton(
-      onPressed: () async {
-        final res = await showTimePicker(
-          context: context,
-          initialTime: value ?? const TimeOfDay(hour: 9, minute: 0),
-        );
-        if (res != null) {
-          final includesToday = _selectionIncludesToday();
-          if (includesToday && !_isTimeAfterNow(res)) {
-            _showSnack('เวลาในวันนี้ต้องมากกว่าเวลาปัจจุบัน');
-            return;
-          }
-
-          setState(() {
-            if (start) {
-              _startTime = res;
-            } else {
-              _endTime = res;
-            }
-          });
-
-          if (_startTime != null && _endTime != null) {
-            final startMinutes = _startTime!.hour * 60 + _startTime!.minute;
-            final endMinutes = _endTime!.hour * 60 + _endTime!.minute;
-            if (endMinutes <= startMinutes) {
-              _showSnack('เวลาสิ้นสุดต้องมากกว่าเวลาเริ่มต้น');
+  Widget _buildTimeButton(String label, TimeOfDay? time, bool isStart) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: GoogleFonts.inter(fontWeight: FontWeight.w500)),
+        const SizedBox(height: 6),
+        InkWell(
+          onTap: () async {
+            final res = await showTimePicker(
+              context: context,
+              initialTime: time ?? const TimeOfDay(hour: 9, minute: 0),
+            );
+            if (res != null) {
               setState(() {
-                if (!start) {
-                  _endTime = null;
-                }
+                if (isStart)
+                  _startTime = res;
+                else
+                  _endTime = res;
               });
             }
-          }
-        }
-      },
-      style: OutlinedButton.styleFrom(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12.0),
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.grey[300]!),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  time?.format(context) ?? 'Select',
+                  style: GoogleFonts.inter(),
+                ),
+                const Icon(Icons.access_time, size: 18, color: Colors.grey),
+              ],
+            ),
+          ),
         ),
-      ),
-      child: Text(
-        value != null ? value.format(context) : 'Select',
-        style: GoogleFonts.poppins(),
-      ),
+      ],
     );
-  }
-
-  Map<String, dynamic> _buildResult() {
-    List<Map<String, dynamic>> sessions = [];
-    if (_useRange &&
-        _dateRange != null &&
-        _startTime != null &&
-        _endTime != null) {
-      DateTime cur = _dateRange!.start;
-      while (!cur.isAfter(_dateRange!.end)) {
-        sessions.add({
-          'SESSION_DATE': DateTime(
-            cur.year,
-            cur.month,
-            cur.day,
-          ).toIso8601String(),
-          'START_TIME': _startTime!.format(context),
-          'END_TIME': _endTime!.format(context),
-          'LOCATION': _locationCtrl.text.trim(),
-        });
-        cur = cur.add(const Duration(days: 1));
-      }
-    } else if (!_useRange &&
-        _multipleDates.isNotEmpty &&
-        _startTime != null &&
-        _endTime != null) {
-      for (final d in _multipleDates) {
-        sessions.add({
-          'SESSION_DATE': DateTime(d.year, d.month, d.day).toIso8601String(),
-          'START_TIME': _startTime!.format(context),
-          'END_TIME': _endTime!.format(context),
-          'LOCATION': _locationCtrl.text.trim(),
-        });
-      }
-    }
-
-    return {
-      'ACTIVITY': {
-        'ACT_NAME': _nameCtrl.text.trim(),
-        'ACT_TYPE': _type,
-        'ACT_DESCRIPTIONS': _descCtrl.text.trim(),
-        'ACT_POINT': int.tryParse(_pointsCtrl.text.trim()) ?? 0,
-        'ACT_GUEST_SPEAKER': _guestCtrl.text.trim(),
-        'ACT_EVENT_HOST': _hostCtrl.text.trim(),
-        'ACT_MAX_PARTICIPANTS':
-            int.tryParse(_maxParticipantsCtrl.text.trim()) ?? 0,
-        'DEP_ID': _department,
-        'ACT_COST': double.tryParse(_feeCtrl.text.trim()) ?? 0.0,
-        'ACT_TRAVEL_INFO': _travelCtrl.text.trim(),
-        'ACT_FOOD_INFO': _foodCtrl.text.trim(),
-        'ACT_MORE_DETAILS': _moreCtrl.text.trim(),
-        'ACT_PARTICIPATION_CONDITION': _conditionCtrl.text.trim(),
-        'ACT_ISCOMPULSORY': _isCompulsory,
-      },
-      'ORGANIZER': {
-        'ORG_NAME': _organizerCtrl.text.trim(),
-        'ORG_CONTACT_INFO': _contactCtrl.text.trim(),
-      },
-      'SESSIONS': sessions,
-    };
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.initialData != null) {
-      final act = widget.initialData!['ACTIVITY'] as Map<String, dynamic>?;
-      final org = widget.initialData!['ORGANIZER'] as Map<String, dynamic>?;
-      final sessions = (widget.initialData!['SESSIONS'] as List?)
-          ?.cast<Map<String, dynamic>>();
-      if (act != null) {
-        _nameCtrl.text = (act['ACT_NAME'] ?? '').toString();
-        _type = (act['ACT_TYPE'] ?? _type).toString();
-        _descCtrl.text = (act['ACT_DESCRIPTIONS'] ?? '').toString();
-        _pointsCtrl.text = (act['ACT_POINT'] ?? '').toString();
-        _guestCtrl.text = (act['ACT_GUEST_SPEAKER'] ?? '').toString();
-        _hostCtrl.text = (act['ACT_EVENT_HOST'] ?? '').toString();
-        _maxParticipantsCtrl.text = (act['ACT_MAX_PARTICIPANTS'] ?? '')
-            .toString();
-        _department = (act['DEP_ID'] ?? _department).toString();
-        if (!_departments.contains(_department)) {
-          _department = _departments.first;
-        }
-        _feeCtrl.text = (act['ACT_COST'] ?? '').toString();
-        _travelCtrl.text = (act['ACT_TRAVEL_INFO'] ?? '').toString();
-        _foodCtrl.text = (act['ACT_FOOD_INFO'] ?? '').toString();
-        _moreCtrl.text = (act['ACT_MORE_DETAILS'] ?? '').toString();
-        _conditionCtrl.text = (act['ACT_PARTICIPATION_CONDITION'] ?? '')
-            .toString();
-        _isCompulsory =
-            int.tryParse((act['ACT_ISCOMPULSORY'] ?? '0').toString()) ?? 0;
-      }
-      if (org != null) {
-        _organizerCtrl.text = (org['ORG_NAME'] ?? _organizerCtrl.text)
-            .toString();
-        _contactCtrl.text = (org['ORG_CONTACT_INFO'] ?? '').toString();
-      }
-      if (sessions != null && sessions.isNotEmpty) {
-        final dates = <DateTime>[];
-        for (final s in sessions) {
-          final dateStr = (s['SESSION_DATE'] ?? '').toString();
-          if (dateStr.isNotEmpty) {
-            final d = DateTime.tryParse(dateStr);
-            if (d != null) dates.add(DateTime(d.year, d.month, d.day));
-          }
-        }
-        final startStr = (sessions.first['START_TIME'] ?? '').toString();
-        final endStr = (sessions.first['END_TIME'] ?? '').toString();
-        _startTime = _parseTime(startStr);
-        _endTime = _parseTime(endStr);
-        _locationCtrl.text = (sessions.first['LOCATION'] ?? '').toString();
-        if (dates.length <= 1) {
-          _useRange = true;
-          if (dates.isNotEmpty) {
-            final d = dates.first;
-            _dateRange = DateTimeRange(start: d, end: d);
-          }
-        } else {
-          _useRange = false;
-          _multipleDates
-            ..clear()
-            ..addAll(dates);
-        }
-      }
-    }
-  }
-
-  TimeOfDay? _parseTime(String s) {
-    if (s.isEmpty) return null;
-    final parts = s.split(':');
-    if (parts.length < 2) return null;
-    final h = int.tryParse(parts[0]);
-    final m = int.tryParse(parts[1]);
-    if (h == null || m == null) return null;
-    return TimeOfDay(hour: h, minute: m);
-  }
-
-  bool _selectionIncludesToday() {
-    final today = DateTime.now();
-    final t = DateTime(today.year, today.month, today.day);
-    if (_useRange) {
-      if (_dateRange == null) return false;
-      final s = DateTime(
-        _dateRange!.start.year,
-        _dateRange!.start.month,
-        _dateRange!.start.day,
-      );
-      final e = DateTime(
-        _dateRange!.end.year,
-        _dateRange!.end.month,
-        _dateRange!.end.day,
-      );
-      return !t.isBefore(s) && !t.isAfter(e);
-    } else {
-      return _multipleDates.any((d) => DateTime(d.year, d.month, d.day) == t);
-    }
-  }
-
-  bool _isTimeAfterNow(TimeOfDay time) {
-    final now = DateTime.now();
-    final candidate = DateTime(
-      now.year,
-      now.month,
-      now.day,
-      time.hour,
-      time.minute,
-    );
-    return candidate.isAfter(now);
-  }
-
-  void _showSnack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 }

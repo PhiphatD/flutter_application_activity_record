@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'dart:async';
 import 'package:flip_card/flip_card.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // 1. Import
+import 'package:http/http.dart' as http; // 2. Import http
+import 'dart:convert'; // 3. Import json
+import 'package:intl/intl.dart';
 
 class OrganizerProfileScreen extends StatefulWidget {
   const OrganizerProfileScreen({Key? key}) : super(key: key);
@@ -14,17 +19,74 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
   late Timer _timer;
   Duration _duration = const Duration(minutes: 10);
 
-  final String orgName = "Organizer ABC";
-  final String organizerId = "ORG-001";
-  final String organizerRole = "Activity Organizer";
-  final String organizerDepartment = "Engagement";
-  final String avatarUrl = "https://i.pravatar.cc/150?img=32";
-  String qrData = "ORG-001";
+  String empName = "Loading...";
+  String empTitle = "";
+  String empId = "...";
+  String empPosition = "...";
+  String empDepartment = "...";
+  String companyName = "...";
+  String avatarUrl = "https://i.pravatar.cc/150?img=32";
+  String qrData = "";
+
+  String empEmail = "-";
+  String empPhone = "-";
+  String empStartDateFormatted = "-";
+  String serviceDuration = "-";
+
+  final String apiUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
 
   @override
   void initState() {
     super.initState();
+    _fetchOrganizerProfile(); // เรียกฟังก์ชันโหลดข้อมูล
     _startTimer();
+  }
+
+  Future<void> _fetchOrganizerProfile() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? storedEmpId = prefs.getString('empId');
+    if (storedEmpId == null) return;
+
+    try {
+      final response = await http.get(
+        Uri.parse('$apiUrl/employees/$storedEmpId'),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        setState(() {
+          empId = data['EMP_ID'] ?? storedEmpId;
+          empTitle = data['EMP_TITLE_EN'] ?? "";
+          empName = data['EMP_NAME_EN'] ?? "Unknown";
+          empPosition = data['EMP_POSITION'] ?? "-";
+          empDepartment = data['DEP_NAME'] ?? "-";
+          companyName = data['COMPANY_NAME'] ?? "-";
+          empEmail = data['EMP_EMAIL'] ?? "-";
+          empPhone = data['EMP_PHONE'] ?? "-";
+          qrData = empId;
+          if (data['EMP_STARTDATE'] != null) {
+            DateTime startDate = DateTime.parse(data['EMP_STARTDATE']);
+            empStartDateFormatted = DateFormat('d MMM y').format(startDate);
+            _calculateServiceDuration(startDate);
+          }
+        });
+      }
+    } catch (e) {
+      print("Error fetching organizer profile: $e");
+    }
+  }
+
+  void _calculateServiceDuration(DateTime startDate) {
+    final now = DateTime.now();
+    final days = now.difference(startDate).inDays;
+    final years = days ~/ 365;
+    final months = (days % 365) ~/ 30;
+    setState(() {
+      if (years > 0) {
+        serviceDuration = "$years Years ${months > 0 ? '$months Months' : ''}";
+      } else {
+        serviceDuration = "$months Months";
+      }
+    });
   }
 
   @override
@@ -41,7 +103,8 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
             _duration = _duration - const Duration(seconds: 1);
           } else {
             _duration = const Duration(minutes: 10);
-            qrData = "ORG-001_REFRESH_${DateTime.now().millisecondsSinceEpoch}";
+            qrData =
+                "${empId}_REFRESH_${DateTime.now().millisecondsSinceEpoch}";
           }
         });
       }
@@ -55,12 +118,26 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
     return "$twoDigitMinutes:$twoDigitSeconds";
   }
 
+  void _copyToClipboard(String text, String label) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$label copied to clipboard'),
+        duration: const Duration(seconds: 1),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    // ธีมสีเหลืองของ Organizer
+    const Color topGradientColor = Color(0xFFFFF6CC);
+
     return Scaffold(
-      extendBodyBehindAppBar: true,
+      extendBodyBehindAppBar: false, // ปรับไม่ให้ซ้อนทับเหมือน Employee
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: topGradientColor,
         elevation: 0,
         foregroundColor: const Color(0xFF375987),
         title: const Text(
@@ -72,57 +149,110 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
           ),
         ),
         centerTitle: true,
-      ),
-      body: Stack(
-        children: [
-          _buildBackground(),
-          Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  "Organizer " + organizerId,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF375987),
-                  ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(72),
+          child: Column(
+            children: [
+              const Text(
+                'Organizer ID',
+                style: TextStyle(fontSize: 16, color: Color(0xFF375987)),
+              ),
+              Text(
+                empId,
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF375987),
                 ),
-                const SizedBox(height: 8),
-                Container(
-                  margin: const EdgeInsets.symmetric(
-                    vertical: 8.0,
-                    horizontal: 180,
-                  ),
-                  height: 4,
-                  color: const Color.fromARGB(255, 0, 0, 0),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                margin: const EdgeInsets.symmetric(
+                  vertical: 8.0,
+                  horizontal: 180,
                 ),
-                const SizedBox(height: 15),
-                SizedBox(
-                  height: 450,
-                  child: FlipCard(
-                    front: _buildInfoCard(),
-                    back: _buildQrCard(),
-                  ),
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF375987).withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(2),
                 ),
-                SizedBox(width: 15),
-                Text(
-                  'แตะที่บัตรเพื่อพลิก',
-                  style: TextStyle(color: Colors.grey),
-                ),
-              ],
-            ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          // เพิ่มปุ่ม Logout ให้ Organizer ด้วย
+          IconButton(
+            icon: const Icon(Icons.logout, color: Color(0xFF375987)),
+            onPressed: () async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.clear();
+              if (mounted) {
+                Navigator.pushNamedAndRemoveUntil(
+                  context,
+                  '/',
+                  (route) => false,
+                );
+              }
+            },
           ),
         ],
+      ),
+      body: SafeArea(
+        child: Stack(
+          children: [
+            _buildBackground(topGradientColor),
+            SingleChildScrollView(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      height: 450,
+                      child: FlipCard(
+                        direction: FlipDirection.HORIZONTAL,
+                        front: _buildInfoCard(),
+                        back: _buildQrCard(),
+                      ),
+                    ),
+                    const SizedBox(width: 15),
+                    const Padding(
+                      padding: EdgeInsets.only(top: 20.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.touch_app_outlined,
+                            color: Colors.grey,
+                            size: 18,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'แตะที่บัตรเพื่อพลิก',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 30),
+                    _buildInfoSection(),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildBackground() {
+  Widget _buildBackground(Color topColor) {
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [Color(0xFFFFF6CC), Colors.white],
+          colors: [topColor, Colors.white],
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
         ),
@@ -154,7 +284,7 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            orgName,
+            companyName,
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 20,
@@ -162,11 +292,11 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
               color: Color(0xFF375987),
             ),
           ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 30),
           CircleAvatar(radius: 60, backgroundImage: NetworkImage(avatarUrl)),
           const SizedBox(height: 15),
           Text(
-            organizerId,
+            '$empTitle $empName',
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 22,
@@ -182,13 +312,13 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
             child: Divider(color: Colors.black.withOpacity(0.4), thickness: 1),
           ),
           Text(
-            organizerRole,
+            'Position : $empPosition',
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 19, color: Color(0xFF375987)),
           ),
           const SizedBox(height: 5),
           Text(
-            'Department : $organizerDepartment',
+            'Department : $empDepartment',
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 19, color: Color(0xFF375987)),
           ),
@@ -261,6 +391,109 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildInfoSection() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 30),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          _buildInfoTile(
+            icon: Icons.email_outlined,
+            label: "Email",
+            value: empEmail,
+            onTap: () => _copyToClipboard(empEmail, "Email"),
+            actionIcon: Icons.copy,
+          ),
+          const Divider(height: 1, indent: 20, endIndent: 20),
+          _buildInfoTile(
+            icon: Icons.phone_outlined,
+            label: "Phone",
+            value: empPhone,
+            onTap: () => _copyToClipboard(empPhone, "Phone Number"),
+            actionIcon: Icons.call,
+          ),
+          const Divider(height: 1, indent: 20, endIndent: 20),
+          _buildInfoTile(
+            icon: Icons.calendar_today_outlined,
+            label: "Start Date",
+            value: "$empStartDateFormatted",
+            subValue: "Duration: $serviceDuration",
+            showAction: false,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoTile({
+    required IconData icon,
+    required String label,
+    required String value,
+    String? subValue,
+    VoidCallback? onTap,
+    IconData? actionIcon,
+    bool showAction = true,
+  }) {
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF6CC),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: const Color(0xFF375987), size: 22),
+      ),
+      title: Text(
+        label,
+        style: const TextStyle(fontSize: 12, color: Colors.grey),
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF375987),
+            ),
+          ),
+          if (subValue != null)
+            Text(
+              subValue,
+              style: const TextStyle(
+                fontSize: 12,
+                color: Colors.green,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+        ],
+      ),
+      trailing: showAction
+          ? IconButton(
+              icon: Icon(
+                actionIcon ?? Icons.copy,
+                color: Colors.grey.shade400,
+                size: 20,
+              ),
+              onPressed: onTap,
+            )
+          : null,
+      onTap: showAction ? onTap : null,
     );
   }
 }

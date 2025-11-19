@@ -17,7 +17,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   bool _isConfirmPasswordObscured = true;
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
-  final String apiUrl = "http://10.0.2.2:8000";
+  final String apiUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
 
   Future<void> _savePassword() async {
     if (_passwordController.text != _confirmController.text) {

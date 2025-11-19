@@ -15,7 +15,7 @@ class VerifyOtpScreen extends StatefulWidget {
 
 class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
   String _otpCode = "";
-  final String apiUrl = "http://10.0.2.2:8000";
+  final String apiUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
 
   Future<void> _verify() async {
     if (_otpCode.length != 6) return;

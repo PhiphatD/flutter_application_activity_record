@@ -1,9 +1,12 @@
+import 'dart:convert'; // [NEW] สำหรับแปลง JSON
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart'
+    as http; // [NEW] อย่าลืมเพิ่ม http ใน pubspec.yaml
 import 'package:flutter_application_activity_record/theme/app_colors.dart';
 import 'activity_create_screen.dart';
 import 'activity_edit_screen.dart';
-import '../../employee_screens/activities/activity_detail_screen.dart';
+import 'activity_detail_screen.dart';
 import '../profile/organizer_profile_screen.dart';
 
 class ActivityManagementScreen extends StatefulWidget {
@@ -17,94 +20,51 @@ class ActivityManagementScreen extends StatefulWidget {
 class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchText = '';
-  final int _currentOrgId = 1;
+  // สมมติว่า logged in user คือ Organizer นี้ (ในระบบจริงต้องดึงจาก Profile/Session)
+  final String _currentOrgId = 'O0001';
   int _selectedSegment = 0;
+  bool _isLoading = true; // [NEW] สถานะโหลดข้อมูล
 
-  late List<Activity> _activities;
-  late Map<int, List<ActivitySession>> _sessionsByActId;
-  late Map<int, String> _organizerNameByOrgId;
+  List<Activity> _activities = [];
 
   @override
   void initState() {
     super.initState();
-    _activities = [
-      Activity(
-        actId: 1001,
-        orgId: 1,
-        actType: 'Seminar',
-        isCompulsory: 1,
-        point: 10,
-        name: 'Leadership Seminar',
-        currentParticipants: 18,
-        maxParticipants: 30,
-      ),
-      Activity(
-        actId: 1002,
-        orgId: 1,
-        actType: 'Workshop',
-        isCompulsory: 0,
-        point: 15,
-        name: 'Agile Workshop',
-        currentParticipants: 12,
-        maxParticipants: 25,
-      ),
-      Activity(
-        actId: 1003,
-        orgId: 2,
-        actType: 'Seminar',
-        isCompulsory: 0,
-        point: 8,
-        name: 'Tech Trends 2025',
-        currentParticipants: 20,
-        maxParticipants: 40,
-      ),
-      Activity(
-        actId: 1004,
-        orgId: 3,
-        actType: 'Workshop',
-        isCompulsory: 1,
-        point: 20,
-        name: 'Security Best Practices',
-        currentParticipants: 28,
-        maxParticipants: 28,
-      ),
-    ];
-    _sessionsByActId = {
-      1001: [
-        ActivitySession(
-          actId: 1001,
-          location: 'HQ Room A',
-          startTime: DateTime.now().add(const Duration(days: 2, hours: 3)),
-        ),
-      ],
-      1002: [
-        ActivitySession(
-          actId: 1002,
-          location: 'HQ Room B',
-          startTime: DateTime.now().add(const Duration(days: 5)),
-        ),
-      ],
-      1003: [
-        ActivitySession(
-          actId: 1003,
-          location: 'Auditorium',
-          startTime: DateTime.now().add(const Duration(days: 1, hours: 1)),
-        ),
-      ],
-      1004: [
-        ActivitySession(
-          actId: 1004,
-          location: 'Lab 2',
-          startTime: DateTime.now().add(const Duration(days: 7)),
-        ),
-      ],
-    };
-    _organizerNameByOrgId = {1: 'You', 2: 'Alice Wong', 3: 'Raj Patel'};
+    _fetchActivities(); // [NEW] เรียกดึงข้อมูลเมื่อหน้าจอโหลด
     _searchController.addListener(() {
       setState(() {
         _searchText = _searchController.text.trim();
       });
     });
+  }
+
+  // ฟังก์ชันดึงข้อมูลจาก API
+  Future<void> _fetchActivities() async {
+    // ใช้ URL ที่คุณกำหนดมา
+    final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
+    final url = Uri.parse('$baseUrl/activities');
+
+    try {
+      final response = await http.get(url);
+
+      if (response.statusCode == 200) {
+        // แปลง response body เป็น List (ใช้ utf8.decode เพื่อรองรับภาษาไทย)
+        final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+
+        if (mounted) {
+          setState(() {
+            _activities = data.map((json) => Activity.fromJson(json)).toList();
+            _isLoading = false;
+          });
+        }
+      } else {
+        debugPrint('Error fetching activities: ${response.statusCode}');
+        if (mounted) setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      debugPrint('Error connecting to API: $e');
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -115,18 +75,74 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
 
   List<Activity> _filteredActivities(bool mine) {
     return _activities.where((a) {
+      // 1. กรองตาม Tab (กิจกรรมของฉัน vs คนอื่น)
       final byOrg = mine ? a.orgId == _currentOrgId : a.orgId != _currentOrgId;
-      final bySearch =
-          _searchText.isEmpty ||
-          a.name.toLowerCase().contains(_searchText.toLowerCase());
-      return byOrg && bySearch;
+
+      // 2. ถ้าไม่มีคำค้นหา ให้คืนค่าตาม Tab เลย
+      if (_searchText.isEmpty) {
+        return byOrg;
+      }
+
+      // 3. ระบบค้นหาอัจฉริยะ (Smart Search)
+      final searchLower = _searchText
+          .toLowerCase(); // แปลงเป็นตัวเล็กเพื่อให้ค้นหาเจอแม้อักษรใหญ่/เล็กต่างกัน
+
+      // เช็คว่าคำค้นหา ไปตรงกับส่วนใดส่วนหนึ่งของข้อมูลหรือไม่
+      final matchName = a.name.toLowerCase().contains(
+        searchLower,
+      ); // ค้นหาจาก ชื่อกิจกรรม
+      final matchLocation = a.location.toLowerCase().contains(
+        searchLower,
+      ); // ค้นหาจาก สถานที่
+      final matchOrganizer = a.organizerName.toLowerCase().contains(
+        searchLower,
+      ); // ค้นหาจาก ชื่อผู้จัด
+      final matchPoint = a.point.toString().contains(
+        searchLower,
+      ); // ค้นหาจาก คะแนน (เช่น พิมพ์ 200)
+      final matchType = a.actType.toLowerCase().contains(
+        searchLower,
+      ); // (แถม) ค้นหาจาก ประเภทกิจกรรม (Workshop/Seminar)
+
+      // ต้องเป็นกิจกรรมใน Tab นั้น AND ตรงกับเงื่อนไขการค้นหาอย่างน้อย 1 อย่าง
+      return byOrg &&
+          (matchName ||
+              matchLocation ||
+              matchOrganizer ||
+              matchPoint ||
+              matchType);
     }).toList();
   }
 
-  void _deleteActivity(int actId) {
-    setState(() {
-      _activities.removeWhere((a) => a.actId == actId);
-    });
+  void _deleteActivity(String actId) async {
+    final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
+
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/activities/$actId'),
+      );
+
+      if (response.statusCode == 200) {
+        // ลบสำเร็จ -> อัปเดตหน้าจอโดยเอาตัวนั้นออกจาก List
+        setState(() {
+          _activities.removeWhere((a) => a.actId == actId);
+        });
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Activity deleted successfully")),
+          );
+        }
+      } else {
+        throw Exception('Failed to delete');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Error deleting: $e")));
+      }
+    }
   }
 
   @override
@@ -138,11 +154,13 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
         child: Padding(
           padding: const EdgeInsets.only(bottom: 8.0),
           child: FloatingActionButton(
-            onPressed: () {
-              Navigator.push(
+            onPressed: () async {
+              // รอผลลัพธ์เผื่อมีการสร้างกิจกรรมใหม่ จะได้รีเฟรชหน้าจอ
+              await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const CreateActivityScreen()),
               );
+              _fetchActivities(); // รีเฟรชข้อมูลใหม่
             },
             backgroundColor: const Color(0xFF4A80FF),
             child: const Icon(Icons.add, color: Colors.white),
@@ -155,7 +173,12 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
             _buildCustomAppBar(),
             _buildSearchBar(),
             _buildViewSwitcher(),
-            Expanded(child: _buildList(_selectedSegment == 0)),
+            // [UPDATE] แสดง Loading หรือ List
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _buildList(_selectedSegment == 0),
+            ),
           ],
         ),
       ),
@@ -164,93 +187,116 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
 
   Widget _buildList(bool mine) {
     final items = _filteredActivities(mine);
+
     if (items.isEmpty) {
       return Center(
-        child: Text(
-          'No activities',
-          style: GoogleFonts.poppins(color: Colors.grey),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.event_busy, size: 60, color: Colors.grey[300]),
+            const SizedBox(height: 10),
+            Text(
+              'No activities found',
+              style: GoogleFonts.poppins(color: Colors.grey),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton(
+              onPressed: _fetchActivities,
+              child: const Text("Refresh"),
+            ),
+          ],
         ),
       );
     }
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      itemCount: items.length,
-      itemBuilder: (context, index) {
-        final a = items[index];
-        final sessions = _sessionsByActId[a.actId] ?? [];
-        final firstSession = sessions.isNotEmpty ? sessions.first : null;
-        final locationText = firstSession != null
-            ? '${firstSession.location} at : ${_formatTime(firstSession.startTime)}'
-            : '-';
 
-        return _OrganizerActivityCard(
-          id: a.actId.toString(),
-          type: a.actType,
-          title: a.name,
-          location: locationText,
-          organizer: _organizerNameByOrgId[a.orgId] ?? '-',
-          points: a.point,
-          currentParticipants: a.currentParticipants,
-          maxParticipants: a.maxParticipants,
-          isCompulsory: a.isCompulsory == 1,
-          showActions: mine,
-          onEdit: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => EditActivityScreen(actId: a.actId),
-              ),
-            );
-          },
-          onDelete: () async {
-            final ok = await showDialog<bool>(
-              context: context,
-              builder: (ctx) {
-                return AlertDialog(
-                  title: Text(
-                    'Confirm Delete',
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+    return RefreshIndicator(
+      onRefresh: _fetchActivities,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
+        itemCount: items.length,
+        itemBuilder: (context, index) {
+          final a = items[index];
+
+          return _OrganizerActivityCard(
+            status: a.status,
+            id: a.actId,
+            type: a.actType,
+            title: a.name,
+            location: a.location, // [UPDATE] ใช้ข้อมูลจาก API
+            organizer: a.organizerName, // [UPDATE] ใช้ข้อมูลจาก API
+            points: a.point,
+            currentParticipants: a.currentParticipants,
+            maxParticipants: a.maxParticipants,
+            isCompulsory: a.isCompulsory == 1,
+            showActions: mine,
+            onEdit: () async {
+              // 1. ใช้ await เพื่อรอผลลัพธ์ตอนกลับมาจากหน้าแก้ไข
+              final bool? result = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => EditActivityScreen(
+                    actId: a
+                        .actId, // [แก้ไข] ใช้ชื่อ parameter ให้ตรงกับ constructor ของ EditActivityScreen
                   ),
-                  content: Text(
-                    'Delete this activity?',
-                    style: GoogleFonts.poppins(),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: Text('Cancel', style: GoogleFonts.poppins()),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: Text(
-                        'Delete',
-                        style: GoogleFonts.poppins(color: Colors.red),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            );
-            if (ok == true) {
-              _deleteActivity(a.actId);
-            }
-          },
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ActivityDetailScreen(
-                  activityId: a.actId.toString(),
-                  isOrganizerView: true,
                 ),
-              ),
-            );
-          },
-        );
-      },
+              );
+
+              // 2. ถ้ากลับมาพร้อมค่า true (แปลว่ามีการบันทึกสำเร็จ) ให้รีเฟรชข้อมูลใหม่
+              if (result == true) {
+                _fetchActivities();
+              }
+            },
+            onDelete: () async {
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (ctx) {
+                  return AlertDialog(
+                    title: Text(
+                      'Confirm Delete',
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+                    ),
+                    content: Text(
+                      'Delete this activity?',
+                      style: GoogleFonts.poppins(),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: Text('Cancel', style: GoogleFonts.poppins()),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: Text(
+                          'Delete',
+                          style: GoogleFonts.poppins(color: Colors.red),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              );
+              if (ok == true) {
+                _deleteActivity(a.actId);
+              }
+            },
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ActivityDetailScreen(
+                    activityId: a.actId,
+                    isOrganizerView: true,
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 
+  // ... (ส่วน _buildCustomAppBar, _buildSearchBar, _buildViewSwitcher คงเดิม)
   Widget _buildCustomAppBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
@@ -396,53 +442,56 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
       ),
     );
   }
-
-  String _formatDateTime(DateTime dt) {
-    final h = dt.hour.toString().padLeft(2, '0');
-    final m = dt.minute.toString().padLeft(2, '0');
-    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} $h:$m';
-  }
-
-  String _formatTime(DateTime dt) {
-    final h = dt.hour.toString().padLeft(2, '0');
-    final m = dt.minute.toString().padLeft(2, '0');
-    return '$h:$m';
-  }
 }
 
+// [NEW] Updated Activity Model ให้ตรงกับ API
 class Activity {
-  final int actId;
-  final int orgId;
+  final String actId;
+  final String orgId;
+  final String organizerName; // [NEW] เพิ่มตัวแปรเก็บชื่อ
   final String actType;
   final int isCompulsory;
   final int point;
   final String name;
   final int currentParticipants;
   final int maxParticipants;
+  final String status;
+  final String location;
+
   Activity({
     required this.actId,
     required this.orgId,
+    required this.organizerName, // [NEW]
     required this.actType,
     required this.isCompulsory,
     required this.point,
     required this.name,
     required this.currentParticipants,
     required this.maxParticipants,
-  });
-}
-
-class ActivitySession {
-  final int actId;
-  final String location;
-  final DateTime startTime;
-  ActivitySession({
-    required this.actId,
+    required this.status,
     required this.location,
-    required this.startTime,
   });
+
+  factory Activity.fromJson(Map<String, dynamic> json) {
+    return Activity(
+      actId: json['actId']?.toString() ?? '',
+      orgId: json['orgId']?.toString() ?? '',
+      organizerName: json['organizerName'] ?? '-', // [NEW] รับค่าจาก JSON
+      actType: json['actType'] ?? '',
+      isCompulsory: json['isCompulsory'] ?? 0,
+      point: json['point'] ?? 0,
+      name: json['name'] ?? '',
+      currentParticipants: json['currentParticipants'] ?? 0,
+      maxParticipants: json['maxParticipants'] ?? 0,
+      status: json['status'] ?? 'Open',
+      location: json['location'] ?? '-',
+    );
+  }
 }
 
+// ... (Class _OrganizerActivityCard คงเดิม ไม่ต้องแก้ เพราะเรารับค่าผ่าน Constructor แล้ว)
 class _OrganizerActivityCard extends StatelessWidget {
+  final String status;
   final String id;
   final String type;
   final String title;
@@ -472,12 +521,34 @@ class _OrganizerActivityCard extends StatelessWidget {
     required this.onEdit,
     required this.onDelete,
     required this.onTap,
+    required this.status,
   });
 
   @override
   Widget build(BuildContext context) {
     const Color cardBackgroundColor = Colors.white;
     const Color brandBlue = Color(0xFF375987);
+
+    // [UPDATED] กำหนดสีของป้ายสถานะให้ครบทุกแบบ
+    Color statusBg;
+    Color statusText;
+    Color statusBorder;
+
+    if (status == 'Full' || status == 'Closed') {
+      statusBg = Colors.red.shade50;
+      statusText = Colors.red;
+      statusBorder = Colors.red;
+    } else if (status == 'Cancelled') {
+      statusBg = Colors.grey.shade200;
+      statusText = Colors.grey;
+      statusBorder = Colors.grey;
+    } else {
+      // กรณี Open หรืออื่นๆ ให้เป็นสีเขียว
+      statusBg = Colors.green.shade50;
+      statusText = Colors.green.shade700;
+      statusBorder = Colors.green.shade200;
+    }
+
     return Stack(
       children: [
         Container(
@@ -511,25 +582,24 @@ class _OrganizerActivityCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Title Row
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                title,
-                                style: GoogleFonts.kanit(
-                                  fontWeight: FontWeight.w400,
-                                  fontSize: 16,
-                                  color: Colors.black,
-                                ),
+                          child: Padding(
+                            // [UPDATED] เว้นที่ด้านขวาเสมอ เพราะมีป้ายสถานะตลอดเวลา
+                            padding: const EdgeInsets.only(right: 70.0),
+                            child: Text(
+                              title,
+                              style: GoogleFonts.kanit(
+                                fontWeight: FontWeight.w400,
+                                fontSize: 16,
+                                color: Colors.black,
                               ),
-                            ],
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 40),
                       ],
                     ),
                     const Divider(color: Colors.grey),
@@ -651,6 +721,28 @@ class _OrganizerActivityCard extends StatelessWidget {
                     ),
                   ],
                 ),
+              ),
+            ),
+          ),
+        ),
+
+        // [UPDATED] แสดงสถานะเสมอ (เอา if ออกแล้ว)
+        Positioned(
+          top: 12,
+          right: 16,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: statusBg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: statusBorder),
+            ),
+            child: Text(
+              status,
+              style: GoogleFonts.poppins(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: statusText,
               ),
             ),
           ),

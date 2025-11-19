@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../login_screen.dart';
 import 'registration_successful_screen.dart';
+import 'package:calendar_date_picker2/calendar_date_picker2.dart'; // <--- เพิ่มบรรทัดนี้
 
 class OrganizationRegisterScreen extends StatefulWidget {
   const OrganizationRegisterScreen({Key? key}) : super(key: key);
@@ -36,6 +37,7 @@ class _OrganizationRegisterScreenState
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _adminStartDateController = TextEditingController();
 
   bool _isLoading = false;
 
@@ -62,7 +64,7 @@ class _OrganizationRegisterScreenState
   ];
 
   // *** API URL: ใช้ 10.0.2.2:8000 สำหรับ Emulator ***
-  final String apiUrl = "http://10.0.2.2:8000";
+  final String apiUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
 
   @override
   void dispose() {
@@ -76,6 +78,7 @@ class _OrganizationRegisterScreenState
     _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _adminStartDateController.dispose();
     super.dispose();
   }
 
@@ -220,6 +223,9 @@ class _OrganizationRegisterScreenState
           'adminEmail': _emailController.text,
           'adminPhone': _phoneController.text,
           'adminPassword': _passwordController.text,
+          'adminStartDate': _adminStartDateController.text.isNotEmpty
+              ? _adminStartDateController.text
+              : DateTime.now().toString().substring(0, 10),
         }),
       );
 
@@ -366,6 +372,43 @@ class _OrganizationRegisterScreenState
                   validator: _validateRequired,
                 ),
 
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "Start Date",
+                        style: GoogleFonts.inter(fontWeight: FontWeight.w500),
+                      ),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        controller: _adminStartDateController,
+                        readOnly: true,
+                        onTap: _openStartDatePicker,
+                        validator: _validateRequired,
+                        decoration: InputDecoration(
+                          hintText: 'Select Start Date',
+                          prefixIcon: Icon(
+                            Icons.calendar_today,
+                            color: Colors.grey[600],
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide(color: Colors.grey[300]!),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide(color: Colors.grey[300]!),
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey[50],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
                 _buildTextField(
                   controller: _passwordController,
                   label: 'Password *',
@@ -450,6 +493,166 @@ class _OrganizationRegisterScreenState
         ),
       ),
     );
+  }
+
+  // ฟังก์ชันเปิดปฏิทินสวยๆ ด้วย calendar_date_picker2
+  void _openStartDatePicker() async {
+    // 1. เตรียมค่าเริ่มต้น (แปลงจาก Text หรือใช้วันปัจจุบัน)
+    final initialDate = _adminStartDateController.text.isNotEmpty
+        ? DateTime.parse(_adminStartDateController.text)
+        : DateTime.now();
+
+    // ตัวแปรเก็บค่าที่เลือก (ต้องเป็น List เพราะแพ็กเกจนี้รองรับเลือกหลายวัน)
+    List<DateTime?> results = [initialDate];
+
+    // 2. โชว์ Bottom Sheet
+    final values = await showModalBottomSheet<List<DateTime?>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        // เก็บค่าชั่วคราวใน BottomSheet state
+        List<DateTime?> tempDates = [initialDate];
+
+        return StatefulBuilder(
+          builder: (context, setStateBottomSheet) {
+            return Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20),
+                ),
+              ),
+              padding: const EdgeInsets.fromLTRB(0, 16, 0, 0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // --- Header ---
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Select Start Date',
+                          style: GoogleFonts.inter(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFF222222),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 1),
+
+                  // --- Calendar Body (พระเอกของเรา) ---
+                  CalendarDatePicker2(
+                    config: CalendarDatePicker2Config(
+                      calendarType: CalendarDatePicker2Type.single,
+                      selectedDayHighlightColor: Theme.of(
+                        context,
+                      ).colorScheme.primary,
+                      weekdayLabels: [
+                        'Sun',
+                        'Mon',
+                        'Tue',
+                        'Wed',
+                        'Thu',
+                        'Fri',
+                        'Sat',
+                      ],
+                      weekdayLabelTextStyle: GoogleFonts.inter(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      dayTextStyle: GoogleFonts.inter(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      selectedDayTextStyle: GoogleFonts.inter(
+                        color: Theme.of(context).colorScheme.onPrimary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      yearTextStyle: GoogleFonts.inter(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      selectedYearTextStyle: GoogleFonts.inter(
+                        color: Theme.of(context).colorScheme.onPrimary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      firstDate: DateTime(1990),
+                      lastDate: DateTime.now(),
+                      currentDate: DateTime.now(),
+                    ),
+                    value: tempDates,
+                    onValueChanged: (dates) {
+                      setStateBottomSheet(() {
+                        tempDates = dates;
+                      });
+                    },
+                    displayedMonthDate: tempDates.first ?? initialDate,
+                    onDisplayedMonthChanged: (date) {
+                      setStateBottomSheet(() {
+                        tempDates = [DateTime(date.year, date.month, 1)];
+                      });
+                    },
+                  ),
+
+                  // --- Confirm Button ---
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 10, 20, 30),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          // ส่งค่ากลับไปหน้าหลัก
+                          Navigator.pop(context, tempDates);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Theme.of(
+                            context,
+                          ).colorScheme.primary,
+                          foregroundColor: Theme.of(
+                            context,
+                          ).colorScheme.onPrimary,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          'Confirm Date',
+                          style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    // 3. อัปเดตค่าลง Controller เมื่อปิด Bottom Sheet
+    if (values != null && values.isNotEmpty && values[0] != null) {
+      final d = values[0]!;
+      final str =
+          "${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}";
+      setState(() {
+        _adminStartDateController.text = str;
+      });
+    }
   }
 
   Widget _buildSectionTitle(String title) {

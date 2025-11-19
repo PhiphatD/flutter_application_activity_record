@@ -15,7 +15,7 @@ class ForgotPasswordScreen extends StatefulWidget {
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final TextEditingController _emailController = TextEditingController();
   bool _isLoading = false;
-  final String apiUrl = "http://10.0.2.2:8000"; // URL Backend
+  final String apiUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev"; // URL Backend
 
   Future<void> _sendOtp() async {
     if (_emailController.text.isEmpty) {
