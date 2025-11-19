@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-// *** 1. Import หน้า Register ***
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart'; // [1] Import เพิ่ม
+
 import 'register/organization_register_screen.dart';
-// *** 2. Import หน้า Forgot Password ***
 import 'password/forgot_password_screen.dart';
 import '../employee_screens/main/employee_main_screen.dart';
 import '../organizer_screens/main/organizer_main_screen.dart';
@@ -20,73 +22,105 @@ class _LoginScreenState extends State<LoginScreen> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
 
-  // --- 2. แก้ไขเมธอด _login() ---
+  // *** API URL: ใช้ 10.0.2.2:8000 สำหรับ Android Emulator ***
+  // ถ้าใช้ iOS Simulator ใช้ http://localhost:8000
+  // ถ้าใช้เครื่องจริง ใช้ IP เครื่องคอมฯ เช่น http://192.168.1.x:8000
+  final String apiUrl = "http://10.0.2.2:8000";
+
   void _login() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-    setState(() {
-      _isLoading = true;
-    });
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
 
     try {
-      final email = _emailController.text;
-      final password = _passwordController.text;
-      String userRole = await _mockLoginAndGetRole(email, password);
+      final response = await http.post(
+        Uri.parse('$apiUrl/login'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "email": _emailController.text
+              .trim(), // trim() เพื่อตัดช่องว่างหัวท้าย
+          "password": _passwordController.text,
+        }),
+      );
 
-      _navigateToUserMainScreen(userRole);
-      // ไม่ต้อง setState หยุดโหลด เพราะจะย้ายไปหน้าใหม่แล้ว
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+
+        // [2] บันทึกข้อมูลผู้ใช้ลงเครื่อง
+        await _saveUserData(data);
+
+        String role = data['role'];
+        _navigateToUserMainScreen(role);
+      } else {
+        final errorData = jsonDecode(response.body);
+        final errorMessage =
+            errorData['detail'] ?? 'อีเมลหรือรหัสผ่านไม่ถูกต้อง';
+
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(errorMessage)));
+        }
+      }
     } catch (e) {
       print("Login error: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('อีเมลหรือรหัสผ่านไม่ถูกต้อง')),
-      );
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้ (กรุณาเปิด Python Server)',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // --- 3. เพิ่มฟังก์ชันจำลอง API ---
-  Future<String> _mockLoginAndGetRole(String email, String password) async {
-    await Future.delayed(const Duration(milliseconds: 600));
-    final users = <String, Map<String, String>>{
-      'employee@company.com': {'password': '123456', 'role': 'employee'},
-      'organizer@company.com': {'password': '123456', 'role': 'organizer'},
-    };
-    final u = users[email.trim().toLowerCase()];
-    if (u == null) throw Exception('user not found');
-    if (u['password'] != password) throw Exception('invalid password');
-    return u['role']!;
+  // ฟังก์ชันบันทึกข้อมูลลง SharedPreferences
+  Future<void> _saveUserData(Map<String, dynamic> data) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('role', data['role']);
+    await prefs.setString('empId', data['emp_id']);
+    await prefs.setString('name', data['name']);
+
+    // company_id อาจจะเป็น null ได้ในบางกรณี (ถ้าไม่ได้ส่งมา)
+    if (data['company_id'] != null) {
+      await prefs.setString('companyId', data['company_id']);
+    }
+
+    // ตั้งค่าว่า Login แล้ว (เผื่อใช้เช็คใน SplashScreen)
+    await prefs.setBool('isLoggedIn', true);
+
+    print("User data saved: ${data['name']} (${data['role']})");
   }
 
-  // --- 4. เพิ่มฟังก์ชันนำทาง ---
   void _navigateToUserMainScreen(String role) {
     Widget destinationScreen;
 
+    // เช็ค Role (แปลงเป็นตัวเล็กเพื่อความชัวร์)
     switch (role.toLowerCase()) {
       case 'admin':
-        // destinationScreen = const AdminMainScreen(); // Uncomment เมื่อมีหน้า Admin
-        destinationScreen =
-            const OrganizerMainScreen(); // ใช้หน้า Employee แทนชั่วคราว
-        print('Login as: Admin');
+        destinationScreen = const OrganizerMainScreen();
+        print('Navigate to: Organizer/Admin Screen');
         break;
       case 'organizer':
-        // destinationScreen = const OrganizerMainScreen(); // Uncomment เมื่อมีหน้า Organizer
-        destinationScreen =
-            const OrganizerMainScreen(); // ใช้หน้า Employee แทนชั่วคราว
-        print('Login as: Organizer');
+        destinationScreen = const OrganizerMainScreen();
+        print('Navigate to: Organizer/Admin Screen');
         break;
       case 'employee':
       default:
         destinationScreen = const EmployeeMainScreen();
-        print('Login as: Employee');
+        print('Navigate to: Employee Screen');
         break;
     }
 
-    Navigator.pushReplacement(
+    // ใช้ pushAndRemoveUntil เพื่อไม่ให้กด Back กลับมาหน้า Login ได้
+    Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (context) => destinationScreen),
+      (route) => false,
     );
   }
 
@@ -99,6 +133,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ... (ส่วน UI Code เหมือนเดิม ไม่ต้องแก้) ...
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(

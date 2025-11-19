@@ -1,26 +1,68 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../register/registration_successful_screen.dart';
 
-// เราใช้ StatefulWidget เพราะต้องมีการสลับค่า (state) การซ่อน/แสดงรหัสผ่าน
 class ResetPasswordScreen extends StatefulWidget {
-  const ResetPasswordScreen({super.key});
+  final String email; // รับ Email เข้ามา
+  const ResetPasswordScreen({super.key, required this.email});
 
   @override
   State<ResetPasswordScreen> createState() => _ResetPasswordScreenState();
 }
 
 class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
-  // สร้าง State variables 2 ตัว เพื่อควบคุมการซ่อนรหัสผ่าน
   bool _isPasswordObscured = true;
   bool _isConfirmPasswordObscured = true;
+  final _passwordController = TextEditingController();
+  final _confirmController = TextEditingController();
+  final String apiUrl = "http://10.0.2.2:8000";
+
+  Future<void> _savePassword() async {
+    if (_passwordController.text != _confirmController.text) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Passwords do not match')));
+      return;
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('$apiUrl/reset-password'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "email": widget.email,
+          "newPassword": _passwordController.text,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const RegistrationSuccessfulScreen(),
+            ),
+            (Route<dynamic> route) => false,
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to reset password')),
+        );
+      }
+    } catch (e) {
+      print(e);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    // สีน้ำเงินหลักของแอป
     const Color primaryColor = Color(0xFF4A80FF);
-
+    // ... (ใช้ code เดิม แต่เปลี่ยน onPressed ของปุ่ม SAVE เป็น _savePassword และผูก controller)
     return Scaffold(
+      // ... AppBar เดิม ...
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -38,8 +80,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 16),
-
-                // --- ส่วนหัวข้อ ---
                 Text(
                   'Set New Password',
                   style: GoogleFonts.poppins(
@@ -48,96 +88,77 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                     color: Colors.black87,
                   ),
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  'Your new password must be different from your previous password.',
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    color: Colors.black54,
-                    height: 1.5,
-                  ),
-                ),
+                // ...
                 const SizedBox(height: 40),
-
-                // --- ช่องกรอก New Password ---
                 TextFormField(
-                  obscureText: _isPasswordObscured, // ใช้ state ควบคุมการซ่อน
+                  controller: _passwordController, // ผูก
+                  obscureText: _isPasswordObscured,
                   decoration: InputDecoration(
                     labelText: 'New Password',
-                    prefixIcon: Icon(Icons.lock_outline, color: primaryColor),
+                    prefixIcon: const Icon(
+                      Icons.lock_outline,
+                      color: primaryColor,
+                    ),
                     suffixIcon: IconButton(
                       icon: Icon(
                         _isPasswordObscured
                             ? Icons.visibility_off_outlined
                             : Icons.visibility_outlined,
                       ),
-                      onPressed: () {
-                        // สลับค่า state เมื่อกดปุ่ม
-                        setState(() {
-                          _isPasswordObscured = !_isPasswordObscured;
-                        });
-                      },
+                      onPressed: () => setState(
+                        () => _isPasswordObscured = !_isPasswordObscured,
+                      ),
                     ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12.0),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12.0),
-                      borderSide: BorderSide(color: primaryColor, width: 2.0),
+                      borderSide: const BorderSide(
+                        color: primaryColor,
+                        width: 2.0,
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(height: 24),
-
-                // --- ช่องกรอก Confirm New Password ---
                 TextFormField(
-                  obscureText: _isConfirmPasswordObscured, // ใช้ state แยกกัน
+                  controller: _confirmController, // ผูก
+                  obscureText: _isConfirmPasswordObscured,
                   decoration: InputDecoration(
                     labelText: 'Confirm New Password',
-                    prefixIcon: Icon(Icons.lock_outline, color: primaryColor),
+                    prefixIcon: const Icon(
+                      Icons.lock_outline,
+                      color: primaryColor,
+                    ),
                     suffixIcon: IconButton(
                       icon: Icon(
                         _isConfirmPasswordObscured
                             ? Icons.visibility_off_outlined
                             : Icons.visibility_outlined,
                       ),
-                      onPressed: () {
-                        setState(() {
-                          _isConfirmPasswordObscured =
-                              !_isConfirmPasswordObscured;
-                        });
-                      },
+                      onPressed: () => setState(
+                        () => _isConfirmPasswordObscured =
+                            !_isConfirmPasswordObscured,
+                      ),
                     ),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12.0),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12.0),
-                      borderSide: BorderSide(color: primaryColor, width: 2.0),
+                      borderSide: const BorderSide(
+                        color: primaryColor,
+                        width: 2.0,
+                      ),
                     ),
                   ),
                 ),
                 const SizedBox(height: 32),
-
-                // --- ปุ่ม SAVE PASSWORD ---
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () {
-                      // TODO: เพิ่ม Logic การบันทึกรหัสผ่านใหม่
-                      // 1. ตรวจสอบว่ารหัสผ่าน 2 ช่องตรงกัน
-                      // 2. ส่งรหัสใหม่ไปอัปเดตที่ Backend
-                      // 3. ถ้าสำเร็จ (ตามที่คุณขอ):
-                      Navigator.pushAndRemoveUntil(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) =>
-                              const RegistrationSuccessfulScreen(),
-                        ),
-                        (Route<dynamic> route) =>
-                            false, // (route) => false หมายถึงลบทุกหน้าใน Stack
-                      );
-                    },
+                    onPressed: _savePassword, // เรียกฟังก์ชัน
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF434343),
                       padding: const EdgeInsets.symmetric(vertical: 16.0),

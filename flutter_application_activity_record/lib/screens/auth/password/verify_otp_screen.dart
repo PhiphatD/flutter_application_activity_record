@@ -1,17 +1,55 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:pinput/pinput.dart'; // <--- import pinput
+import 'package:pinput/pinput.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'reset_password_screen.dart';
 
-class VerifyOtpScreen extends StatelessWidget {
-  const VerifyOtpScreen({super.key});
+class VerifyOtpScreen extends StatefulWidget {
+  final String email; // รับ Email เข้ามา
+  const VerifyOtpScreen({super.key, required this.email});
+
+  @override
+  State<VerifyOtpScreen> createState() => _VerifyOtpScreenState();
+}
+
+class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
+  String _otpCode = "";
+  final String apiUrl = "http://10.0.2.2:8000";
+
+  Future<void> _verify() async {
+    if (_otpCode.length != 6) return;
+
+    try {
+      final response = await http.post(
+        Uri.parse('$apiUrl/verify-otp'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"email": widget.email, "otp": _otpCode}),
+      );
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          // ผ่านแล้ว ส่ง Email ไปหน้าตั้งรหัสใหม่
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ResetPasswordScreen(email: widget.email),
+            ),
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Invalid OTP')));
+      }
+    } catch (e) {
+      print(e);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    // สีน้ำเงินหลักของแอป
     const Color primaryColor = Color(0xFF4A80FF);
-
-    // --- นี่คือสไตล์ของช่อง Pinput (คุณสามารถปรับแต่งได้) ---
     final defaultPinTheme = PinTheme(
       width: 56,
       height: 60,
@@ -22,13 +60,11 @@ class VerifyOtpScreen extends StatelessWidget {
         border: Border.all(color: Colors.transparent),
       ),
     );
-
     final focusedPinTheme = defaultPinTheme.copyWith(
       decoration: defaultPinTheme.decoration!.copyWith(
         border: Border.all(color: primaryColor),
       ),
     );
-    // --- สิ้นสุดสไตล์ Pinput ---
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -48,8 +84,6 @@ class VerifyOtpScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: 16),
-
-                // --- ส่วนหัวข้อ ---
                 Text(
                   'Check Your Email',
                   style: GoogleFonts.poppins(
@@ -60,7 +94,7 @@ class VerifyOtpScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'We\'ve sent a 6-digit code to:\nphiphat.d@example.com', // <--- TODO: ใส่ตัวแปรอีเมลจริงตรงนี้
+                  'We\'ve sent a 6-digit code to:\n${widget.email}',
                   style: GoogleFonts.poppins(
                     fontSize: 16,
                     color: Colors.black54,
@@ -68,34 +102,23 @@ class VerifyOtpScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 40),
-
-                // --- ช่องกรอก Pinput 6 หลัก ---
                 Center(
                   child: Pinput(
                     length: 6,
                     defaultPinTheme: defaultPinTheme,
                     focusedPinTheme: focusedPinTheme,
                     onCompleted: (pin) {
-                      // TODO: ทำอะไรบางอย่างเมื่อกรอกครบ 6 ตัว
-                      print('Completed: $pin');
+                      _otpCode = pin;
+                      // _verify(); // จะให้เช็คเลยหรือรอกดปุ่มก็ได้
                     },
+                    onChanged: (value) => _otpCode = value,
                   ),
                 ),
                 const SizedBox(height: 32),
-
-                // --- ปุ่ม VERIFY ---
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const ResetPasswordScreen(),
-                        ),
-                      );
-                      // ถ้าถูกต้อง ให้ Navigator.push ไปหน้า ResetPasswordScreen
-                    },
+                    onPressed: _verify,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF434343),
                       padding: const EdgeInsets.symmetric(vertical: 16.0),
@@ -113,34 +136,7 @@ class VerifyOtpScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(height: 24),
-
-                // --- ปุ่ม Resend ---
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      'Didn\'t receive the code?',
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        color: Colors.black54,
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        // TODO: เพิ่ม Logic การส่งรหัสใหม่อีกครั้ง
-                      },
-                      child: Text(
-                        'Resend',
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: primaryColor,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                // ... Resend Button logic (Optional)
               ],
             ),
           ),

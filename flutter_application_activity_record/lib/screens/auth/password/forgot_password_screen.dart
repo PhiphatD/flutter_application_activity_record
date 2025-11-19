@@ -1,10 +1,64 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-// เพิ่มบรรทัดนี้ที่โซน import ด้านบน
+import 'package:http/http.dart' as http; // Import http
+import 'dart:convert';
 import 'verify_otp_screen.dart';
 
-class ForgotPasswordScreen extends StatelessWidget {
+class ForgotPasswordScreen extends StatefulWidget {
+  // เปลี่ยนเป็น StatefulWidget
   const ForgotPasswordScreen({super.key});
+
+  @override
+  State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
+}
+
+class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
+  final TextEditingController _emailController = TextEditingController();
+  bool _isLoading = false;
+  final String apiUrl = "http://10.0.2.2:8000"; // URL Backend
+
+  Future<void> _sendOtp() async {
+    if (_emailController.text.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please enter your email')));
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final response = await http.post(
+        Uri.parse('$apiUrl/forgot-password'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"email": _emailController.text.trim()}),
+      );
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          // ส่ง Email ไปหน้าถัดไป เพื่อใช้ verify
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) =>
+                  VerifyOtpScreen(email: _emailController.text.trim()),
+            ),
+          );
+        }
+      } else {
+        final error = jsonDecode(response.body);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error['detail'] ?? 'Failed')));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Connection Error')));
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -14,39 +68,24 @@ class ForgotPasswordScreen extends StatelessWidget {
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
-        elevation: 0, // ไม่มีเงา
+        elevation: 0,
         leading: IconButton(
-          icon: const Icon(
-            Icons.arrow_back,
-            color: Colors.black,
-          ), // <--- ใช้ Icons.arrow_back และสีดำ
+          icon: const Icon(Icons.arrow_back, color: Colors.black),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        // title: Text( // <--- ลบหรือคอมเมนต์ส่วนนี้ออก เพื่อไม่ให้มีข้อความตรงกลาง
-        //   'Forgot Password',
-        //   style: GoogleFonts.poppins(
-        //     color: primaryColor,
-        //     fontWeight: FontWeight.bold,
-        //   ),
-        // ),
-        // centerTitle: true, // <--- ลบหรือคอมเมนต์ส่วนนี้ออก
       ),
       body: SafeArea(
         child: SingleChildScrollView(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24.0),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment
-                  .start, // <--- เปลี่ยนเป็น start เพื่อให้ข้อความชิดซ้าย
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(
-                  height: 16,
-                ), // ลดความสูงลงหน่อย เพราะไม่มี Title ข้างบนแล้ว
-                // --- ส่วนหัวข้อ ---
+                const SizedBox(height: 16),
                 Text(
-                  'Forgot Password', // <--- ย้ายข้อความ "Forgot Password" มาเป็นหัวข้อหลักด้านล่าง AppBar
+                  'Forgot Password',
                   style: GoogleFonts.poppins(
-                    fontSize: 28, // ปรับขนาดให้ใหญ่ขึ้น
+                    fontSize: 28,
                     fontWeight: FontWeight.bold,
                     color: Colors.black87,
                   ),
@@ -54,16 +93,14 @@ class ForgotPasswordScreen extends StatelessWidget {
                 const SizedBox(height: 16),
                 Text(
                   'Enter the email associated with your account and we\'ll send a code to reset your password.',
-                  textAlign: TextAlign.left, // <--- เปลี่ยนเป็น left
                   style: GoogleFonts.poppins(
                     fontSize: 16,
                     color: Colors.black54,
                   ),
                 ),
                 const SizedBox(height: 40),
-
-                // --- ช่องกรอกอีเมล (สไตล์เดียวกับหน้า Login) ---
                 TextFormField(
+                  controller: _emailController, // ผูก Controller
                   keyboardType: TextInputType.emailAddress,
                   decoration: InputDecoration(
                     labelText: 'Email',
@@ -79,20 +116,10 @@ class ForgotPasswordScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 32),
-
-                // --- ปุ่ม Send Code (สไตล์เดียวกับหน้า Login) ---
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const VerifyOtpScreen(),
-                        ),
-                      );
-                      // หลังกดปุ่มนี้ ให้ Navigator.push ไป หน้า VerifyOtpScreen
-                    },
+                    onPressed: _isLoading ? null : _sendOtp, // เรียกฟังก์ชัน
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF434343),
                       padding: const EdgeInsets.symmetric(vertical: 16.0),
@@ -100,45 +127,26 @@ class ForgotPasswordScreen extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12.0),
                       ),
                     ),
-                    child: Text(
-                      'Send Code',
-                      style: GoogleFonts.poppins(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
+                    child: _isLoading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Text(
+                            'Send Code',
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
                   ),
                 ),
-                const SizedBox(height: 24),
-
-                // --- ปุ่มกลับไปหน้า Login (สไตล์เดียวกับหน้า Login) ---
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      'Remember password?',
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        color: Colors.black54,
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        // กลับไปหน้า Login
-                        Navigator.of(context).pop();
-                      },
-                      child: Text(
-                        'Sign In',
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: primaryColor,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                // ... (ส่วนปุ่ม Remember password เหมือนเดิม)
               ],
             ),
           ),

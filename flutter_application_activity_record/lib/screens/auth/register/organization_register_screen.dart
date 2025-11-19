@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-// *** 1. Import หน้า Login และ Google Fonts ***
-import '../login_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../login_screen.dart';
 import 'registration_successful_screen.dart';
 
 class OrganizationRegisterScreen extends StatefulWidget {
@@ -16,14 +17,28 @@ class _OrganizationRegisterScreenState
     extends State<OrganizationRegisterScreen> {
   final _formKey = GlobalKey<FormState>();
 
+  // --- Controllers for Company Info ---
   final _companyNameController = TextEditingController();
-  String? _businessType;
+  final _taxIdController = TextEditingController();
+  final _addressController = TextEditingController();
+
+  // [NEW] Controller สำหรับ Business Type กรณีเลือก Other
+  final _customBusinessTypeController = TextEditingController();
+  String? _selectedBusinessType;
+
+  // --- Controllers for Admin Info ---
+  // [NEW] Controller สำหรับ Title กรณีเลือก Other
+  final _customAdminTitleController = TextEditingController();
+  String? _selectedAdminTitle;
+
   final _fullNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+
   bool _isLoading = false;
+
   final List<String> _businessTypes = [
     'Technology',
     'Finance & Insurance',
@@ -34,13 +49,28 @@ class _OrganizationRegisterScreenState
     'Education',
     'Real Estate & Construction',
     'Non-Profit',
-    'Other',
+    'Other', // ต้องมีตัวเลือกนี้
   ];
-  String? _selectedBusinessType;
+
+  final List<String> _nameTitles = [
+    'Mr.',
+    'Mrs.',
+    'Ms.',
+    'Dr.',
+    'Prof.',
+    'Other', // ต้องมีตัวเลือกนี้
+  ];
+
+  // *** API URL: ใช้ 10.0.2.2:8000 สำหรับ Emulator ***
+  final String apiUrl = "http://10.0.2.2:8000";
 
   @override
   void dispose() {
     _companyNameController.dispose();
+    _taxIdController.dispose();
+    _addressController.dispose();
+    _customBusinessTypeController.dispose(); // [NEW]
+    _customAdminTitleController.dispose(); // [NEW]
     _fullNameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
@@ -49,124 +79,104 @@ class _OrganizationRegisterScreenState
     super.dispose();
   }
 
-  // *** 2. แก้ไขฟังก์ชันนี้ ให้เรียก Dialog ***
   Future<void> _registerOrganization() async {
-    // 1. ตรวจสอบความถูกต้องของ Form
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-
-    // 2. ตรวจสอบรหัสผ่านว่าตรงกัน
+    if (!_formKey.currentState!.validate()) return;
     if (_passwordController.text != _confirmPasswordController.text) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('รหัสผ่านไม่ตรงกัน')));
       return;
     }
-
-    // 3. ถ้าทุกอย่างถูกต้อง ให้แสดง Dialog
     _showConfirmationDialog();
   }
 
-  // *** 3. เพิ่มฟังก์ชันสำหรับสร้าง Dialog ตามดีไซน์ ***
   Future<void> _showConfirmationDialog() async {
-    // (ใช้ Font 'Inter' ตาม CSS ที่คุณให้มา)
     showDialog(
       context: context,
-      barrierDismissible: false, // ไม่ให้ปิด dialog โดยการแตะข้างนอก
+      barrierDismissible: false,
       builder: (BuildContext dialogContext) {
         return Dialog(
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16.0), // border-radius: 16px
+            borderRadius: BorderRadius.circular(16.0),
           ),
           child: Container(
-            width: 300, // width: 300px
-            padding: const EdgeInsets.all(16.0), // padding: 16px
+            width: 300,
+            padding: const EdgeInsets.all(16.0),
             child: Column(
-              mainAxisSize: MainAxisSize.min, // ให้ Column สูงเท่าที่จำเป็น
+              mainAxisSize: MainAxisSize.min,
               children: [
-                // Content
                 Padding(
-                  padding: const EdgeInsets.all(8.0), // padding: 8px
+                  padding: const EdgeInsets.all(8.0),
                   child: Column(
                     children: [
-                      // Title
                       Text(
                         'Confirm',
                         style: GoogleFonts.inter(
                           fontSize: 16,
-                          fontWeight: FontWeight.w800, // 800 weight
+                          fontWeight: FontWeight.w800,
                           color: const Color(0xFF070707),
                         ),
                       ),
-                      const SizedBox(height: 8), // gap: 8px
-                      // Description
+                      const SizedBox(height: 8),
                       Text(
                         'Your organization account will be created upon confirmation.',
                         textAlign: TextAlign.center,
                         style: GoogleFonts.inter(
                           fontSize: 12,
-                          fontWeight: FontWeight.w400, // 400 weight
-                          color: const Color(0xFF808080), // #808080
+                          fontWeight: FontWeight.w400,
+                          color: const Color(0xFF808080),
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(
-                  height: 20,
-                ), // gap: 20px (ระหว่าง content กับ actions)
-                // Actions
+                const SizedBox(height: 20),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    // Action 1 (Cancel)
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.pop(dialogContext); // ปิด Dialog
-                        },
+                        onPressed: () => Navigator.pop(dialogContext),
                         style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(130, 40), // w:130, h:40
+                          minimumSize: const Size(130, 40),
                           side: const BorderSide(
-                            color: Color(0xFF808080), // #808080
+                            color: Color(0xFF808080),
                             width: 1.5,
                           ),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12.0), // 12px
+                            borderRadius: BorderRadius.circular(12.0),
                           ),
                         ),
                         child: Text(
                           'Cancel',
                           style: GoogleFonts.inter(
                             fontSize: 12,
-                            fontWeight: FontWeight.w600, // 600 weight
+                            fontWeight: FontWeight.w600,
                             color: const Color(0xFF808080),
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8), // gap: 8px
-                    // Action 2 (Confirm)
+                    const SizedBox(width: 8),
                     Expanded(
                       child: ElevatedButton(
                         onPressed: () {
-                          Navigator.pop(dialogContext); // ปิด Dialog
-                          _performRegistration(); // << เรียก Logic การสมัครจริง
+                          Navigator.pop(dialogContext);
+                          _performRegistration();
                         },
                         style: ElevatedButton.styleFrom(
-                          minimumSize: const Size(130, 40), // w:130, h:40
-                          backgroundColor: const Color(0xFF222222), // #222222
+                          minimumSize: const Size(130, 40),
+                          backgroundColor: const Color(0xFF222222),
                           foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12.0), // 12px
+                            borderRadius: BorderRadius.circular(12.0),
                           ),
                         ),
                         child: Text(
                           'Confirm',
                           style: GoogleFonts.inter(
                             fontSize: 16,
-                            fontWeight: FontWeight.w800, // 800 weight
+                            fontWeight: FontWeight.w800,
                             color: Colors.white,
                           ),
                         ),
@@ -182,51 +192,66 @@ class _OrganizationRegisterScreenState
     );
   }
 
-  // *** 4. สร้างฟังก์ชันใหม่สำหรับ Logic การสมัคร (ย้ายมาจาก _registerOrganization) ***
   Future<void> _performRegistration() async {
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isLoading = true);
 
-    // --- TODO: เชื่อมต่อ API/Backend ที่นี่ ---
-    Map<String, dynamic> registrationData = {
-      'companyName': _companyNameController.text,
-      'businessType': _businessType,
-      'adminFullName': _fullNameController.text,
-      'adminEmail': _emailController.text,
-      'adminPhone': _phoneController.text,
-      'adminPassword': _passwordController.text,
-    };
+    // [NEW] Logic การเลือกค่าที่จะส่ง (ถ้าเลือก Other ให้เอาจากช่อง Custom)
+    String finalBusinessType = (_selectedBusinessType == 'Other')
+        ? _customBusinessTypeController.text.trim()
+        : (_selectedBusinessType ?? 'Other');
 
-    print("Sending registration data:");
-    print(registrationData);
+    String finalAdminTitle = (_selectedAdminTitle == 'Other')
+        ? _customAdminTitleController.text.trim()
+        : (_selectedAdminTitle ?? 'Mr.');
 
-    // 4. จำลองการเชื่อมต่อ
-    await Future.delayed(const Duration(seconds: 2));
-
-    // 5. เมื่อเสร็จสิ้น (สมมติว่าสำเร็จ)
-    setState(() {
-      _isLoading = false;
-    });
-
-    // *** 3. เปลี่ยนปลายทาง (Destination) ***
-    if (mounted) {
-      // ลบ SnackBar ออก และเปลี่ยนไปหน้า Success
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(
-          // *** ไปที่หน้า RegistrationSuccessfulScreen ***
-          builder: (context) => const RegistrationSuccessfulScreen(),
-        ),
-        (route) => false,
+    try {
+      final response = await http.post(
+        Uri.parse('$apiUrl/register_organization'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          // Company Info
+          'companyName': _companyNameController.text,
+          'taxId': _taxIdController.text,
+          'address': _addressController.text,
+          'businessType': finalBusinessType, // ใช้ค่าที่คำนวณแล้ว
+          // Admin Info
+          'adminTitle': finalAdminTitle, // ใช้ค่าที่คำนวณแล้ว
+          'adminFullName': _fullNameController.text,
+          'adminEmail': _emailController.text,
+          'adminPhone': _phoneController.text,
+          'adminPassword': _passwordController.text,
+        }),
       );
+
+      if (response.statusCode == 200) {
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const RegistrationSuccessfulScreen(),
+            ),
+            (route) => false,
+          );
+        }
+      } else {
+        final errorData = jsonDecode(response.body);
+        String errorMessage = errorData['detail'] ?? 'Registration failed';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(errorMessage)));
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      print("Registration error: $e");
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Cannot connect to server')));
+      setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // ... (ส่วน Build UI ที่เหลือเหมือนเดิมทั้งหมด) ...
-    // ... (ไม่จำเป็นต้องแก้ไขส่วน UI) ...
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
@@ -242,33 +267,89 @@ class _OrganizationRegisterScreenState
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // --- Section 1: Company Information ---
                 _buildSectionTitle('Company Information'),
+
                 _buildTextField(
                   controller: _companyNameController,
                   label: 'Company Name *',
                   hint: 'Your Company Name',
                   validator: _validateRequired,
                 ),
+
+                _buildTextField(
+                  controller: _taxIdController,
+                  label: 'Tax ID / Registration No. *',
+                  hint: 'Tax ID',
+                  keyboardType: TextInputType.number,
+                  validator: (value) {
+                    if (value == null || value.isEmpty)
+                      return 'Tax ID is required';
+                    if (value.length != 13) return 'Tax ID must be 13 digits';
+                    return null;
+                  },
+                ),
+
+                // Business Type Dropdown
                 _buildDropdownField(
                   label: 'Business Type',
-                  hint: 'Optional',
-                  value: _businessType,
+                  hint: 'Select Type',
+                  value: _selectedBusinessType,
                   items: _businessTypes,
-                  onChanged: (value) {
-                    setState(() {
-                      _businessType = value;
-                    });
-                  },
+                  onChanged: (value) =>
+                      setState(() => _selectedBusinessType = value),
                   prefixIcon: Icons.business,
                 ),
+
+                // [NEW] ช่องกรอก Business Type เอง ถ้าเลือก Other
+                if (_selectedBusinessType == 'Other')
+                  _buildTextField(
+                    controller: _customBusinessTypeController,
+                    label: 'Please specify Business Type *',
+                    hint: 'e.g. Agriculture, Logistics',
+                    validator: _validateRequired, // บังคับกรอกถ้าเลือก Other
+                  ),
+
+                _buildTextField(
+                  controller: _addressController,
+                  label: 'Company Address *',
+                  hint: 'Headquarters Address',
+                  maxLines: 3,
+                  validator: _validateRequired,
+                ),
+
                 const SizedBox(height: 24),
+
+                // --- Section 2: Administrator Account ---
                 _buildSectionTitle('Administrator Account'),
+
+                // Title Dropdown
+                _buildDropdownField(
+                  label: 'Title',
+                  hint: 'Select Title',
+                  value: _selectedAdminTitle,
+                  items: _nameTitles,
+                  onChanged: (value) =>
+                      setState(() => _selectedAdminTitle = value),
+                  prefixIcon: Icons.person_outline,
+                ),
+
+                // [NEW] ช่องกรอก Title เอง ถ้าเลือก Other
+                if (_selectedAdminTitle == 'Other')
+                  _buildTextField(
+                    controller: _customAdminTitleController,
+                    label: 'Please specify Title *',
+                    hint: 'e.g. Gen.',
+                    validator: _validateRequired, // บังคับกรอกถ้าเลือก Other
+                  ),
+
                 _buildTextField(
                   controller: _fullNameController,
                   label: 'Full Name *',
                   hint: 'Your Full Name',
                   validator: _validateRequired,
                 ),
+
                 _buildTextField(
                   controller: _emailController,
                   label: 'Email Address *',
@@ -276,6 +357,7 @@ class _OrganizationRegisterScreenState
                   keyboardType: TextInputType.emailAddress,
                   validator: _validateEmail,
                 ),
+
                 _buildTextField(
                   controller: _phoneController,
                   label: 'Phone Number *',
@@ -283,12 +365,14 @@ class _OrganizationRegisterScreenState
                   keyboardType: TextInputType.phone,
                   validator: _validateRequired,
                 ),
+
                 _buildTextField(
                   controller: _passwordController,
                   label: 'Password *',
                   obscureText: true,
                   validator: _validatePassword,
                 ),
+
                 _buildTextField(
                   controller: _confirmPasswordController,
                   label: 'Confirm Password *',
@@ -303,12 +387,14 @@ class _OrganizationRegisterScreenState
                     return null;
                   },
                 ),
+
                 const SizedBox(height: 32),
+
+                // --- Submit Button ---
                 _isLoading
                     ? const Center(child: CircularProgressIndicator())
                     : ElevatedButton(
-                        onPressed:
-                            _registerOrganization, // <- เรียกฟังก์ชันที่อัปเดตแล้ว
+                        onPressed: _registerOrganization,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.grey[800],
                           minimumSize: const Size(double.infinity, 50),
@@ -319,14 +405,15 @@ class _OrganizationRegisterScreenState
                         child: Text(
                           'Create Your Organization Account',
                           style: GoogleFonts.inter(
-                            // ใช้อะไรก็ได้ แต่ Inter ดูเข้ากันดี
                             fontSize: 16,
                             color: Colors.white,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
+
                 const SizedBox(height: 20),
+
                 Center(
                   child: Wrap(
                     alignment: WrapAlignment.center,
@@ -365,8 +452,6 @@ class _OrganizationRegisterScreenState
     );
   }
 
-  // (Widgets _buildSectionTitle, _buildTextField, _buildDropdownField, และ Validators ทั้งหมดเหมือนเดิม)
-
   Widget _buildSectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16.0),
@@ -375,11 +460,7 @@ class _OrganizationRegisterScreenState
         children: [
           Text(
             title,
-            style: GoogleFonts.inter(
-              // ใช้อะไรก็ได้ แต่ Inter ดูเข้ากันดี
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-            ),
+            style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.bold),
           ),
           Divider(color: Colors.grey[300], thickness: 1),
         ],
@@ -393,6 +474,7 @@ class _OrganizationRegisterScreenState
     String? hint,
     bool obscureText = false,
     TextInputType? keyboardType,
+    int maxLines = 1,
     String? Function(String?)? validator,
   }) {
     return Padding(
@@ -406,6 +488,7 @@ class _OrganizationRegisterScreenState
             controller: controller,
             obscureText: obscureText,
             keyboardType: keyboardType,
+            maxLines: maxLines,
             validator: validator,
             decoration: InputDecoration(
               hintText: hint,
