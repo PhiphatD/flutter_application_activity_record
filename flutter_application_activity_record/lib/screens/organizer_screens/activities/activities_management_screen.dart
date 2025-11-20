@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:flutter_application_activity_record/theme/app_colors.dart';
+
 import 'activity_create_screen.dart';
 import 'activity_edit_screen.dart';
 import 'activity_detail_screen.dart';
@@ -21,7 +21,12 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchText = '';
   final String _currentOrgId = 'O0001'; // Mock ID
+  List<String> _selectedTypes = []; // เก็บ Type ที่เลือก
+  String? _selectedStatus; // เก็บ Status ที่เลือก
+  List<String> _availableTypes = []; // เก็บ Type ทั้งหมดที่มีใน DB (ดึง Auto)
 
+  int _filterCompulsoryIndex = 0; // 0=All, 1=Compulsory, 2=Optional
+  bool _filterOnlyAvailable = false; // Hide activities that are fully booked
   // 0 = My Activities, 1 = Other Organizers
   int _selectedOwnerSegment = 0;
 
@@ -51,10 +56,16 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+        final loadedActivities = data
+            .map((json) => Activity.fromJson(json))
+            .toList();
 
+        // [NEW] ดึง Type ที่ไม่ซ้ำกันออกมาเพื่อทำตัวเลือก Filter
+        final types = loadedActivities.map((a) => a.actType).toSet().toList();
         if (mounted) {
           setState(() {
             _activities = data.map((json) => Activity.fromJson(json)).toList();
+            _availableTypes = types;
             _isLoading = false;
           });
         }
@@ -102,6 +113,31 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
         timeMatch = actDate.isBefore(today);
       }
 
+      // [NEW] 3. Filter by Type (Multiple selection)
+      if (_selectedTypes.isNotEmpty && !_selectedTypes.contains(a.actType)) {
+        return false;
+      }
+
+      // [NEW] 4. Filter by Status (Single selection)
+      if (_selectedStatus != null && a.status != _selectedStatus) {
+        return false;
+      }
+
+      // [NEW] 5. Filter by Compulsory
+      if (_filterCompulsoryIndex == 1 && a.isCompulsory == 0)
+        return false; // เลือก Compulsory แต่กิจกรรมไม่ใช่
+      if (_filterCompulsoryIndex == 2 && a.isCompulsory == 1)
+        return false; // เลือก Optional แต่กิจกรรมเป็น Compulsory
+
+      // [NEW] 6. Filter by Availability (Hide Full)
+      if (_filterOnlyAvailable) {
+        // ถ้าเต็มแล้ว (และไม่ใช่ 0/0) ให้ซ่อน
+        if (a.maxParticipants > 0 &&
+            a.currentParticipants >= a.maxParticipants) {
+          return false;
+        }
+      }
+
       // 3. Filter by Search Text
       if (_searchText.isEmpty) {
         return ownerMatch && timeMatch;
@@ -141,6 +177,269 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     return groups;
   }
 
+  // --- Helper Widgets สำหรับ Filter Modal ---
+  Widget _buildBackground() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          // สีเริ่มจากเหลืองอ่อน (Organizer Theme) ไล่ลงมาเป็นสีขาว
+          colors: [Color(0xFFFFF6CC), Colors.white],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          // ปรับจุดหยุดของสีเหลืองให้ลงมาลึกหน่อย เพื่อให้ครอบคลุมส่วน Header
+          stops: [0.0, 0.4],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRadioOption(String label, int index, StateSetter setStateModal) {
+    final isSelected = _filterCompulsoryIndex == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          setStateModal(() => _filterCompulsoryIndex = index);
+          setState(() {}); // อัปเดตหน้าหลักด้วย
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: isSelected ? const Color(0xFF4A80FF) : Colors.transparent,
+            borderRadius: BorderRadius.circular(11),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              color: isSelected ? Colors.white : Colors.black87,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVerticalDivider() {
+    return Container(width: 1, height: 24, color: Colors.grey.shade300);
+  }
+
+  // [NEW] ฟังก์ชันแสดงหน้าต่างกรอง
+  void _showFilterModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateModal) {
+            return SafeArea(
+              child: Container(
+                padding: const EdgeInsets.all(24),
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.85,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            "Filter Activities",
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              setState(() {
+                                _selectedTypes.clear();
+                                _selectedStatus = null;
+                                _filterCompulsoryIndex = 0;
+                                _filterOnlyAvailable = false;
+                              });
+                              Navigator.pop(context);
+                            },
+                            child: Text(
+                              "Reset",
+                              style: GoogleFonts.poppins(color: Colors.red),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // 1. Type
+                      Text(
+                        "Type",
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _availableTypes.map((type) {
+                          final isSelected = _selectedTypes.contains(type);
+                          return FilterChip(
+                            label: Text(type),
+                            selected: isSelected,
+                            selectedColor: const Color(0xFFFFF6CC),
+                            checkmarkColor: Colors.orange.shade900,
+                            labelStyle: GoogleFonts.poppins(
+                              color: isSelected
+                                  ? Colors.orange.shade900
+                                  : Colors.black87,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                            onSelected: (bool selected) {
+                              setStateModal(() {
+                                if (selected)
+                                  _selectedTypes.add(type);
+                                else
+                                  _selectedTypes.remove(type);
+                              });
+                              setState(() {});
+                            },
+                          );
+                        }).toList(),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // 2. Status
+                      Text(
+                        "Status",
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: ['Open', 'Full', 'Closed', 'Canceled'].map((
+                          status,
+                        ) {
+                          final isSelected = _selectedStatus == status;
+                          return ChoiceChip(
+                            label: Text(status),
+                            selected: isSelected,
+                            selectedColor: const Color(0xFFE6EFFF),
+                            labelStyle: GoogleFonts.poppins(
+                              color: isSelected
+                                  ? const Color(0xFF375987)
+                                  : Colors.black87,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                            onSelected: (bool selected) {
+                              setStateModal(() {
+                                _selectedStatus = selected ? status : null;
+                              });
+                              setState(() {});
+                            },
+                          );
+                        }).toList(),
+                      ),
+
+                      const SizedBox(height: 20),
+                      const Divider(),
+                      const SizedBox(height: 10),
+
+                      // 3. Compulsory
+                      Text(
+                        "Requirement",
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            _buildRadioOption("All", 0, setStateModal),
+                            _buildVerticalDivider(),
+                            _buildRadioOption("Compulsory", 1, setStateModal),
+                            _buildVerticalDivider(),
+                            _buildRadioOption("Optional", 2, setStateModal),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // 4. Availability
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            "Show Available Only",
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Switch(
+                            value: _filterOnlyAvailable,
+                            activeColor: const Color(0xFF4A80FF),
+                            onChanged: (val) {
+                              setStateModal(() => _filterOnlyAvailable = val);
+                              setState(() {});
+                            },
+                          ),
+                        ],
+                      ),
+                      Text(
+                        "Hide activities that are fully booked",
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+
+                      const SizedBox(height: 30),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF4A80FF),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          child: Text(
+                            "Apply Filters",
+                            style: GoogleFonts.poppins(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _deleteActivity(String actId) async {
     final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
     try {
@@ -169,7 +468,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: organizerBg,
+      // ไม่ต้องกำหนด backgroundColor ที่ Scaffold เพราะเราจะใช้ Stack ทับ
       floatingActionButton: SafeArea(
         bottom: true,
         child: Padding(
@@ -187,21 +486,31 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
           ),
         ),
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildCustomAppBar(),
-            _buildSearchBar(),
-            _buildOwnerSegment(), // [1] My Activity / Other
-            _buildTimeFilter(), // [2] Active / History (New)
-            const Divider(height: 1, thickness: 1, color: Color(0xFFEEEEEE)),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _buildGroupedList(),
+      body: Stack(
+        // [NEW] ใช้ Stack เพื่อซ้อนพื้นหลัง
+        children: [
+          _buildBackground(), // [NEW] วางพื้นหลังไว้ล่างสุด
+          // เนื้อหาเดิม
+          SafeArea(
+            child: Column(
+              children: [
+                _buildCustomAppBar(),
+                _buildSearchBar(),
+                _buildOwnerSegment(),
+                _buildTimeFilter(),
+
+                // ปรับ Divider ให้จางลงหน่อยเพื่อให้เข้ากับพื้นหลังใหม่
+                const Divider(height: 1, thickness: 1, color: Colors.black12),
+
+                Expanded(
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _buildGroupedList(),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -446,33 +755,72 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   }
 
   Widget _buildSearchBar() {
+    // เช็คว่ามีการใช้ Filter อยู่หรือไม่ (ถ้าใช้จะเปลี่ยนสีปุ่ม)
+    final hasFilter =
+        _selectedTypes.isNotEmpty ||
+        _selectedStatus != null ||
+        _filterCompulsoryIndex != 0 ||
+        _filterOnlyAvailable;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12.0),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 10.0,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: TextField(
-          controller: _searchController,
-          decoration: InputDecoration(
-            hintText: 'Search activities...',
-            hintStyle: GoogleFonts.poppins(),
-            prefixIcon: Icon(Icons.search, color: Colors.grey.shade500),
-            border: InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 20.0,
-              vertical: 15.0,
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12.0),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 10.0,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search activities...',
+                  hintStyle: GoogleFonts.poppins(color: Colors.grey[400]),
+                  prefixIcon: Icon(Icons.search, color: Colors.grey.shade500),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 20.0,
+                    vertical: 15.0,
+                  ),
+                ),
+              ),
             ),
           ),
-        ),
+          const SizedBox(width: 12),
+
+          // [NEW] Filter Button
+          GestureDetector(
+            onTap: _showFilterModal,
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                // ถ้ามี Filter ให้เป็นสีน้ำเงิน ถ้าไม่มีเป็นสีขาว
+                color: hasFilter ? const Color(0xFF4A80FF) : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 10.0,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.filter_list_rounded,
+                color: hasFilter
+                    ? Colors.white
+                    : Colors.grey.shade700, // เปลี่ยนสีไอคอน
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

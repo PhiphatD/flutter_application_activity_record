@@ -40,7 +40,11 @@ class _CalendarPickerState extends State<CalendarPicker> {
   void initState() {
     super.initState();
     final now = DateTime.now();
-    _visibleMonth = DateTime((widget.initialMonth ?? now).year, (widget.initialMonth ?? now).month, 1);
+    _visibleMonth = DateTime(
+      (widget.initialMonth ?? now).year,
+      (widget.initialMonth ?? now).month,
+      1,
+    );
     if (widget.initialRange != null) {
       _start = _stripTime(widget.initialRange!.start);
       _end = _stripTime(widget.initialRange!.end);
@@ -55,23 +59,41 @@ class _CalendarPickerState extends State<CalendarPicker> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8)]),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 8),
+        ],
+      ),
       padding: const EdgeInsets.all(8),
       child: Column(
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              IconButton(onPressed: _prevMonth, icon: const Icon(Icons.chevron_left)),
+              IconButton(
+                onPressed: _prevMonth,
+                icon: const Icon(Icons.chevron_left),
+              ),
               Row(
                 children: [
                   InkWell(
                     onTap: _pickMonth,
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(color: organizerBg, borderRadius: BorderRadius.circular(12)),
-                      child: Text(_monthName(_visibleMonth.month), style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: organizerBg,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        _monthName(_visibleMonth.month),
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -79,14 +101,26 @@ class _CalendarPickerState extends State<CalendarPicker> {
                     onTap: _pickYear,
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(color: organizerBg, borderRadius: BorderRadius.circular(12)),
-                      child: Text('${_visibleMonth.year}', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: organizerBg,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${_visibleMonth.year}',
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                      ),
                     ),
                   ),
                 ],
               ),
-              IconButton(onPressed: _nextMonth, icon: const Icon(Icons.chevron_right)),
+              IconButton(
+                onPressed: _nextMonth,
+                icon: const Icon(Icons.chevron_right),
+              ),
             ],
           ),
           const SizedBox(height: 6),
@@ -96,7 +130,10 @@ class _CalendarPickerState extends State<CalendarPicker> {
               for (final d in ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'])
                 Expanded(
                   child: Center(
-                    child: Text(d, style: GoogleFonts.poppins(color: Colors.black54)),
+                    child: Text(
+                      d,
+                      style: GoogleFonts.poppins(color: Colors.black54),
+                    ),
                   ),
                 ),
             ],
@@ -109,8 +146,16 @@ class _CalendarPickerState extends State<CalendarPicker> {
   }
 
   List<Widget> _buildWeeks() {
-    final firstDayOfMonth = DateTime(_visibleMonth.year, _visibleMonth.month, 1);
-    final lastDayOfMonth = DateTime(_visibleMonth.year, _visibleMonth.month + 1, 0);
+    final firstDayOfMonth = DateTime(
+      _visibleMonth.year,
+      _visibleMonth.month,
+      1,
+    );
+    final lastDayOfMonth = DateTime(
+      _visibleMonth.year,
+      _visibleMonth.month + 1,
+      0,
+    );
     final startOffset = _weekdayIndex(firstDayOfMonth.weekday);
     final totalDays = lastDayOfMonth.day;
     final cells = <DateTime?>[];
@@ -125,11 +170,14 @@ class _CalendarPickerState extends State<CalendarPicker> {
     }
     final rows = <Widget>[];
     for (int i = 0; i < cells.length; i += 7) {
-      rows.add(Row(
-        children: [
-          for (int j = 0; j < 7; j++) Expanded(child: _buildDayCell(cells[i + j])),
-        ],
-      ));
+      rows.add(
+        Row(
+          children: [
+            for (int j = 0; j < 7; j++)
+              Expanded(child: _buildDayCell(cells[i + j])),
+          ],
+        ),
+      );
       rows.add(const SizedBox(height: 4));
     }
     return rows;
@@ -144,7 +192,9 @@ class _CalendarPickerState extends State<CalendarPicker> {
     final isPast = _stripTime(day).isBefore(_stripTime(DateTime.now()));
     final bgColor = isSelected
         ? chipSelectedYellow
-        : (isInRange ? chipSelectedYellow.withOpacity(0.25) : Colors.transparent);
+        : (isInRange
+              ? chipSelectedYellow.withOpacity(0.25)
+              : Colors.transparent);
     final textColor = (!widget.allowPast && isPast)
         ? Colors.grey
         : (isSelected ? Colors.black : Colors.black87);
@@ -161,7 +211,13 @@ class _CalendarPickerState extends State<CalendarPicker> {
               : null,
         ),
         alignment: Alignment.center,
-        child: Text('${day.day}', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: textColor)),
+        child: Text(
+          '${day.day}',
+          style: GoogleFonts.poppins(
+            fontWeight: FontWeight.w600,
+            color: textColor,
+          ),
+        ),
       ),
     );
   }
@@ -186,9 +242,15 @@ class _CalendarPickerState extends State<CalendarPicker> {
                   Navigator.pop(ctx);
                 },
                 child: Container(
-                  decoration: BoxDecoration(color: organizerBg, borderRadius: BorderRadius.circular(12)),
+                  decoration: BoxDecoration(
+                    color: organizerBg,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   alignment: Alignment.center,
-                  child: Text(_monthName(m), style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                  child: Text(
+                    _monthName(m),
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                  ),
                 ),
               );
             }).toList(),
@@ -210,7 +272,10 @@ class _CalendarPickerState extends State<CalendarPicker> {
             itemBuilder: (c, i) {
               final y = years[i];
               return ListTile(
-                title: Text('$y', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                title: Text(
+                  '$y',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                ),
                 onTap: () {
                   setState(() {
                     _visibleMonth = DateTime(y, _visibleMonth.month, 1);
@@ -240,7 +305,11 @@ class _CalendarPickerState extends State<CalendarPicker> {
           _start = d;
         }
       }
-      widget.onRangeChanged?.call(_start != null && _end != null ? DateTimeRange(start: _start!, end: _end!) : null);
+      widget.onRangeChanged?.call(
+        _start != null && _end != null
+            ? DateTimeRange(start: _start!, end: _end!)
+            : null,
+      );
     } else {
       if (widget.singleSelection) {
         _multi
@@ -253,7 +322,9 @@ class _CalendarPickerState extends State<CalendarPicker> {
           _multi.add(d);
         }
       }
-      widget.onMultiChanged?.call(_multi.toList()..sort((a, b) => a.compareTo(b)));
+      widget.onMultiChanged?.call(
+        _multi.toList()..sort((a, b) => a.compareTo(b)),
+      );
     }
     setState(() {});
   }
@@ -292,7 +363,20 @@ class _CalendarPickerState extends State<CalendarPicker> {
   DateTime _stripTime(DateTime d) => DateTime(d.year, d.month, d.day);
 
   String _monthName(int m) {
-    const names = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const names = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
     return names[m - 1];
   }
 }

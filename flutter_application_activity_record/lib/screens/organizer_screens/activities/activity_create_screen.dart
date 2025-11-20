@@ -53,7 +53,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
 
   // Status Dropdown
   String? _selectedStatus = 'Open';
-  final List<String> _statuses = ['Open', 'Full', 'Closed', 'Cancelled'];
+  final List<String> _statuses = ['Open', 'Full', 'Closed', 'Canceled'];
 
   // Date & Time
   TimeOfDay? _startTime;

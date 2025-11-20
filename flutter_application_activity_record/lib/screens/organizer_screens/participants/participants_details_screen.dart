@@ -4,12 +4,20 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:flutter_application_activity_record/theme/app_colors.dart';
+import 'enterprise_scanner_screen.dart';
+import 'activities/activity_qr_display_screen.dart';
 
 class ParticipantsDetailsScreen extends StatefulWidget {
   final String activityId;
   final String activityName;
   final DateTime activityDate;
   final String location;
+  final bool isHistory;
+
+  // [NEW] เพิ่ม Field เหล่านี้เพื่อใช้คำนวณเวลาในหน้า QR
+  final String startTime;
+  final String endTime;
+  final int isCompulsory;
 
   const ParticipantsDetailsScreen({
     super.key,
@@ -17,6 +25,11 @@ class ParticipantsDetailsScreen extends StatefulWidget {
     required this.activityName,
     required this.activityDate,
     required this.location,
+    required this.isHistory,
+    // [NEW] รับค่าเพิ่ม
+    this.startTime = "-",
+    this.endTime = "-",
+    this.isCompulsory = 0,
   });
 
   @override
@@ -68,6 +81,8 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
             _totalJoined = joined;
             _isLoading = false;
           });
+          // Apply filter again in case search query exists
+          if (_searchQuery.isNotEmpty) _filterList(_searchQuery);
         }
       } else {
         if (mounted) setState(() => _isLoading = false);
@@ -93,6 +108,255 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
     });
   }
 
+  // --- [NEW LOGIC START] ส่วนจัดการ Check-in ---
+
+  // 1. ฟังก์ชันคำนวณเวลา (เอาไว้โชว์ใน QR Screen)
+  String _getValidTimeRange() {
+    if (widget.startTime == "-" || widget.endTime == "-") return "TBA";
+    try {
+      final start = DateFormat("HH:mm").parse(widget.startTime);
+      // เปิดให้เช็คอินก่อน 1 ชม.
+      final openTime = start.subtract(const Duration(hours: 1));
+
+      DateTime closeTime;
+      if (widget.isCompulsory == 1) {
+        // งานบังคับ: ปิดหลังเริ่ม 30 นาที
+        closeTime = start.add(const Duration(minutes: 30));
+      } else {
+        // งานทั่วไป: ปิดตอนจบงาน
+        closeTime = DateFormat("HH:mm").parse(widget.endTime);
+      }
+      return "${DateFormat('HH:mm').format(openTime)} - ${DateFormat('HH:mm').format(closeTime)}";
+    } catch (e) {
+      return "${widget.startTime} - ${widget.endTime}";
+    }
+  }
+
+  // 2. แสดง Modal เลือกโหมด
+  void _showCheckInOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 20.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 15),
+                  child: Text(
+                    "Check-in Mode",
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                // Option 1: Scan Employee
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.qr_code_scanner,
+                      color: Colors.blue,
+                    ),
+                  ),
+                  title: Text(
+                    "Scan Employee QR",
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    "Organizer scans employee's phone",
+                    style: GoogleFonts.poppins(fontSize: 12),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _openScanner();
+                  },
+                ),
+                const Divider(indent: 20, endIndent: 20),
+                // Option 2: Show Event QR
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.qr_code_2, color: Colors.orange),
+                  ),
+                  title: Text(
+                    "Show Event QR",
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    "Employee scans this screen",
+                    style: GoogleFonts.poppins(fontSize: 12),
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _openEventQrDisplay();
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // 3. เปิดหน้า Scanner
+  void _openScanner() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const EnterpriseScannerScreen()),
+    );
+
+    if (result != null && mounted) {
+      if (result == "SHOW_MY_QR") {
+        // กรณีเผื่อไว้
+        _openEventQrDisplay();
+      } else {
+        // ได้ QR Code (EMP_ID) -> ยิง API
+        _processCheckIn(result);
+      }
+    }
+  }
+
+  // 4. เปิดหน้าแสดง QR กิจกรรม
+  void _openEventQrDisplay() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ActivityQrDisplayScreen(
+          activityName: widget.activityName,
+          actId: widget.activityId,
+          qrData: "ACTION:CHECKIN|ACT_ID:${widget.activityId}",
+          timeInfo: _getValidTimeRange(), // ส่งเวลาที่คำนวณแล้วไปแสดง
+        ),
+      ),
+    );
+  }
+
+  // 5. ฟังก์ชันยิง API Check-in
+  Future<void> _processCheckIn(String empId) async {
+    // Show Loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/checkin'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "emp_id": empId,
+          "act_id": widget.activityId,
+          "scanned_by": "organizer",
+        }),
+      );
+
+      // Hide Loading
+      if (mounted) Navigator.pop(context);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        _showResultDialog(
+          isSuccess: true,
+          title: "Check-in Success!",
+          message: "${data['emp_name']}\nEarned +${data['points_earned']} pts",
+        );
+        _fetchParticipants(); // Refresh list เพื่ออัปเดตสถานะ Joined ทันที
+      } else {
+        final errorData = jsonDecode(utf8.decode(response.bodyBytes));
+        _showResultDialog(
+          isSuccess: false,
+          title: "Check-in Failed",
+          message: errorData['detail'] ?? "Unknown error",
+        );
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      _showResultDialog(
+        isSuccess: false,
+        title: "Connection Error",
+        message: "Cannot connect to server.",
+      );
+    }
+  }
+
+  void _showResultDialog({
+    required bool isSuccess,
+    required String title,
+    required String message,
+  }) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isSuccess ? Icons.check_circle : Icons.cancel,
+              color: isSuccess ? Colors.green : Colors.red,
+              size: 80,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              style: GoogleFonts.poppins(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: isSuccess ? Colors.green[800] : Colors.red[800],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(fontSize: 16),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isSuccess ? Colors.green : Colors.red,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                child: Text(
+                  "OK",
+                  style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  // --- [NEW LOGIC END] ---
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -110,6 +374,23 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
         ),
         centerTitle: true,
       ),
+
+      // [NEW] ปุ่ม Check-in มุมขวาล่าง (ซ่อนถ้าเป็น History)
+      floatingActionButton: widget.isHistory
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _showCheckInOptions,
+              backgroundColor: const Color(0xFF4A80FF),
+              icon: const Icon(Icons.qr_code_scanner, color: Colors.white),
+              label: Text(
+                "Check-in",
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+
       body: Column(
         children: [
           // 1. Summary Dashboard
@@ -152,9 +433,11 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
                 : RefreshIndicator(
                     onRefresh: _fetchParticipants,
                     child: ListView.builder(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 8,
+                      padding: const EdgeInsets.only(
+                        left: 20,
+                        right: 20,
+                        top: 8,
+                        bottom: 80, // [FIXED] เผื่อที่ให้ FAB ไม่บัง List
                       ),
                       itemCount: _filteredParticipants.length,
                       itemBuilder: (context, index) {
@@ -169,8 +452,11 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
       ),
     );
   }
+  // ... (ส่วน Widget ย่อยอื่นๆ เช่น _buildDashboard, _ParticipantCard ใช้ของเดิมได้เลยครับ)
 
   Widget _buildDashboard() {
+    // ... (Code เดิมของคุณ) ...
+    // copy โค้ดเดิมส่วนล่างมาใส่ต่อตรงนี้ได้เลยครับ (ตั้งแต่ _buildDashboard ลงไปจนจบไฟล์)
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -212,7 +498,6 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
               const SizedBox(width: 12),
               Icon(Icons.location_on, size: 14, color: Colors.grey[600]),
               const SizedBox(width: 4),
-              // [FIX] Wrap with Flexible to prevent overflow
               Flexible(
                 child: Text(
                   widget.location,
@@ -301,22 +586,15 @@ class _ParticipantCard extends StatelessWidget {
 
   const _ParticipantCard({required this.data});
 
-  // [NEW] ฟังก์ชันเลือกรูปการ์ตูนตามเพศ (จาก Title)
   String _getAvatarUrl(String? title, String empId) {
-    // ใช้ Service ของ avatar.iran.liara.run ซึ่งฟรีและมีแยกเพศชัดเจน
-    final seed = empId; // ใช้ empId เป็น seed ให้หน้าตาเหมือนเดิมทุกครั้ง
-
-    if (title == null)
+    final seed = empId;
+    if (title == null) {
       return 'https://avatar.iran.liara.run/public/boy?username=$seed';
-
+    }
     final t = title.toLowerCase().trim().replaceAll('.', '');
-
-    // เช็คคำนำหน้าผู้หญิง
     if (['ms', 'mrs', 'miss', 'นาง', 'นางสาว'].contains(t)) {
       return 'https://avatar.iran.liara.run/public/girl?username=$seed';
     }
-
-    // Default เป็นผู้ชาย (Mr. หรืออื่นๆ)
     return 'https://avatar.iran.liara.run/public/boy?username=$seed';
   }
 
@@ -324,7 +602,7 @@ class _ParticipantCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isJoined = data['status'] == 'Joined';
     final empId = data['empId'] ?? '';
-    final title = data['title']; // รับ Title มาจาก API
+    final title = data['title'];
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -350,12 +628,9 @@ class _ParticipantCard extends StatelessWidget {
           CircleAvatar(
             radius: 24,
             backgroundColor: Colors.grey.shade200,
-            // [UPDATED] ใช้รูปการ์ตูน
             backgroundImage: NetworkImage(_getAvatarUrl(title, empId)),
           ),
           const SizedBox(width: 16),
-
-          // [FIXED] Expanded เพื่อให้ข้อความยาวๆ ไม่ล้นจอ
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -379,7 +654,6 @@ class _ParticipantCard extends StatelessWidget {
                       color: Colors.grey[500],
                     ),
                     const SizedBox(width: 4),
-                    // [FIXED] Expanded ซ้อนใน Row เพื่อกันล้น
                     Expanded(
                       child: Text(
                         "$empId • ${data['department'] ?? '-'}",
@@ -396,9 +670,7 @@ class _ParticipantCard extends StatelessWidget {
               ],
             ),
           ),
-
-          const SizedBox(width: 8), // ระยะห่างระหว่างข้อความกับป้ายสถานะ
-          // Status Badge
+          const SizedBox(width: 8),
           if (isJoined)
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,

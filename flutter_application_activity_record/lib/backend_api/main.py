@@ -14,8 +14,8 @@ from datetime import time
 # --- CSV Upload ---
 import csv
 import codecs
-import io
 from fastapi import File, UploadFile, Form
+from datetime import timedelta, datetime
 
 # สร้างตารางใน DB อัตโนมัติ (ถ้ายังไม่มี)
 models.Base.metadata.create_all(bind=engine)
@@ -157,7 +157,13 @@ class ParticipantResponse(BaseModel):
     class Config:
         orm_mode = True
 
-
+class CheckInRequest(BaseModel):
+    emp_id: str
+    act_id: str        # หรือ session_id ก็ได้ แต่เพื่อความง่ายใช้ act_id ก่อน แล้วระบบหา session ที่ใกล้สุดเอง
+    scanned_by: str    # ระบุว่าใครเป็นคนสแกน ('organizer' หรือ 'self')
+    location_lat: float | None = None # เผื่ออนาคตเช็คพิกัด
+    location_long: float | None = None
+    
 # --- Helper Functions ---
 def _bcrypt_safe(password: str) -> str:
     # ตัดรหัสผ่านให้ไม่เกิน 72 bytes เพื่อป้องกัน bcrypt error
@@ -977,6 +983,131 @@ def get_activity_participants(act_id: str, db: Session = Depends(get_db)):
     
     return results
 
+
+@app.post("/checkin")
+def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
+    # 1. Validate Employee
+    employee = db.query(models.Employee).filter(models.Employee.EMP_ID == req.emp_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลพนักงาน")
+
+    # 2. Validate Activity & Find Active Session
+    # ดึงข้อมูล Activity มาก่อน เพื่อเช็คว่าเป็น Compulsory หรือไม่
+    activity = db.query(models.Activity).filter(models.Activity.ACT_ID == req.act_id).first()
+    if not activity:
+        raise HTTPException(status_code=404, detail="ไม่พบข้อมูลกิจกรรม")
+
+    now = datetime.now() # เวลา Server (The Source of Truth)
+    
+    # หา Session ของวันนี้
+    sessions = db.query(models.ActivitySession).filter(
+        models.ActivitySession.ACT_ID == req.act_id,
+        models.ActivitySession.SESSION_DATE == now.date()
+    ).all()
+
+    if not sessions:
+         raise HTTPException(status_code=400, detail="ไม่มีรอบกิจกรรมในวันนี้")
+
+    target_session = None
+    time_error_message = ""
+    
+    for sess in sessions:
+        start_dt = datetime.combine(sess.SESSION_DATE, sess.START_TIME)
+        end_dt = datetime.combine(sess.SESSION_DATE, sess.END_TIME)
+        
+        # --- [CORE LOGIC UPDATED] ---
+        
+        # 1. เวลาเปิดให้เช็คอิน (เหมือนกันทั้งสองแบบ) = ก่อนเริ่ม 1 ชั่วโมง
+        window_open = start_dt - timedelta(hours=1)
+        
+        # 2. เวลาปิดรับเช็คอิน (แยกเงื่อนไข)
+        if activity.ACT_ISCOMPULSORY:
+            # แบบบังคับ: ให้สายได้แค่ 30 นาทีหลังจากเริ่ม
+            window_close = start_dt + timedelta(minutes=30)
+            condition_text = "ภายใน 30 นาทีแรก"
+        else:
+            # แบบทั่วไป: เช็คอินได้จนจบกิจกรรม
+            window_close = end_dt
+            condition_text = "ก่อนกิจกรรมจบ"
+            
+        # ตรวจสอบช่วงเวลา
+        if window_open <= now <= window_close:
+            target_session = sess
+            break # เจอ Session ที่ลงได้แล้ว จบ loop
+        else:
+            # เก็บข้อความ Error ไว้ เผื่อไม่เจอ Session ไหนเลยจะได้แจ้งถูก
+            time_error_message = f"ไม่อยู่ในช่วงเวลาเช็คอิน ({condition_text})"
+
+    if not target_session:
+         # ถ้าวนลูปครบแล้วยังหา Session ที่ลงได้ไม่เจอ
+         raise HTTPException(status_code=400, detail=time_error_message or "ไม่อยู่ในช่วงเวลากิจกรรม")
+
+    # 3. Check Registration (เหมือนเดิม)
+    reg = db.query(models.Registration).filter(
+        models.Registration.EMP_ID == req.emp_id,
+        models.Registration.SESSION_ID == target_session.SESSION_ID
+    ).first()
+    
+    if not reg:
+        raise HTTPException(status_code=400, detail="พนักงานยังไม่ได้ลงทะเบียนกิจกรรมนี้")
+
+    # 4. Check Duplicate (เหมือนเดิม)
+    existing_checkin = db.query(models.CheckIn).filter(
+        models.CheckIn.EMP_ID == req.emp_id,
+        models.CheckIn.SESSION_ID == target_session.SESSION_ID
+    ).first()
+    
+    if existing_checkin:
+        raise HTTPException(status_code=400, detail="พนักงานเช็คอินเรียบร้อยแล้ว")
+
+    try:
+        # 5. Process Check-in (เหมือนเดิม)
+        new_checkin_id = generate_id("CI", 8)
+        points_to_give = activity.ACT_POINT
+        
+        new_checkin = models.CheckIn(
+            CHECKIN_ID=new_checkin_id,
+            EMP_ID=req.emp_id,
+            SESSION_ID=target_session.SESSION_ID,
+            CHECKIN_DATE=now.date(),
+            CHECKIN_TIME=now.time(),
+            POINTS_EARNED=points_to_give
+        )
+        db.add(new_checkin)
+        
+        # 6. Update Points & Transaction (เหมือนเดิม)
+        emp_points = db.query(models.Points).filter(models.Points.EMP_ID == req.emp_id).first()
+        if not emp_points:
+            emp_points = models.Points(EMP_ID=req.emp_id, TOTAL_POINTS=0)
+            db.add(emp_points)
+            
+        emp_points.TOTAL_POINTS += points_to_give
+        
+        txn_id = generate_id("TXN", 8)
+        new_txn = models.PointTransaction(
+            TXN_ID=txn_id,
+            EMP_ID=req.emp_id,
+            TXN_TYPE="Earn",
+            REF_TYPE="CHECKIN",
+            REF_ID=new_checkin_id,
+            POINTS=points_to_give,
+            TXN_DATE=now
+        )
+        db.add(new_txn)
+        
+        db.commit()
+        
+        return {
+            "status": "success",
+            "message": f"เช็คอินสำเร็จ! คุณได้รับ {points_to_give} คะแนน",
+            "emp_name": employee.EMP_NAME_EN,
+            "points_earned": points_to_give,
+            "checkin_time": now.strftime("%H:%M")
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database Error: {str(e)}")
 
 # หมายเหตุ: อย่าลืมรัน uvicorn ใหม่ทุกครั้งหลังแก้ไฟล์
 # uvicorn main:app --reload --host 0.0.0.0 --port 8000

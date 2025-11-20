@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:flutter_application_activity_record/theme/app_colors.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'participants_details_screen.dart';
 import '../profile/organizer_profile_screen.dart';
-import 'qr_scanner_screen.dart';
+import 'enterprise_scanner_screen.dart';
+import 'activities/activity_qr_display_screen.dart';
 
 class ActivitiesParticipantsListScreen extends StatefulWidget {
   const ActivitiesParticipantsListScreen({super.key});
@@ -28,6 +28,14 @@ class _ActivitiesParticipantsListScreenState
   List<_Activity> _activities = [];
   String _currentOrganizerName = "";
 
+  // ตัวแปรเก็บค่า Filter ที่เลือก
+  List<String> _selectedTypes = [];
+  String? _selectedStatus;
+  List<String> _availableTypes = []; // ดึงจาก DB
+
+  int _filterCompulsoryIndex = 0; // 0=All, 1=Compulsory, 2=Optional
+  bool _filterOnlyAvailable = false; // true = ซ่อนงานที่เต็มแล้ว
+
   @override
   void initState() {
     super.initState();
@@ -45,9 +53,15 @@ class _ActivitiesParticipantsListScreenState
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
+        final loadedActivities = data
+            .map((json) => _Activity.fromJson(json))
+            .toList();
+        // [NEW] ดึง Type ทั้งหมดที่มีในระบบมาทำเป็นตัวเลือก Filter (Unique values)
+        final types = loadedActivities.map((a) => a.actType).toSet().toList();
         if (mounted) {
           setState(() {
             _activities = data.map((json) => _Activity.fromJson(json)).toList();
+            _availableTypes = types;
             _isLoading = false;
           });
         }
@@ -73,7 +87,29 @@ class _ActivitiesParticipantsListScreenState
           _query.isEmpty || a.name.toLowerCase().contains(_query.toLowerCase());
       if (!matchesSearch) return false;
 
-      // Filter 3: Date
+      // 3. [NEW] Filter Type
+      if (_selectedTypes.isNotEmpty && !_selectedTypes.contains(a.actType)) {
+        return false;
+      }
+
+      // 4. [NEW] Filter Status
+      if (_selectedStatus != null && a.status != _selectedStatus) {
+        return false;
+      }
+
+      // 5. [NEW] Filter Compulsory
+      if (_filterCompulsoryIndex == 1 && a.isCompulsory == 0) return false;
+      if (_filterCompulsoryIndex == 2 && a.isCompulsory == 1) return false;
+
+      // 6. [NEW] Filter Availability (Hide Full)
+      if (_filterOnlyAvailable) {
+        if (a.maxParticipants > 0 &&
+            a.currentParticipants >= a.maxParticipants) {
+          return false;
+        }
+      }
+
+      // 7. Filter Date (Tab)
       final actDate = DateTime(
         a.activityDate.year,
         a.activityDate.month,
@@ -112,38 +148,65 @@ class _ActivitiesParticipantsListScreenState
     final dateKeys = groupedMap.keys.toList();
 
     return Scaffold(
-      backgroundColor: organizerBg,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            _buildSearchBar(),
-            _buildTabs(),
-            const Divider(height: 1, color: Color(0xFFEEEEEE)),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : dateKeys.isEmpty
-                  ? _buildEmptyState()
-                  : ListView.builder(
-                      padding: EdgeInsets.only(
-                        left: 20.0,
-                        right: 20.0,
-                        top: 10.0,
-                        bottom: 80.0 + MediaQuery.of(context).padding.bottom,
-                      ),
-                      itemCount: dateKeys.length,
-                      itemBuilder: (context, index) {
-                        final date = dateKeys[index];
-                        final activitiesOnDate = groupedMap[date]!;
-                        return _buildActivityGroup(
-                          date: date,
-                          cards: activitiesOnDate,
-                        );
-                      },
-                    ),
+      // [1] ลบ backgroundColor เดิมออก (หรือ comment ไว้) เพราะเราจะใช้ Gradient ทับ
+      // backgroundColor: organizerBg,
+      body: Stack(
+        // [2] ใช้ Stack เพื่อซ้อน Layer
+        children: [
+          _buildBackground(), // [3] วางพื้นหลังไว้ล่างสุด
+          // เนื้อหาหลัก
+          SafeArea(
+            child: Column(
+              children: [
+                _buildHeader(),
+                _buildSearchBar(),
+                _buildTabs(),
+
+                // [4] ปรับสีเส้นคั่นให้จางลงเล็กน้อยเพื่อให้เข้ากับพื้นหลังใหม่
+                const Divider(height: 1, thickness: 1, color: Colors.black12),
+
+                Expanded(
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : dateKeys.isEmpty
+                      ? _buildEmptyState()
+                      : ListView.builder(
+                          padding: EdgeInsets.only(
+                            left: 20.0,
+                            right: 20.0,
+                            top: 10.0,
+                            bottom:
+                                80.0 + MediaQuery.of(context).padding.bottom,
+                          ),
+                          itemCount: dateKeys.length,
+                          itemBuilder: (context, index) {
+                            final date = dateKeys[index];
+                            final activitiesOnDate = groupedMap[date]!;
+                            return _buildActivityGroup(
+                              date: date,
+                              cards: activitiesOnDate,
+                            );
+                          },
+                        ),
+                ),
+              ],
             ),
-          ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // [5] เพิ่มฟังก์ชันสร้างพื้นหลัง
+  Widget _buildBackground() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          // สีเหลืองอ่อนไล่ลงมาเป็นสีขาว (Theme Organizer)
+          colors: [Color(0xFFFFF6CC), Colors.white],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          stops: [0.0, 0.4], // ไล่สีถึงประมาณ 40% ของจอ
         ),
       ),
     );
@@ -176,23 +239,33 @@ class _ActivitiesParticipantsListScreenState
     );
     final differenceInDays = cleanEventDate.difference(today).inDays;
 
+    // --- Future (Active Tab) ---
     if (differenceInDays == 0) return "Today";
     if (differenceInDays == 1) return "Tomorrow";
     if (differenceInDays > 1 && differenceInDays <= 7) return "This Week";
     if (differenceInDays > 7 && differenceInDays <= 30) return "This Month";
+    if (differenceInDays > 30) return "Upcoming";
 
-    // ถ้าเป็นอดีต
-    if (differenceInDays < 0 && differenceInDays >= -7) return "Last Week";
-
+    // --- Past (History Tab) ---
+    if (differenceInDays < 0) {
+      final daysAgo = differenceInDays.abs();
+      if (daysAgo == 1)
+        return "Yesterday"; // เพิ่ม Yesterday ให้ดูใส่ใจรายละเอียด
+      if (daysAgo <= 7) return "Last Week";
+      if (daysAgo <= 30) return "Last Month"; // เพิ่ม Last Month
+      return "Past Event"; // เก็บตกรายการที่เก่ากว่า 1 เดือน
+    }
     return "";
   }
 
-  // [UPDATED] Group Header Layout
+  // [UPDATED] 4. อัปเดต List เพื่อซ่อนปุ่ม Scan
   Widget _buildActivityGroup({
     required DateTime date,
     required List<_Activity> cards,
   }) {
     final relativeDate = _getRelativeDateString(date);
+    // เช็คว่าตอนนี้อยู่ Tab History หรือไม่
+    final isHistory = _selectedTab == 1;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -233,8 +306,8 @@ class _ActivitiesParticipantsListScreenState
                 padding: const EdgeInsets.only(bottom: 16.0),
                 child: _EnterpriseActivityCard(
                   activity: a,
-                  onTap: () => _navigateToDetail(a),
-                  onScan: () => _scanQrDirectly(a),
+                  onTap: () => _navigateToDetail(a, isHistory),
+                  onScan: isHistory ? null : () => _scanQrDirectly(a),
                 ),
               ),
             )
@@ -243,7 +316,7 @@ class _ActivitiesParticipantsListScreenState
     );
   }
 
-  void _navigateToDetail(_Activity a) {
+  void _navigateToDetail(_Activity a, bool isHistory) {
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -252,22 +325,108 @@ class _ActivitiesParticipantsListScreenState
           activityName: a.name,
           activityDate: a.activityDate,
           location: a.location,
+          isHistory: isHistory,
+          // [เพิ่ม 3 บรรทัดนี้ครับ] ส่งข้อมูลเวลาและสถานะบังคับไปด้วย
+          startTime: a.startTime,
+          endTime: a.endTime,
+          isCompulsory: a.isCompulsory,
         ),
       ),
     );
   }
 
-  void _scanQrDirectly(_Activity a) {
+  // 1. เปิด Scanner (Mode A: สแกนพนักงาน)
+  void _scanQrDirectly(_Activity activity) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const EnterpriseScannerScreen(),
+      ), // ใช้หน้าจอใหม่
+    );
+
+    if (result != null) {
+      if (result == "SHOW_ACTIVITY_QR") {
+        // Organizer อยากเปิด QR กิจกรรมแทน (Mode B)
+        _showActivityQr(activity);
+      } else {
+        // ได้ผลลัพธ์เป็น QR Code (EMP_ID) -> เรียก API เช็คอิน
+        _processCheckIn(result, activity.actId);
+      }
+    }
+  }
+
+  String _getValidTimeRange(_Activity activity) {
+    if (activity.startTime == "-" || activity.endTime == "-") return "TBA";
+
+    try {
+      final start = DateFormat("HH:mm").parse(activity.startTime);
+      // เวลาเริ่มเปิดให้เช็คอิน (ก่อน 1 ชม.)
+      final openTime = start.subtract(const Duration(hours: 1));
+
+      DateTime closeTime;
+      if (activity.isCompulsory == 1) {
+        // งานบังคับ: ปิดหลังเริ่ม 30 นาที
+        closeTime = start.add(const Duration(minutes: 30));
+      } else {
+        // งานทั่วไป: ปิดตอนจบงาน
+        closeTime = DateFormat("HH:mm").parse(activity.endTime);
+      }
+
+      return "${DateFormat('HH:mm').format(openTime)} - ${DateFormat('HH:mm').format(closeTime)}";
+    } catch (e) {
+      return "${activity.startTime} - ${activity.endTime}";
+    }
+  }
+
+  // 2. เปิดหน้า QR กิจกรรม (Mode B: ให้พนักงานสแกน)
+  void _showActivityQr(_Activity activity) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const QrScannerScreen()),
-    ).then((value) {
-      if (value != null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Scanned: $value")));
+      MaterialPageRoute(
+        builder: (_) => ActivityQrDisplayScreen(
+          activityName: activity.name,
+          actId: activity.actId,
+          qrData: "ACTION:CHECKIN|ACT_ID:${activity.actId}",
+          timeInfo: _getValidTimeRange(activity), // [NEW] ส่งเวลาที่คำนวณแล้วไป
+        ),
+      ),
+    );
+  }
+
+  Future<void> _processCheckIn(String empId, String actId) async {
+    // TODO: Implement actual API call
+    print("Processing check-in for EMP: $empId at ACT: $actId");
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/activities/$actId/checkin'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'empId': empId}),
+      );
+
+      if (mounted) {
+        if (response.statusCode == 200) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Check-in Successful!"),
+              backgroundColor: Colors.green,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Check-in Failed: ${response.body}"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
-    });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   Widget _buildHeader() {
@@ -306,6 +465,17 @@ class _ActivitiesParticipantsListScreenState
                 ),
               ),
             ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: IconButton(
+                icon: const Icon(
+                  Icons.notifications_outlined,
+                  color: Colors.black54,
+                  size: 28,
+                ),
+                onPressed: () {},
+              ),
+            ),
           ],
         ),
       ),
@@ -313,35 +483,321 @@ class _ActivitiesParticipantsListScreenState
   }
 
   Widget _buildSearchBar() {
+    final hasFilter =
+        _selectedTypes.isNotEmpty ||
+        _selectedStatus != null ||
+        _filterCompulsoryIndex != 0 ||
+        _filterOnlyAvailable;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12.0),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10.0,
-              offset: const Offset(0, 4),
+      child: Row(
+        // เปลี่ยนเป็น Row เพื่อวางปุ่ม Filter คู่กับ Search
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12.0),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10.0,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: TextField(
+                controller: _search,
+                decoration: InputDecoration(
+                  hintText: 'Search my activities...',
+                  hintStyle: GoogleFonts.poppins(
+                    color: Colors.grey[400],
+                  ), // แก้สี Hint ให้จางลงหน่อย
+                  prefixIcon: Icon(Icons.search, color: Colors.grey.shade500),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 20.0,
+                    vertical: 15.0,
+                  ),
+                ),
+              ),
             ),
-          ],
-        ),
-        child: TextField(
-          controller: _search,
-          decoration: InputDecoration(
-            hintText: 'Search my activities...',
-            hintStyle: GoogleFonts.poppins(),
-            prefixIcon: Icon(Icons.search, color: Colors.grey.shade500),
-            border: InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 20.0,
-              vertical: 15.0,
+          ),
+          const SizedBox(width: 12),
+
+          // ปุ่ม Filter
+          GestureDetector(
+            onTap: _showFilterModal,
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: hasFilter
+                    ? const Color(0xFF4A80FF)
+                    : Colors.white, // เปลี่ยนสีถ้ามีการเลือก Filter
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10.0,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.filter_list_rounded,
+                color: hasFilter ? Colors.white : Colors.grey.shade700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showFilterModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateModal) {
+            return SafeArea(
+              child: Container(
+                padding: const EdgeInsets.all(24),
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.85,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            "Filter Activities",
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              setState(() {
+                                _selectedTypes.clear();
+                                _selectedStatus = null;
+                                _filterCompulsoryIndex = 0;
+                                _filterOnlyAvailable = false;
+                              });
+                              Navigator.pop(context);
+                            },
+                            child: Text(
+                              "Reset",
+                              style: GoogleFonts.poppins(color: Colors.red),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // 1. Type
+                      Text(
+                        "Type",
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _availableTypes.map((type) {
+                          final isSelected = _selectedTypes.contains(type);
+                          return FilterChip(
+                            label: Text(type),
+                            selected: isSelected,
+                            selectedColor: const Color(0xFFFFF6CC),
+                            checkmarkColor: Colors.orange.shade900,
+                            labelStyle: GoogleFonts.poppins(
+                              color: isSelected
+                                  ? Colors.orange.shade900
+                                  : Colors.black87,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                            onSelected: (bool selected) {
+                              setStateModal(() {
+                                if (selected)
+                                  _selectedTypes.add(type);
+                                else
+                                  _selectedTypes.remove(type);
+                              });
+                              setState(() {});
+                            },
+                          );
+                        }).toList(),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // 2. Status
+                      Text(
+                        "Status",
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        children: ['Open', 'Full', 'Closed', 'Canceled'].map((
+                          status,
+                        ) {
+                          final isSelected = _selectedStatus == status;
+                          return ChoiceChip(
+                            label: Text(status),
+                            selected: isSelected,
+                            selectedColor: const Color(0xFFE6EFFF),
+                            labelStyle: GoogleFonts.poppins(
+                              color: isSelected
+                                  ? const Color(0xFF375987)
+                                  : Colors.black87,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                            onSelected: (bool selected) {
+                              setStateModal(() {
+                                _selectedStatus = selected ? status : null;
+                              });
+                              setState(() {});
+                            },
+                          );
+                        }).toList(),
+                      ),
+
+                      const SizedBox(height: 20),
+                      const Divider(),
+                      const SizedBox(height: 10),
+
+                      // 3. Compulsory
+                      Text(
+                        "Requirement",
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            _buildRadioOption("All", 0, setStateModal),
+                            _buildVerticalDivider(),
+                            _buildRadioOption("Compulsory", 1, setStateModal),
+                            _buildVerticalDivider(),
+                            _buildRadioOption("Optional", 2, setStateModal),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      // 4. Availability
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            "Show Available Only",
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Switch(
+                            value: _filterOnlyAvailable,
+                            activeColor: const Color(0xFF4A80FF),
+                            onChanged: (val) {
+                              setStateModal(() => _filterOnlyAvailable = val);
+                              setState(() {});
+                            },
+                          ),
+                        ],
+                      ),
+                      Text(
+                        "Hide activities that are fully booked",
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: Colors.grey,
+                        ),
+                      ),
+
+                      const SizedBox(height: 30),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF4A80FF),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          child: Text(
+                            "Apply Filters",
+                            style: GoogleFonts.poppins(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildRadioOption(String label, int index, StateSetter setStateModal) {
+    final isSelected = _filterCompulsoryIndex == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          setStateModal(() => _filterCompulsoryIndex = index);
+          setState(() {});
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: isSelected ? const Color(0xFF4A80FF) : Colors.transparent,
+            borderRadius: BorderRadius.circular(11),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              color: isSelected ? Colors.white : Colors.black87,
             ),
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildVerticalDivider() {
+    return Container(width: 1, height: 24, color: Colors.grey.shade300);
   }
 
   Widget _buildTabs() {
@@ -396,12 +852,12 @@ class _ActivitiesParticipantsListScreenState
 class _EnterpriseActivityCard extends StatelessWidget {
   final _Activity activity;
   final VoidCallback onTap;
-  final VoidCallback onScan;
+  final VoidCallback? onScan;
 
   const _EnterpriseActivityCard({
     required this.activity,
     required this.onTap,
-    required this.onScan,
+    this.onScan,
   });
 
   String _calculateDuration(String start, String end) {
@@ -635,6 +1091,7 @@ class _Activity {
   final DateTime activityDate;
   final String startTime;
   final String endTime;
+  final int isCompulsory;
 
   _Activity({
     required this.actId,
@@ -649,6 +1106,7 @@ class _Activity {
     required this.activityDate,
     required this.startTime,
     required this.endTime,
+    required this.isCompulsory,
   });
 
   factory _Activity.fromJson(Map<String, dynamic> json) {
@@ -669,6 +1127,7 @@ class _Activity {
       activityDate: date,
       startTime: json['startTime'] ?? '-',
       endTime: json['endTime'] ?? '-',
+      isCompulsory: json['isCompulsory'] ?? 0,
     );
   }
 }
