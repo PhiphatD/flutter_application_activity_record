@@ -1,8 +1,8 @@
-import 'dart:convert'; // [NEW] สำหรับแปลง JSON
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:http/http.dart'
-    as http; // [NEW] อย่าลืมเพิ่ม http ใน pubspec.yaml
+import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 import 'package:flutter_application_activity_record/theme/app_colors.dart';
 import 'activity_create_screen.dart';
 import 'activity_edit_screen.dart';
@@ -20,17 +20,21 @@ class ActivityManagementScreen extends StatefulWidget {
 class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchText = '';
-  // สมมติว่า logged in user คือ Organizer นี้ (ในระบบจริงต้องดึงจาก Profile/Session)
-  final String _currentOrgId = 'O0001';
-  int _selectedSegment = 0;
-  bool _isLoading = true; // [NEW] สถานะโหลดข้อมูล
+  final String _currentOrgId = 'O0001'; // Mock ID
 
+  // 0 = My Activities, 1 = Other Organizers
+  int _selectedOwnerSegment = 0;
+
+  // [NEW] 0 = Active (Today & Future), 1 = History (Past)
+  int _selectedTimeFilter = 0;
+
+  bool _isLoading = true;
   List<Activity> _activities = [];
 
   @override
   void initState() {
     super.initState();
-    _fetchActivities(); // [NEW] เรียกดึงข้อมูลเมื่อหน้าจอโหลด
+    _fetchActivities();
     _searchController.addListener(() {
       setState(() {
         _searchText = _searchController.text.trim();
@@ -38,9 +42,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     });
   }
 
-  // ฟังก์ชันดึงข้อมูลจาก API
   Future<void> _fetchActivities() async {
-    // ใช้ URL ที่คุณกำหนดมา
     final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
     final url = Uri.parse('$baseUrl/activities');
 
@@ -48,7 +50,6 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
       final response = await http.get(url);
 
       if (response.statusCode == 200) {
-        // แปลง response body เป็น List (ใช้ utf8.decode เพื่อรองรับภาษาไทย)
         final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
 
         if (mounted) {
@@ -58,11 +59,9 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
           });
         }
       } else {
-        debugPrint('Error fetching activities: ${response.statusCode}');
         if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
-      debugPrint('Error connecting to API: $e');
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -73,74 +72,96 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     super.dispose();
   }
 
-  List<Activity> _filteredActivities(bool mine) {
-    return _activities.where((a) {
-      // 1. กรองตาม Tab (กิจกรรมของฉัน vs คนอื่น)
-      final byOrg = mine ? a.orgId == _currentOrgId : a.orgId != _currentOrgId;
+  // [UPDATED] Logic การกรองที่ซับซ้อนขึ้น (Owner + Time + Search)
+  List<Activity> _filteredActivities() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
 
-      // 2. ถ้าไม่มีคำค้นหา ให้คืนค่าตาม Tab เลย
-      if (_searchText.isEmpty) {
-        return byOrg;
+    return _activities.where((a) {
+      // 1. Filter by Owner (My vs Others)
+      final isMine =
+          a.orgId == _currentOrgId; // *ในระบบจริงควรเช็คจาก ID ที่ Login
+      // หมายเหตุ: เนื่องจากตอนนี้เรา Mock Login อาจจะต้องปรับ Logic ตรงนี้ให้ตรงกับ ID จริง
+      // หรือถ้าใช้ระบบชื่อแบบหน้า Participant ก็ใช้ a.organizerName == 'My Name'
+
+      final ownerMatch = (_selectedOwnerSegment == 0) ? isMine : !isMine;
+
+      // 2. Filter by Time (Active vs History)
+      final actDate = DateTime(
+        a.activityDate.year,
+        a.activityDate.month,
+        a.activityDate.day,
+      );
+
+      bool timeMatch;
+      if (_selectedTimeFilter == 0) {
+        // Active: วันนี้ หรือ อนาคต
+        timeMatch = !actDate.isBefore(today);
+      } else {
+        // History: อดีต (เมื่อวานลงไป)
+        timeMatch = actDate.isBefore(today);
       }
 
-      // 3. ระบบค้นหาอัจฉริยะ (Smart Search)
-      final searchLower = _searchText
-          .toLowerCase(); // แปลงเป็นตัวเล็กเพื่อให้ค้นหาเจอแม้อักษรใหญ่/เล็กต่างกัน
+      // 3. Filter by Search Text
+      if (_searchText.isEmpty) {
+        return ownerMatch && timeMatch;
+      }
 
-      // เช็คว่าคำค้นหา ไปตรงกับส่วนใดส่วนหนึ่งของข้อมูลหรือไม่
-      final matchName = a.name.toLowerCase().contains(
-        searchLower,
-      ); // ค้นหาจาก ชื่อกิจกรรม
-      final matchLocation = a.location.toLowerCase().contains(
-        searchLower,
-      ); // ค้นหาจาก สถานที่
-      final matchOrganizer = a.organizerName.toLowerCase().contains(
-        searchLower,
-      ); // ค้นหาจาก ชื่อผู้จัด
-      final matchPoint = a.point.toString().contains(
-        searchLower,
-      ); // ค้นหาจาก คะแนน (เช่น พิมพ์ 200)
-      final matchType = a.actType.toLowerCase().contains(
-        searchLower,
-      ); // (แถม) ค้นหาจาก ประเภทกิจกรรม (Workshop/Seminar)
+      final searchLower = _searchText.toLowerCase();
+      final matchName = a.name.toLowerCase().contains(searchLower);
+      final matchLocation = a.location.toLowerCase().contains(searchLower);
+      final matchOrg = a.organizerName.toLowerCase().contains(searchLower);
 
-      // ต้องเป็นกิจกรรมใน Tab นั้น AND ตรงกับเงื่อนไขการค้นหาอย่างน้อย 1 อย่าง
-      return byOrg &&
-          (matchName ||
-              matchLocation ||
-              matchOrganizer ||
-              matchPoint ||
-              matchType);
+      return ownerMatch &&
+          timeMatch &&
+          (matchName || matchLocation || matchOrg);
     }).toList();
+  }
+
+  Map<DateTime, List<Activity>> _groupActivities(List<Activity> list) {
+    // Sorting
+    if (_selectedTimeFilter == 0) {
+      // Active: เรียง วันใกล้ -> ไกล
+      list.sort((a, b) => a.activityDate.compareTo(b.activityDate));
+    } else {
+      // History: เรียง วันใหม่ -> เก่า
+      list.sort((a, b) => b.activityDate.compareTo(a.activityDate));
+    }
+
+    Map<DateTime, List<Activity>> groups = {};
+    for (var activity in list) {
+      final dateKey = DateTime(
+        activity.activityDate.year,
+        activity.activityDate.month,
+        activity.activityDate.day,
+      );
+      if (groups[dateKey] == null) groups[dateKey] = [];
+      groups[dateKey]!.add(activity);
+    }
+    return groups;
   }
 
   void _deleteActivity(String actId) async {
     final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
-
     try {
       final response = await http.delete(
         Uri.parse('$baseUrl/activities/$actId'),
       );
-
       if (response.statusCode == 200) {
-        // ลบสำเร็จ -> อัปเดตหน้าจอโดยเอาตัวนั้นออกจาก List
         setState(() {
           _activities.removeWhere((a) => a.actId == actId);
         });
-
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Activity deleted successfully")),
           );
         }
-      } else {
-        throw Exception('Failed to delete');
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text("Error deleting: $e")));
+        ).showSnackBar(SnackBar(content: Text("Error: $e")));
       }
     }
   }
@@ -155,12 +176,11 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
           padding: const EdgeInsets.only(bottom: 8.0),
           child: FloatingActionButton(
             onPressed: () async {
-              // รอผลลัพธ์เผื่อมีการสร้างกิจกรรมใหม่ จะได้รีเฟรชหน้าจอ
               await Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const CreateActivityScreen()),
               );
-              _fetchActivities(); // รีเฟรชข้อมูลใหม่
+              _fetchActivities();
             },
             backgroundColor: const Color(0xFF4A80FF),
             child: const Icon(Icons.add, color: Colors.white),
@@ -172,12 +192,13 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
           children: [
             _buildCustomAppBar(),
             _buildSearchBar(),
-            _buildViewSwitcher(),
-            // [UPDATE] แสดง Loading หรือ List
+            _buildOwnerSegment(), // [1] My Activity / Other
+            _buildTimeFilter(), // [2] Active / History (New)
+            const Divider(height: 1, thickness: 1, color: Color(0xFFEEEEEE)),
             Expanded(
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
-                  : _buildList(_selectedSegment == 0),
+                  : _buildGroupedList(),
             ),
           ],
         ),
@@ -185,22 +206,28 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     );
   }
 
-  Widget _buildList(bool mine) {
-    final items = _filteredActivities(mine);
+  Widget _buildGroupedList() {
+    final filteredList = _filteredActivities();
 
-    if (items.isEmpty) {
+    if (filteredList.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.event_busy, size: 60, color: Colors.grey[300]),
+            Icon(
+              _selectedTimeFilter == 0 ? Icons.event_available : Icons.history,
+              size: 60,
+              color: Colors.grey[300],
+            ),
             const SizedBox(height: 10),
             Text(
-              'No activities found',
+              _selectedTimeFilter == 0
+                  ? 'No upcoming activities'
+                  : 'No history found',
               style: GoogleFonts.poppins(color: Colors.grey),
             ),
             const SizedBox(height: 10),
-            ElevatedButton(
+            TextButton(
               onPressed: _fetchActivities,
               child: const Text("Refresh"),
             ),
@@ -209,48 +236,117 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
       );
     }
 
+    final groupedMap = _groupActivities(filteredList);
+    final dateKeys = groupedMap.keys.toList();
+
     return RefreshIndicator(
       onRefresh: _fetchActivities,
       child: ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-        itemCount: items.length,
+        padding: const EdgeInsets.only(
+          left: 20.0,
+          right: 20.0,
+          top: 10.0,
+          bottom: 80.0,
+        ),
+        itemCount: dateKeys.length,
         itemBuilder: (context, index) {
-          final a = items[index];
+          final date = dateKeys[index];
+          final activitiesOnDate = groupedMap[date]!;
+          // เช็คว่าเป็นของฉันไหม เพื่อแสดงปุ่ม Edit/Delete
+          final isMine = _selectedOwnerSegment == 0;
+          return _buildActivityGroup(date, activitiesOnDate, isMine);
+        },
+      ),
+    );
+  }
 
-          return _OrganizerActivityCard(
-            status: a.status,
-            id: a.actId,
-            type: a.actType,
-            title: a.name,
-            location: a.location, // [UPDATE] ใช้ข้อมูลจาก API
-            organizer: a.organizerName, // [UPDATE] ใช้ข้อมูลจาก API
-            points: a.point,
-            currentParticipants: a.currentParticipants,
-            maxParticipants: a.maxParticipants,
-            isCompulsory: a.isCompulsory == 1,
-            showActions: mine,
-            onEdit: () async {
-              // 1. ใช้ await เพื่อรอผลลัพธ์ตอนกลับมาจากหน้าแก้ไข
-              final bool? result = await Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => EditActivityScreen(
-                    actId: a
-                        .actId, // [แก้ไข] ใช้ชื่อ parameter ให้ตรงกับ constructor ของ EditActivityScreen
+  Widget _buildActivityGroup(
+    DateTime date,
+    List<Activity> activities,
+    bool mine,
+  ) {
+    final isToday = _isSameDay(date, DateTime.now());
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 16.0, bottom: 12.0),
+          child: Row(
+            children: [
+              if (isToday)
+                Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    "TODAY",
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-              );
-
-              // 2. ถ้ากลับมาพร้อมค่า true (แปลว่ามีการบันทึกสำเร็จ) ให้รีเฟรชข้อมูลใหม่
-              if (result == true) {
-                _fetchActivities();
-              }
-            },
-            onDelete: () async {
-              final ok = await showDialog<bool>(
-                context: context,
-                builder: (ctx) {
-                  return AlertDialog(
+              Text(
+                _formatActivityDate(date),
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: isToday ? Colors.black : Colors.black87,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                _getRelativeDateString(date),
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  color: Colors.grey[600],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+        ...activities.map((a) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 16.0),
+            child: _OrganizerActivityCard(
+              status: a.status,
+              id: a.actId,
+              type: a.actType,
+              title: a.name,
+              location: a.location,
+              organizer: a.organizerName,
+              points: a.point,
+              currentParticipants: a.currentParticipants,
+              maxParticipants: a.maxParticipants,
+              isCompulsory: a.isCompulsory == 1,
+              showActions:
+                  mine &&
+                  _selectedTimeFilter ==
+                      0, // แก้ไขได้เฉพาะของฉัน และเป็น Active
+              startTime: a.startTime,
+              endTime: a.endTime,
+              onEdit: () async {
+                final bool? result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => EditActivityScreen(actId: a.actId),
+                  ),
+                );
+                if (result == true) _fetchActivities();
+              },
+              onDelete: () async {
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
                     title: Text(
                       'Confirm Delete',
                       style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
@@ -272,31 +368,30 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                         ),
                       ),
                     ],
-                  );
-                },
-              );
-              if (ok == true) {
-                _deleteActivity(a.actId);
-              }
-            },
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => ActivityDetailScreen(
-                    activityId: a.actId,
-                    isOrganizerView: true,
                   ),
-                ),
-              );
-            },
+                );
+                if (ok == true) _deleteActivity(a.actId);
+              },
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ActivityDetailScreen(
+                      activityId: a.actId,
+                      isOrganizerView: true,
+                    ),
+                  ),
+                );
+              },
+            ),
           );
-        },
-      ),
+        }).toList(),
+      ],
     );
   }
 
-  // ... (ส่วน _buildCustomAppBar, _buildSearchBar, _buildViewSwitcher คงเดิม)
+  // --- UI Components ---
+
   Widget _buildCustomAppBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
@@ -308,14 +403,12 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
             Align(
               alignment: Alignment.centerLeft,
               child: GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const OrganizerProfileScreen(),
-                    ),
-                  );
-                },
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const OrganizerProfileScreen(),
+                  ),
+                ),
                 child: CircleAvatar(
                   radius: 22,
                   backgroundColor: Colors.grey.shade200,
@@ -357,7 +450,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
       child: Container(
         decoration: BoxDecoration(
-          color: const Color.fromARGB(255, 255, 255, 255),
+          color: Colors.white,
           borderRadius: BorderRadius.circular(12.0),
           boxShadow: [
             BoxShadow(
@@ -384,29 +477,34 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     );
   }
 
-  Widget _buildViewSwitcher() {
+  Widget _buildOwnerSegment() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
+      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 4.0),
       child: Row(
         children: [
           ChoiceChip(
+            avatar: Icon(
+              Icons.person_outline,
+              size: 18,
+              color: _selectedOwnerSegment == 0 ? Colors.black : Colors.grey,
+            ),
             label: const Text('My Activities'),
             labelStyle: TextStyle(
-              color: _selectedSegment == 0 ? Colors.black : Colors.black87,
-              fontWeight: _selectedSegment == 0
+              color: _selectedOwnerSegment == 0 ? Colors.black : Colors.black87,
+              fontWeight: _selectedOwnerSegment == 0
                   ? FontWeight.bold
                   : FontWeight.normal,
             ),
-            selected: _selectedSegment == 0,
+            selected: _selectedOwnerSegment == 0,
             onSelected: (selected) {
-              if (selected) setState(() => _selectedSegment = 0);
+              if (selected) setState(() => _selectedOwnerSegment = 0);
             },
             backgroundColor: Colors.white,
             selectedColor: const Color(0xFFFFD600),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(24.0),
               side: BorderSide(
-                color: _selectedSegment == 0
+                color: _selectedOwnerSegment == 0
                     ? const Color(0xFFFFD600)
                     : Colors.grey.shade400,
               ),
@@ -415,23 +513,28 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
           ),
           const SizedBox(width: 8.0),
           ChoiceChip(
+            avatar: Icon(
+              Icons.group_outlined,
+              size: 18,
+              color: _selectedOwnerSegment == 1 ? Colors.black : Colors.grey,
+            ),
             label: const Text('Other Organizers'),
             labelStyle: TextStyle(
-              color: _selectedSegment == 1 ? Colors.black : Colors.black87,
-              fontWeight: _selectedSegment == 1
+              color: _selectedOwnerSegment == 1 ? Colors.black : Colors.black87,
+              fontWeight: _selectedOwnerSegment == 1
                   ? FontWeight.bold
                   : FontWeight.normal,
             ),
-            selected: _selectedSegment == 1,
+            selected: _selectedOwnerSegment == 1,
             onSelected: (selected) {
-              if (selected) setState(() => _selectedSegment = 1);
+              if (selected) setState(() => _selectedOwnerSegment = 1);
             },
             backgroundColor: Colors.white,
             selectedColor: const Color(0xFFFFD600),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(24.0),
               side: BorderSide(
-                color: _selectedSegment == 1
+                color: _selectedOwnerSegment == 1
                     ? const Color(0xFFFFD600)
                     : Colors.grey.shade400,
               ),
@@ -442,13 +545,92 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
       ),
     );
   }
+
+  // [NEW] Time Filter Tabs (Active / History)
+  Widget _buildTimeFilter() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+      child: Container(
+        height: 36,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade200,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          children: [
+            _buildTimeFilterTab("Active", 0),
+            _buildTimeFilterTab("History", 1),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimeFilterTab(String text, int index) {
+    final isSelected = _selectedTimeFilter == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _selectedTimeFilter = index),
+        child: Container(
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Text(
+            text,
+            style: GoogleFonts.poppins(
+              fontSize: 14,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              color: isSelected ? Colors.black : Colors.grey.shade600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- Helpers ---
+  bool _isSameDay(DateTime d1, DateTime d2) {
+    return d1.year == d2.year && d1.month == d2.month && d1.day == d2.day;
+  }
+
+  String _formatActivityDate(DateTime eventDate) {
+    final formatter = DateFormat('d MMMM y', 'en_US');
+    return formatter.format(eventDate);
+  }
+
+  String _getRelativeDateString(DateTime eventDate) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final cleanEventDate = DateTime(
+      eventDate.year,
+      eventDate.month,
+      eventDate.day,
+    );
+    final differenceInDays = cleanEventDate.difference(today).inDays;
+
+    if (differenceInDays < 0) return "Past Event";
+    if (differenceInDays == 0) return "Today";
+    if (differenceInDays == 1) return "Tomorrow";
+    if (differenceInDays <= 7) return "This Week";
+    return "";
+  }
 }
 
-// [NEW] Updated Activity Model ให้ตรงกับ API
+// Activity Model
 class Activity {
   final String actId;
   final String orgId;
-  final String organizerName; // [NEW] เพิ่มตัวแปรเก็บชื่อ
   final String actType;
   final int isCompulsory;
   final int point;
@@ -457,11 +639,14 @@ class Activity {
   final int maxParticipants;
   final String status;
   final String location;
+  final String organizerName;
+  final DateTime activityDate;
+  final String startTime;
+  final String endTime;
 
   Activity({
     required this.actId,
     required this.orgId,
-    required this.organizerName, // [NEW]
     required this.actType,
     required this.isCompulsory,
     required this.point,
@@ -470,13 +655,20 @@ class Activity {
     required this.maxParticipants,
     required this.status,
     required this.location,
+    required this.organizerName,
+    required this.activityDate,
+    required this.startTime,
+    required this.endTime,
   });
 
   factory Activity.fromJson(Map<String, dynamic> json) {
+    DateTime date = DateTime.now();
+    if (json['activityDate'] != null) {
+      date = DateTime.parse(json['activityDate']);
+    }
     return Activity(
       actId: json['actId']?.toString() ?? '',
       orgId: json['orgId']?.toString() ?? '',
-      organizerName: json['organizerName'] ?? '-', // [NEW] รับค่าจาก JSON
       actType: json['actType'] ?? '',
       isCompulsory: json['isCompulsory'] ?? 0,
       point: json['point'] ?? 0,
@@ -485,11 +677,14 @@ class Activity {
       maxParticipants: json['maxParticipants'] ?? 0,
       status: json['status'] ?? 'Open',
       location: json['location'] ?? '-',
+      organizerName: json['organizerName'] ?? '-',
+      activityDate: date,
+      startTime: json['startTime'] ?? '-',
+      endTime: json['endTime'] ?? '-',
     );
   }
 }
 
-// ... (Class _OrganizerActivityCard คงเดิม ไม่ต้องแก้ เพราะเรารับค่าผ่าน Constructor แล้ว)
 class _OrganizerActivityCard extends StatelessWidget {
   final String status;
   final String id;
@@ -505,6 +700,8 @@ class _OrganizerActivityCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onTap;
+  final String startTime;
+  final String endTime;
 
   const _OrganizerActivityCard({
     super.key,
@@ -522,272 +719,290 @@ class _OrganizerActivityCard extends StatelessWidget {
     required this.onDelete,
     required this.onTap,
     required this.status,
+    this.startTime = "-",
+    this.endTime = "-",
   });
+
+  String _calculateDuration() {
+    if (startTime == "-" || endTime == "-") return "";
+    try {
+      final s = DateFormat("HH:mm").parse(startTime);
+      final e = DateFormat("HH:mm").parse(endTime);
+      final diff = e.difference(s);
+      final hours = diff.inHours;
+      final minutes = diff.inMinutes.remainder(60);
+      if (hours > 0 && minutes > 0) return "${hours}h ${minutes}m";
+      if (hours > 0) return "${hours}h";
+      return "${minutes}m";
+    } catch (_) {
+      return "";
+    }
+  }
+
+  String _cleanLocation(String loc) {
+    if (loc.contains(" at :")) return loc.split(" at :")[0].trim();
+    return loc;
+  }
 
   @override
   Widget build(BuildContext context) {
-    const Color cardBackgroundColor = Colors.white;
-    const Color brandBlue = Color(0xFF375987);
+    final duration = _calculateDuration();
+    final displayLocation = _cleanLocation(location);
+    final displayTime = (startTime == "-" || endTime == "-")
+        ? "Time TBA"
+        : "$startTime - $endTime";
 
-    // [UPDATED] กำหนดสีของป้ายสถานะให้ครบทุกแบบ
-    Color statusBg;
-    Color statusText;
-    Color statusBorder;
-
-    if (status == 'Full' || status == 'Closed') {
-      statusBg = Colors.red.shade50;
-      statusText = Colors.red;
-      statusBorder = Colors.red;
-    } else if (status == 'Cancelled') {
-      statusBg = Colors.grey.shade200;
-      statusText = Colors.grey;
-      statusBorder = Colors.grey;
-    } else {
-      // กรณี Open หรืออื่นๆ ให้เป็นสีเขียว
-      statusBg = Colors.green.shade50;
-      statusText = Colors.green.shade700;
-      statusBorder = Colors.green.shade200;
-    }
-
-    return Stack(
-      children: [
-        Container(
-          width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 16.0),
-          decoration: BoxDecoration(
-            color: cardBackgroundColor,
-            border: Border.all(
-              color: const Color.fromRGBO(0, 0, 0, 0.15),
-              width: 1.0,
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade200),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.15),
-                blurRadius: 6.0,
-                offset: const Offset(0, 3),
-              ),
-            ],
-            borderRadius: BorderRadius.circular(20.0),
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onTap,
-              borderRadius: BorderRadius.circular(20.0),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16.0,
-                  vertical: 12.0,
+          ],
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _tag(type, Colors.blue.shade50, Colors.blue.shade700),
+                const SizedBox(width: 8),
+                if (isCompulsory)
+                  _tag(
+                    "Compulsory",
+                    Colors.orange.shade50,
+                    Colors.orange.shade700,
+                  ),
+                const Spacer(),
+                _tag(
+                  status,
+                  status == 'Open'
+                      ? Colors.green.shade50
+                      : Colors.grey.shade100,
+                  status == 'Open'
+                      ? Colors.green.shade700
+                      : Colors.grey.shade600,
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Title Row
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Padding(
-                            // [UPDATED] เว้นที่ด้านขวาเสมอ เพราะมีป้ายสถานะตลอดเวลา
-                            padding: const EdgeInsets.only(right: 70.0),
-                            child: Text(
-                              title,
-                              style: GoogleFonts.kanit(
-                                fontWeight: FontWeight.w400,
-                                fontSize: 16,
-                                color: Colors.black,
-                              ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: GoogleFonts.kanit(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                if (showActions) ...[
+                  const SizedBox(width: 8),
+                  InkWell(
+                    onTap: onEdit,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.edit_outlined,
+                        size: 20,
+                        color: Colors.blueAccent,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  InkWell(
+                    onTap: onDelete,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(
+                        Icons.delete_outline,
+                        size: 20,
+                        color: Colors.redAccent,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(
+                  Icons.access_time_rounded,
+                  size: 16,
+                  color: Colors.grey[600],
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  displayTime,
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+                if (duration.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    "($duration)",
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: Colors.grey[500],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(
+                  Icons.location_on_outlined,
+                  size: 16,
+                  color: Colors.grey[500],
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    displayLocation,
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: Colors.grey[600],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(Icons.person_outline, size: 16, color: Colors.grey[500]),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    "Host: $organizer",
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: Colors.grey[600],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Divider(height: 1, color: Color(0xFFEEEEEE)),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.people_alt,
+                            size: 16,
+                            color: Colors.grey[800],
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            "$currentParticipants/$maxParticipants Registered",
+                            style: GoogleFonts.poppins(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey[800],
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                    const Divider(color: Colors.grey),
-                    const SizedBox(height: 8.0),
-
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            children: [
-                              _buildInfoRow(
-                                text: location,
-                                icon: Icons.location_on_outlined,
-                              ),
-                              const SizedBox(height: 8.0),
-                              _buildInfoRow(
-                                text: 'Organizers : $organizer',
-                                icon: Icons.person_outline,
-                              ),
-                              const SizedBox(height: 8.0),
-                              _buildInfoRow(
-                                text: 'Points : $points',
-                                icon: Icons.star_border_purple500_outlined,
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        if (showActions) ...[
-                          const SizedBox(width: 12.0),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              InkWell(
-                                onTap: onEdit,
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 4,
-                                    horizontal: 4,
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(
-                                        Icons.edit,
-                                        size: 18,
-                                        color: Color(0xFF4A80FF),
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'Edit',
-                                        style: GoogleFonts.poppins(
-                                          color: const Color(0xFF4A80FF),
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 16.0),
-                              InkWell(
-                                onTap: onDelete,
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 4,
-                                    horizontal: 4,
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(
-                                        Icons.delete_outline,
-                                        size: 18,
-                                        color: Colors.redAccent,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'Delete',
-                                        style: GoogleFonts.poppins(
-                                          color: Colors.redAccent,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
                         ],
-                      ],
-                    ),
-
-                    const SizedBox(height: 12.0),
-
-                    Row(
-                      children: [
-                        _buildTypePill(type, isCompulsory),
-                        const Spacer(),
-                        const Icon(
-                          Icons.people_alt_outlined,
-                          color: brandBlue,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 4.0),
-                        Text(
-                          '$currentParticipants/$maxParticipants',
-                          style: GoogleFonts.kanit(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: currentParticipants >= maxParticipants
-                                ? const Color(0xFFD91A1A)
-                                : brandBlue,
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: maxParticipants > 0
+                              ? currentParticipants / maxParticipants
+                              : 0,
+                          backgroundColor: Colors.grey[100],
+                          valueColor: const AlwaysStoppedAnimation<Color>(
+                            Color(0xFF4A80FF),
                           ),
+                          minHeight: 6,
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+                const SizedBox(width: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF6CC),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.star, size: 14, color: Colors.orange),
+                      const SizedBox(width: 4),
+                      Text(
+                        "$points Pts",
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange.shade800,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ),
+          ],
         ),
-
-        // [UPDATED] แสดงสถานะเสมอ (เอา if ออกแล้ว)
-        Positioned(
-          top: 12,
-          right: 16,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: statusBg,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: statusBorder),
-            ),
-            child: Text(
-              status,
-              style: GoogleFonts.poppins(
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
-                color: statusText,
-              ),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
-  Widget _buildInfoRow({required String text, IconData? icon}) {
-    return Row(
-      children: [
-        if (icon != null) ...[
-          Icon(icon, color: const Color(0xFF375987), size: 22),
-          const SizedBox(width: 12.0),
-        ],
-        Expanded(
-          child: Text(
-            text,
-            style: GoogleFonts.kanit(
-              fontWeight: FontWeight.w400,
-              fontSize: 14,
-              color: Colors.black,
-            ),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildTypePill(String type, bool isCompulsory) {
-    final label = isCompulsory ? 'TYPE: $type • Compulsory' : 'TYPE: $type';
+  Widget _tag(String text, Color bg, Color fg) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20.0),
-        border: Border.all(color: Colors.grey.shade400),
+        color: bg,
+        borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
-        label,
-        style: GoogleFonts.kanit(
-          color: Colors.black54,
-          fontWeight: FontWeight.bold,
+        text,
+        style: GoogleFonts.poppins(
           fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: fg,
         ),
       ),
     );

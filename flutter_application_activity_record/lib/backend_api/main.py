@@ -66,6 +66,9 @@ class ActivityResponse(BaseModel):
     maxParticipants: int
     status: str
     location: str = "-" # เพิ่ม location
+    activityDate: date | None = None
+    startTime: str | None = "-" 
+    endTime: str | None = "-"
 
     class Config:
         orm_mode = True
@@ -140,6 +143,21 @@ class ActivityFormRequest(BaseModel):
     ACTIVITY: ActivityData
     ORGANIZER: OrganizerData
     SESSIONS: list[SessionData]
+
+
+# [NEW] Schema สำหรับข้อมูลผู้เข้าร่วม (Participant)
+class ParticipantResponse(BaseModel):
+    empId: str
+    title: str | None = None 
+    name: str
+    department: str
+    status: str         # "Registered" หรือ "Joined"
+    checkInTime: str    # เวลาที่เช็คอิน (ถ้ามี)
+    
+    class Config:
+        orm_mode = True
+
+
 # --- Helper Functions ---
 def _bcrypt_safe(password: str) -> str:
     # ตัดรหัสผ่านให้ไม่เกิน 72 bytes เพื่อป้องกัน bcrypt error
@@ -549,11 +567,19 @@ def get_activities(db: Session = Depends(get_db)):
             
         # 2. หาสถานที่
         location = "-"
-        if act.sessions and len(act.sessions) > 0:
-            first_session = act.sessions[0]
-            start_time_str = first_session.START_TIME.strftime("%H:%M")
-            location = f"{first_session.LOCATION} at : {start_time_str}"
+        act_date = None
+        start_time = "-"
+        end_time = "-"
 
+        if act.sessions and len(act.sessions) > 0:
+            sorted_sessions = sorted(act.sessions, key=lambda x: x.SESSION_DATE)
+            first_session = sorted_sessions[0]
+            
+            start_time = first_session.START_TIME.strftime("%H:%M")
+            end_time = first_session.END_TIME.strftime("%H:%M")
+            location = f"{first_session.LOCATION}"
+            act_date = first_session.SESSION_DATE
+            
         # 3. [NEW] หาชื่อผู้จัด (Organizer Name)
         org_name = "-"
         # เช็คว่ามีความสัมพันธ์เชื่อมไปถึง Employee ได้ไหม
@@ -571,7 +597,10 @@ def get_activities(db: Session = Depends(get_db)):
             "maxParticipants": act.ACT_MAX_PARTICIPANTS,
             "status": act.ACT_STATUS,
             "currentParticipants": current_count,
-            "location": location
+            "location": location,
+            "activityDate": act_date, 
+            "startTime": start_time, 
+            "endTime": end_time,    
         })
         
     return results
@@ -899,6 +928,55 @@ def delete_activity(act_id: str, db: Session = Depends(get_db)):
         db.rollback()
         print(f"Delete Error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete: {str(e)}")
+
+@app.get("/activities/{act_id}/participants", response_model=list[ParticipantResponse])
+def get_activity_participants(act_id: str, db: Session = Depends(get_db)):
+    # 1. หา Session ทั้งหมดของกิจกรรมนี้
+    sessions = db.query(models.ActivitySession).filter(models.ActivitySession.ACT_ID == act_id).all()
+    session_ids = [s.SESSION_ID for s in sessions]
+
+    if not session_ids:
+        return []
+
+    # 2. ดึงคนลงทะเบียน (Registration)
+    regs = db.query(models.Registration).filter(models.Registration.SESSION_ID.in_(session_ids)).all()
+
+    # 3. ดึงคนเช็คอิน (CheckIn) เอามาทำ Map เพื่อให้ค้นหาเร็ว O(1)
+    checkins = db.query(models.CheckIn).filter(models.CheckIn.SESSION_ID.in_(session_ids)).all()
+    checked_in_map = {c.EMP_ID: c.CHECKIN_TIME for c in checkins}
+
+    results = []
+    # ใช้ Set เพื่อป้องกันชื่อซ้ำ (กรณีลงหลายรอบ)
+    processed_emp_ids = set()
+
+    for r in regs:
+        emp = r.employee
+        if emp.EMP_ID in processed_emp_ids:
+            continue
+            
+        processed_emp_ids.add(emp.EMP_ID)
+        
+        status = "Registered"
+        check_in_time = "-"
+
+        # ตรวจสอบว่าเช็คอินหรือยัง
+        if emp.EMP_ID in checked_in_map:
+            status = "Joined"
+            # แปลงเวลาเป็น HH:MM
+            t = checked_in_map[emp.EMP_ID]
+            check_in_time = t.strftime("%H:%M")
+
+        results.append({
+            "empId": emp.EMP_ID,
+            "title": emp.EMP_TITLE_EN,
+            "name": emp.EMP_NAME_EN,
+            "department": emp.department.DEP_NAME if emp.department else "-",
+            "status": status,
+            "checkInTime": check_in_time
+        })
+    
+    return results
+
 
 # หมายเหตุ: อย่าลืมรัน uvicorn ใหม่ทุกครั้งหลังแก้ไฟล์
 # uvicorn main:app --reload --host 0.0.0.0 --port 8000

@@ -116,7 +116,7 @@ class Registration(Base):
     EMP_ID = Column(String(5), ForeignKey("EMPLOYEE.EMP_ID"), nullable=False)
     SESSION_ID = Column(String(6), ForeignKey("ACTIVITY_SESSION.SESSION_ID"), nullable=False)
     REG_DATE = Column(Date, nullable=False)
-
+    employee = relationship("Employee")
 # --- 8. ตารางเช็คอิน ---
 class CheckIn(Base):
     __tablename__ = "CHECKIN"
