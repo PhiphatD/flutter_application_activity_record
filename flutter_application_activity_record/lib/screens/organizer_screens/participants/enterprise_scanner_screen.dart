@@ -22,19 +22,21 @@ class _EnterpriseScannerScreenState extends State<EnterpriseScannerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // ใช้ Stack เพื่อซ้อน Overlay บนกล้อง
+    // [UPDATED] คำนวณขนาดกรอบสแกนตามความกว้างหน้าจอ (70%)
+    // และจำกัดไม่ให้เล็กกว่า 250px หรือใหญ่กว่า 350px
+    final screenWidth = MediaQuery.of(context).size.width;
+    final scanWindowSize = (screenWidth * 0.7).clamp(250.0, 350.0);
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // 1. Camera Layer
           MobileScanner(
             controller: _controller,
             onDetect: (capture) {
               final List<Barcode> barcodes = capture.barcodes;
               for (final barcode in barcodes) {
                 if (barcode.rawValue != null) {
-                  // เจอ QR Code แล้ว ส่งค่ากลับทันที
                   _controller.stop();
                   Navigator.pop(context, barcode.rawValue);
                   break;
@@ -43,23 +45,20 @@ class _EnterpriseScannerScreenState extends State<EnterpriseScannerScreen> {
             },
           ),
 
-          // 2. Overlay Layer (พื้นที่มืด + กรอบโฟกัส)
           CustomPaint(
             painter: ScannerOverlayPainter(
               borderColor: Colors.white,
               borderRadius: 20,
               borderLength: 40,
               borderWidth: 8,
-              cutOutSize: 280,
+              cutOutSize: scanWindowSize, // [UPDATED] ใช้ค่า Dynamic
             ),
             child: Container(),
           ),
 
-          // 3. UI Controls Layer (ปุ่มต่างๆ)
           SafeArea(
             child: Column(
               children: [
-                // Top Bar
                 Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 16,
@@ -99,9 +98,8 @@ class _EnterpriseScannerScreenState extends State<EnterpriseScannerScreen> {
                   ),
                 ),
 
-                const Spacer(),
+                const Spacer(), // [UPDATED] ใช้ Spacer ดันข้อความไปอยู่ใต้กรอบพอดี
 
-                // Center Text Hint
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 24,
@@ -120,8 +118,8 @@ class _EnterpriseScannerScreenState extends State<EnterpriseScannerScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 40), // เว้นระยะจากกรอบ
-                // Bottom Controls (เหมือนรูปที่ 1 - ปุ่ม My QR)
+                const SizedBox(height: 40),
+
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 24),
@@ -130,8 +128,6 @@ class _EnterpriseScannerScreenState extends State<EnterpriseScannerScreen> {
                     children: [
                       InkWell(
                         onTap: () {
-                          // TODO: เปิดหน้า QR ของตัวเอง (ถ้าเป็น Employee)
-                          // หรือเปิดหน้า QR กิจกรรม (ถ้าเป็น Organizer)
                           Navigator.pop(context, "SHOW_MY_QR");
                         },
                         child: Column(
@@ -164,7 +160,6 @@ class _EnterpriseScannerScreenState extends State<EnterpriseScannerScreen> {
   }
 }
 
-// --- Helper: วาดกรอบสี่เหลี่ยมเจาะรู (เหมือนรูปที่ 1 เป๊ะๆ) ---
 class ScannerOverlayPainter extends CustomPainter {
   final Color borderColor;
   final double borderRadius;
@@ -185,10 +180,8 @@ class ScannerOverlayPainter extends CustomPainter {
     final width = size.width;
     final height = size.height;
 
-    // 1. สร้าง Path ของพื้นหลัง (เต็มจอ)
     final backgroundPath = Path()..addRect(Rect.fromLTWH(0, 0, width, height));
 
-    // 2. สร้าง Path ของรูเจาะตรงกลาง
     final cutOutRect = Rect.fromCenter(
       center: Offset(width / 2, height / 2),
       width: cutOutSize,
@@ -200,8 +193,7 @@ class ScannerOverlayPainter extends CustomPainter {
         RRect.fromRectAndRadius(cutOutRect, Radius.circular(borderRadius)),
       );
 
-    // [FIX] 3. ใช้ PathOperation.difference เพื่อตัดรูเจาะออกจากพื้นหลัง
-    // วิธีนี้จะวาดสีดำทับเฉพาะส่วนรอบนอก ส่วนตรงกลางจะโปร่งใสแน่นอน 100%
+    // ใช้ PathOperation.difference เพื่อเจาะรู (วิธีที่ถูกต้องที่สุด)
     final maskPath = Path.combine(
       PathOperation.difference,
       backgroundPath,
@@ -214,7 +206,6 @@ class ScannerOverlayPainter extends CustomPainter {
 
     canvas.drawPath(maskPath, backgroundPaint);
 
-    // 4. วาดขอบมุม 4 ด้าน (เหมือนเดิม)
     final borderPaint = Paint()
       ..color = borderColor
       ..style = PaintingStyle.stroke
@@ -222,7 +213,7 @@ class ScannerOverlayPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
 
     final path = Path();
-    // มุมบนซ้าย
+    // วาดมุมทั้ง 4 (โค้ดเดิมถูกต้องแล้ว)
     path.moveTo(cutOutRect.left, cutOutRect.top + borderLength);
     path.lineTo(cutOutRect.left, cutOutRect.top + borderRadius);
     path.quadraticBezierTo(
@@ -233,7 +224,6 @@ class ScannerOverlayPainter extends CustomPainter {
     );
     path.lineTo(cutOutRect.left + borderLength, cutOutRect.top);
 
-    // มุมบนขวา
     path.moveTo(cutOutRect.right - borderLength, cutOutRect.top);
     path.lineTo(cutOutRect.right - borderRadius, cutOutRect.top);
     path.quadraticBezierTo(
@@ -244,7 +234,6 @@ class ScannerOverlayPainter extends CustomPainter {
     );
     path.lineTo(cutOutRect.right, cutOutRect.top + borderLength);
 
-    // มุมล่างขวา
     path.moveTo(cutOutRect.right, cutOutRect.bottom - borderLength);
     path.lineTo(cutOutRect.right, cutOutRect.bottom - borderRadius);
     path.quadraticBezierTo(
@@ -255,7 +244,6 @@ class ScannerOverlayPainter extends CustomPainter {
     );
     path.lineTo(cutOutRect.right - borderLength, cutOutRect.bottom);
 
-    // มุมล่างซ้าย
     path.moveTo(cutOutRect.left + borderLength, cutOutRect.bottom);
     path.lineTo(cutOutRect.left + borderRadius, cutOutRect.bottom);
     path.quadraticBezierTo(

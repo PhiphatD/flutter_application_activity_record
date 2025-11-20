@@ -1,39 +1,12 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../widgets/activity_card.dart'; // <--- Import การ์ดใหม่
-import '../profile/profile_screen.dart'; // <--- Import ProfileScreen
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:flutter_application_activity_record/theme/app_colors.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../profile/profile_screen.dart';
+import 'activity_detail_screen.dart';
 
-// --- (ใหม่) 1. สร้าง Class Model สำหรับเก็บข้อมูล ---
-// (ใช้เก็บข้อมูลที่ดึงมาจาก Database หรือ List)
-class _Activity {
-  final String id;
-  final String type;
-  final String title;
-  final String location;
-  final String organizer;
-  final int points;
-  final int currentParticipants;
-  final int maxParticipants;
-  final bool isCompulsory;
-  final DateTime activityDate; // Key สำหรับจัดกลุ่ม
-
-  _Activity({
-    required this.id,
-    required this.type,
-    required this.title,
-    required this.location,
-    required this.organizer,
-    required this.points,
-    required this.currentParticipants,
-    required this.maxParticipants,
-    required this.isCompulsory,
-    required this.activityDate,
-  });
-}
-
-// --- (เหมือนเดิม) ---
 class ActivityFeedScreen extends StatefulWidget {
   const ActivityFeedScreen({super.key});
 
@@ -42,227 +15,193 @@ class ActivityFeedScreen extends StatefulWidget {
 }
 
 class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
-  bool _showOnlyFavorites = false; // State สำหรับปุ่ม Favorite
-  String _selectedFilter = 'Type'; // State สำหรับปุ่ม Filter
+  final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
+  bool _isLoading = true;
+  List<dynamic> _activities = [];
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
 
-  // --- (ใหม่) 2. List ข้อมูลจำลอง (แทน Database) ---
-  // (ย้ายข้อมูลที่เคย Hard-code ใน UI มาไว้ตรงนี้)
-  final List<_Activity> _mockActivities = [
-    _Activity(
-      id: '10',
-      type: 'Training',
-      title: 'ฝึกอบรม กลยุทธ์การสร้างแบรนด์',
-      location: 'ห้องประชุม A3-403 at : 13.00 PM',
-      organizer: 'Thanuay',
-      points: 200,
-      currentParticipants: 20,
-      maxParticipants: 40,
-      isCompulsory: false,
-      activityDate: DateTime(2025, 7, 23),
-    ),
-    _Activity(
-      id: '11',
-      type: 'Seminar',
-      title: 'งานสัมนาเทคโนโลยีรอบตัวเรา',
-      location: 'ห้องประชุม B6-310 at : 14.00 PM',
-      organizer: 'Thanuay',
-      points: 300,
-      currentParticipants: 12,
-      maxParticipants: 40,
-      isCompulsory: true,
-      activityDate: DateTime(2025, 7, 23), // วันที่เดียวกัน
-    ),
-    _Activity(
-      id: '12',
-      type: 'Workshop',
-      title: 'Workshop Microsoft365',
-      location: 'ห้องประชุม C9-203 at : 11.00 AM',
-      organizer: 'Thanuay',
-      points: 500,
-      currentParticipants: 40,
-      maxParticipants: 40,
-      isCompulsory: false,
-      activityDate: DateTime(2026, 1, 24), // คนละวัน
-    ),
-    // (ข้อมูลนี้ผมเพิ่มให้จากรอบที่แล้วเพื่อให้เห็นการ์ดอีกใบ)
-    _Activity(
-      id: '4',
-      type: 'Training',
-      title: 'ฝึกอบรม กลยุทธ์การสร้างแบรนด์ 2',
-      location: 'ห้องประชุม A3-403 at : 13.00 PM',
-      organizer: 'Thanuay',
-      points: 200,
-      currentParticipants: 0,
-      maxParticipants: 40,
-      isCompulsory: false,
-      activityDate: DateTime(2026, 1, 31), // คนละวัน
-    ),
-  ];
-
-  // (ใหม่) 3. ตัวแปรสำหรับเก็บข้อมูลที่ "จัดกลุ่ม" แล้ว
-  Map<DateTime, List<_Activity>> _groupedActivities = {};
-
-  // (ใหม่) 4. initState จะทำงานตอนเปิดหน้า
   @override
   void initState() {
     super.initState();
-    // จำลองการโหลดข้อมูลและจัดกลุ่ม
-    _loadAndGroupActivities();
+    _fetchActivities();
+    _searchController.addListener(() {
+      setState(() {
+        _searchQuery = _searchController.text.toLowerCase();
+      });
+    });
   }
 
-  // (ใหม่) 5. ฟังก์ชันสำหรับโหลดและจัดกลุ่มข้อมูล (นี่คือส่วนที่จำลองการดึง DB)
-  void _loadAndGroupActivities() {
-    // ในอนาคต คุณจะดึงข้อมูลจาก API หรือ DB ตรงนี้
-    // ตอนนี้เราใช้ _mockActivities แทน
-
-    // 1. เรียงลำดับข้อมูลตามวันที่ (เก่าไปใหม่)
-    _mockActivities.sort((a, b) => a.activityDate.compareTo(b.activityDate));
-
-    // 2. จัดกลุ่มข้อมูล
-    Map<DateTime, List<_Activity>> groups = {};
-    for (var activity in _mockActivities) {
-      // เราใช้ "วัน" เป็น key (ไม่สนใจ "เวลา" ในการจัดกลุ่ม)
-      final dateKey = DateTime(
-        activity.activityDate.year,
-        activity.activityDate.month,
-        activity.activityDate.day,
-      );
-
-      // ถ้ายังไม่มีกลุ่มสำหรับวันนี้ ให้สร้างกลุ่มใหม่
-      if (groups[dateKey] == null) {
-        groups[dateKey] = [];
+  Future<void> _fetchActivities() async {
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/activities'));
+      if (response.statusCode == 200) {
+        if (mounted) {
+          setState(() {
+            _activities = json.decode(utf8.decode(response.bodyBytes));
+            _isLoading = false;
+          });
+        }
       }
-
-      // เพิ่มกิจกรรมนี้เข้าไปในกลุ่มของวันนั้น
-      groups[dateKey]!.add(activity);
+    } catch (e) {
+      print("Error fetching activities: $e");
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
 
-    // 3. อัปเดต State เพื่อให้หน้าจอ re-build
-    setState(() {
-      _groupedActivities = groups;
+  // Logic การกรองและจัดกลุ่ม
+  Map<String, List<dynamic>> get _groupedActivities {
+    Map<String, List<dynamic>> groups = {};
+
+    // กรองตามคำค้นหา
+    final filtered = _activities.where((act) {
+      final title = (act['name'] ?? '').toString().toLowerCase();
+      return title.contains(_searchQuery);
+    }).toList();
+
+    // เรียงลำดับวันที่ (ใหม่ -> เก่า หรือ เก่า -> ใหม่ ตามต้องการ)
+    filtered.sort((a, b) {
+      DateTime dateA =
+          DateTime.tryParse(a['activityDate'] ?? '') ?? DateTime.now();
+      DateTime dateB =
+          DateTime.tryParse(b['activityDate'] ?? '') ?? DateTime.now();
+      return dateA.compareTo(dateB);
     });
+
+    for (var act in filtered) {
+      final dateStr = act['activityDate'] ?? '';
+      if (dateStr.isEmpty) continue;
+
+      DateTime date = DateTime.parse(dateStr);
+      String key = DateFormat('yyyy-MM-dd').format(date);
+
+      if (groups[key] == null) groups[key] = [];
+      groups[key]!.add(act);
+    }
+    return groups;
   }
 
   @override
   Widget build(BuildContext context) {
+    final groupedMap = _groupedActivities;
+    final dateKeys = groupedMap.keys.toList();
+
     return Scaffold(
-      backgroundColor: employeeBg,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // --- 1. Custom AppBar (เหมือนเดิม) ---
-            _buildCustomAppBar(),
-
-            // --- 2. Search Bar (เหมือนเดิม) ---
-            _buildSearchBar(),
-
-            // --- 3. Filter Section (เหมือนเดิม) ---
-            _buildFilterSection(),
-
-            // --- 4. (แก้ไข) Activity List ---
-            Expanded(
-              // (แก้ไข) เปลี่ยนจาก ListView -> ListView.builder
-              child: ListView.builder(
-                padding: EdgeInsets.only(
-                  left: 20.0,
-                  right: 20.0,
-                  top: 10.0,
-                  bottom: 16.0 + MediaQuery.of(context).padding.bottom,
-                ),
-                // (แก้ไข) นับจำนวน "วัน" (กลุ่ม) ที่มีกิจกรรม
-                itemCount: _groupedActivities.keys.length,
-                itemBuilder: (context, index) {
-                  // (แก้ไข) ดึง "วันที่" (Key) และ "List กิจกรรม" (Value)
-                  final date = _groupedActivities.keys.elementAt(index);
-                  final activitiesOnThisDate = _groupedActivities[date]!;
-
-                  // (แก้ไข) เรียก _buildActivityGroup 1 ครั้ง ต่อ 1 วัน
-                  return _buildActivityGroup(
-                    activityDate: formatActivityDate(date),
-                    relativeDate: getRelativeDateString(date),
-                    // (แก้ไข) ส่ง List<_Activity> เข้าไป
-                    cards: activitiesOnThisDate,
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // --- Widget สำหรับ Custom AppBar (เหมือนเดิม) ---
-  Widget _buildCustomAppBar() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      // [1] ใช้ Stack เพื่อซ้อนพื้นหลัง
+      body: Stack(
         children: [
-          // รูปโปรไฟล์
-          GestureDetector(
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const ProfileScreen()),
-              );
-            },
-            child: CircleAvatar(
-              radius: 22,
-              backgroundColor: Colors.grey.shade200,
-              // TODO: ใส่รูปจริง
-              backgroundImage: NetworkImage(
-                'https://i.pravatar.cc/150?img=32',
-              ), // <--- รูปตัวอย่าง
-            ),
-          ),
+          _buildBackground(), // พื้นหลัง Gradient สีฟ้า
+          SafeArea(
+            child: Column(
+              children: [
+                _buildCustomAppBar(),
+                _buildSearchBar(),
 
-          // ชื่อหน้า "Activity"
-          Text(
-            'Activity',
-            style: GoogleFonts.poppins(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF375987),
+                // [2] Content List
+                Expanded(
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : dateKeys.isEmpty
+                      ? _buildEmptyState()
+                      : ListView.builder(
+                          padding: const EdgeInsets.only(
+                            left: 20.0,
+                            right: 20.0,
+                            bottom: 20.0,
+                          ),
+                          itemCount: dateKeys.length,
+                          itemBuilder: (context, index) {
+                            final dateKey = dateKeys[index];
+                            final acts = groupedMap[dateKey]!;
+                            return _buildActivityGroup(dateKey, acts);
+                          },
+                        ),
+                ),
+              ],
             ),
-          ),
-
-          // ไอคอนแจ้งเตือน
-          IconButton(
-            icon: Icon(
-              Icons.notifications_outlined,
-              color: Colors.black54,
-              size: 28,
-            ),
-            onPressed: () {
-              // TODO: เปิดหน้า Notification
-            },
           ),
         ],
       ),
     );
   }
 
-  // --- Widget สำหรับ Search Bar (เหมือนเดิม) ---
+  Widget _buildBackground() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.white, // บนสุดขาว
+            Color(0xFFE6EFFF), // กลางๆ ฟ้าอ่อน (Theme Employee)
+            Colors.white, // ล่างขาว
+          ],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          stops: [0.0, 0.3, 0.8],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCustomAppBar() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          GestureDetector(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ProfileScreen()),
+            ),
+            child: CircleAvatar(
+              radius: 22,
+              backgroundColor: Colors.grey.shade200,
+              backgroundImage: const NetworkImage(
+                'https://i.pravatar.cc/150?img=32',
+              ),
+            ),
+          ),
+          Text(
+            'Activity Feed',
+            style: GoogleFonts.poppins(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: const Color(0xFF375987),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(
+              Icons.notifications_outlined,
+              color: Colors.black54,
+              size: 28,
+            ),
+            onPressed: () {},
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSearchBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
       child: Container(
         decoration: BoxDecoration(
-          color: const Color.fromARGB(255, 255, 255, 255),
+          color: Colors.white,
           borderRadius: BorderRadius.circular(12.0),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.black.withOpacity(0.05),
               blurRadius: 10.0,
               offset: const Offset(0, 4),
             ),
           ],
         ),
         child: TextField(
+          controller: _searchController,
           decoration: InputDecoration(
             hintText: 'Search activities...',
-            hintStyle: GoogleFonts.poppins(),
+            hintStyle: GoogleFonts.poppins(color: Colors.grey[400]),
             prefixIcon: Icon(Icons.search, color: Colors.grey.shade500),
             border: InputBorder.none,
             contentPadding: const EdgeInsets.symmetric(
@@ -275,184 +214,300 @@ class _ActivityFeedScreenState extends State<ActivityFeedScreen> {
     );
   }
 
-  // --- Widget สำหรับแถบ Filter (เหมือนเดิม) ---
-  Widget _buildFilterSection() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: Row(
-        children: [
-          // --- Filter Pills ---
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _buildFilterPill('Type'),
-                  _buildFilterPill('Date'),
-                  _buildFilterPill('Location'),
-                ],
-              ),
-            ),
-          ),
+  Widget _buildActivityGroup(String dateKey, List<dynamic> activities) {
+    DateTime date = DateTime.parse(dateKey);
+    String dayStr = DateFormat('EEE, d MMM y', 'en_US').format(date);
 
-          // --- ปุ่ม Favorite (Toggle) ---
-          IconButton(
-            icon: Icon(
-              _showOnlyFavorites ? Icons.favorite : Icons.favorite_border,
-              color: _showOnlyFavorites ? Colors.red : Colors.grey,
-            ),
-            onPressed: () {
-              setState(() {
-                _showOnlyFavorites = !_showOnlyFavorites;
-                // TODO: เพิ่ม Logic การกรองรายการโปรด
-              });
-            },
-          ),
-        ],
-      ),
-    );
-  }
+    // Relative Date Logic
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final diff = date.difference(today).inDays;
+    String relative = "";
+    if (diff == 0)
+      relative = "Today";
+    else if (diff == 1)
+      relative = "Tomorrow";
+    else if (diff > 1 && diff <= 7)
+      relative = "This Week";
 
-  // --- Widget ย่อยสำหรับสร้าง Filter Pill (เหมือนเดิม) ---
-  Widget _buildFilterPill(String label) {
-    return Container(
-      margin: const EdgeInsets.only(right: 8.0),
-      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20.0),
-        border: Border.all(color: Colors.grey.shade400),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: GoogleFonts.poppins(fontSize: 14, color: Colors.black87),
-          ),
-          const SizedBox(width: 8.0),
-          const Icon(
-            Icons.keyboard_arrow_down,
-            color: Colors.black87,
-            size: 20,
-          ),
-        ],
-      ),
-    );
-  }
-
-  // --- 6. (แก้ไข) Widget for grouping activities (ใช้ Logic แบบ todo_screen.dart) ---
-  Widget _buildActivityGroup({
-    required String activityDate,
-    required String relativeDate,
-    required List<_Activity>
-    cards, // <-- (แก้ไข) เปลี่ยน Type เป็น List<_Activity>
-  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 1. ส่วนหัวของวันที่ (ใช้ Style และ ระยะห่าง แบบ todo_screen.dart)
         Padding(
-          // (สำคัญ) ระยะห่างบน 16, ล่าง 8 (เหมือน todo_screen.dart)
-          padding: const EdgeInsets.only(top: 16.0, bottom: 8.0),
+          padding: const EdgeInsets.only(top: 20.0, bottom: 12.0),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
             children: [
               Text(
-                activityDate,
-                // (สำคัญ) ใช้ Style แบบ todo_screen.dart
-                style: const TextStyle(
+                dayStr,
+                style: GoogleFonts.poppins(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
                   color: Colors.black,
                 ),
               ),
-              const SizedBox(width: 12), // (เหมือน todo_screen.dart)
-              Text(
-                relativeDate,
-                // (สำคัญ) ใช้ Style แบบ todo_screen.dart
-                style: TextStyle(fontSize: 14, color: Colors.grey[700]),
-              ),
+              if (relative.isNotEmpty) ...[
+                const SizedBox(width: 12),
+                Text(
+                  relative,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ],
           ),
         ),
-
-        // 2. ส่วนของการ์ด (ใช้ Logic แบบ todo_screen.dart)
-        Column(
-          // ใช้ List.generate เพื่อสร้าง List ของ Widgets
-          children: List.generate(cards.length, (index) {
-            final activity = cards[index];
-
-            // สร้างการ์ดขึ้นมาก่อน
-            final cardWidget = ActivityCard(
-              id: activity.id,
-              type: activity.type,
-              title: activity.title,
-              location: activity.location,
-              organizer: activity.organizer,
-              points: activity.points,
-              currentParticipants: activity.currentParticipants,
-              maxParticipants: activity.maxParticipants,
-              isCompulsory: activity.isCompulsory,
-            );
-
-            // (สำคัญ) Logic ในการเว้นวรรคแบบ todo_screen.dart
-            if (index == 0) {
-              // ถ้าเป็นการ์ดใบแรก (index == 0) ของกลุ่ม -> ไม่ต้องเพิ่ม Padding
-              return cardWidget;
-            } else {
-              // ถ้าเป็นการ์ดใบถัดไป -> ให้เพิ่ม Padding(top: 16.0)
-              return Padding(
-                padding: const EdgeInsets.only(top: 16.0),
-                child: cardWidget,
-              );
-            }
-          }),
-        ),
+        ...activities
+            .map(
+              (act) => Padding(
+                padding: const EdgeInsets.only(bottom: 16.0),
+                child: _EmployeeActivityCard(activity: act),
+              ),
+            )
+            .toList(),
       ],
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.event_busy, size: 60, color: Colors.grey[300]),
+          const SizedBox(height: 16),
+          Text(
+            "No activities found",
+            style: GoogleFonts.poppins(color: Colors.grey),
+          ),
+        ],
+      ),
     );
   }
 }
 
-// --- ฟังก์ชันที่ 1: สำหรับจัดรูปแบบวันที่ (เหมือนเดิม) ---
-String formatActivityDate(DateTime eventDate) {
-  // 'd MMMM y' คือการจัดรูปแบบ (เช่น 23 July 2025)
-  // 'en_US' เพื่อบังคับให้เป็นชื่อเดือนภาษาอังกฤษ (July)
-  final formatter = DateFormat('d MMMM y', 'en_US');
-  return formatter.format(eventDate);
-}
+// [NEW] Enterprise Grade Card for Employee
+class _EmployeeActivityCard extends StatelessWidget {
+  final dynamic activity;
 
-// --- ฟังก์ชันที่ 2: สำหรับคำนวณระยะเวลาที่เหลือ (เหมือนเดิม) ---
-String getRelativeDateString(DateTime eventDate) {
-  final now = DateTime.now();
-  // ล้างค่าเวลา (ชั่วโมง, นาที) เพื่อเปรียบเทียบเฉพาะ "วัน"
-  final today = DateTime(now.year, now.month, now.day);
-  final cleanEventDate = DateTime(
-    eventDate.year,
-    eventDate.month,
-    eventDate.day,
-  );
+  const _EmployeeActivityCard({required this.activity});
 
-  // คำนวณส่วนต่างของวัน
-  final differenceInDays = cleanEventDate.difference(today).inDays;
+  @override
+  Widget build(BuildContext context) {
+    final String name = activity['name'] ?? 'Unknown Activity';
+    final String type = activity['actType'] ?? 'General';
+    final int points = activity['point'] ?? 0;
+    final String location = activity['location'] ?? '-';
+    final String startTime = activity['startTime'] ?? '-';
+    final String endTime = activity['endTime'] ?? '-';
+    final int current = activity['currentParticipants'] ?? 0;
+    final int max = activity['maxParticipants'] ?? 0;
+    final bool isCompulsory = (activity['isCompulsory'] == 1);
+    final String status = activity['status'] ?? 'Open';
 
-  if (differenceInDays < 0) {
-    return "Past Event"; // กิจกรรมที่ผ่านมาแล้ว
-  } else if (differenceInDays == 0) {
-    return "Today"; // วันนี้
-  } else if (differenceInDays == 1) {
-    return "Tomorrow"; // พรุ่งนี้
-  } else if (differenceInDays <= 7) {
-    return "This Week"; // ภายใน 7 วัน
-  } else if (differenceInDays <= 30) {
-    return "This Month"; // ภายใน 30 วัน
-  } else if (differenceInDays <= 60) {
-    return "Next 2 Months"; // ภายใน 60 วัน (ตรงกับตัวอย่าง)
-  } else if (differenceInDays <= 90) {
-    return "Next 3 Months"; // ภายใน 90 วัน
-  } else {
-    // ถ้าไกลกว่า 3 เดือน
-    final formatter = DateFormat('MMMM y', 'en_US'); // "July 2025"
-    return "in ${formatter.format(eventDate)}";
+    return InkWell(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ActivityDetailScreen(activityId: activity['actId']),
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade300, width: 1), // เส้นขอบ
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08), // เงาฟุ้งแบบผู้ดี
+              blurRadius: 15,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Tags Row
+            Row(
+              children: [
+                _tag(type, Colors.blue.shade50, Colors.blue.shade700),
+                const SizedBox(width: 8),
+                if (isCompulsory)
+                  _tag(
+                    "Compulsory",
+                    Colors.orange.shade50,
+                    Colors.orange.shade700,
+                  ),
+                const Spacer(),
+                // Points Badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF8E1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.orange.shade100),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.star_rounded,
+                        size: 16,
+                        color: Colors.orange.shade800,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        "$points Pts",
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange.shade900,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Title
+            Text(
+              name,
+              style: GoogleFonts.kanit(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF222222),
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 8),
+
+            // Info Rows
+            _infoRow(Icons.access_time_rounded, "$startTime - $endTime"),
+            const SizedBox(height: 4),
+            _infoRow(Icons.location_on_outlined, location),
+
+            const SizedBox(height: 12),
+            const Divider(height: 1, color: Color(0xFFF0F0F0)),
+            const SizedBox(height: 12),
+
+            // Participants Bar
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.people_alt_outlined,
+                            size: 16,
+                            color: Colors.grey[700],
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            "$current/$max Registered",
+                            style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: max > 0 ? current / max : 0,
+                          backgroundColor: Colors.grey[100],
+                          valueColor: const AlwaysStoppedAnimation<Color>(
+                            Color(0xFF4A80FF),
+                          ),
+                          minHeight: 6,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                // Status Button / Label
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: status == 'Full'
+                        ? Colors.red.shade50
+                        : Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    status == 'Open' ? 'Join Now' : status,
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: status == 'Full'
+                          ? Colors.red
+                          : Colors.blue.shade700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _infoRow(IconData icon, String text) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: Colors.grey[500]),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey[700]),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _tag(String text, Color bg, Color fg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: GoogleFonts.poppins(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: fg,
+        ),
+      ),
+    );
   }
 }

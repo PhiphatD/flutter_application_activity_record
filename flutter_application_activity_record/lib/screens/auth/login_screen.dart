@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart'; // [1] Import เพิ่ม
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'register/organization_register_screen.dart';
 import 'password/forgot_password_screen.dart';
@@ -22,9 +22,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
 
-  // *** API URL: ใช้ 10.0.2.2:8000 สำหรับ Android Emulator ***
-  // ถ้าใช้ iOS Simulator ใช้ http://localhost:8000
-  // ถ้าใช้เครื่องจริง ใช้ IP เครื่องคอมฯ เช่น http://192.168.1.x:8000
   final String apiUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
 
   void _login() async {
@@ -37,18 +34,14 @@ class _LoginScreenState extends State<LoginScreen> {
         Uri.parse('$apiUrl/login'),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({
-          "email": _emailController.text
-              .trim(), // trim() เพื่อตัดช่องว่างหัวท้าย
+          "email": _emailController.text.trim(),
           "password": _passwordController.text,
         }),
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-
-        // [2] บันทึกข้อมูลผู้ใช้ลงเครื่อง
         await _saveUserData(data);
-
         String role = data['role'];
         _navigateToUserMainScreen(role);
       } else {
@@ -78,45 +71,37 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // ฟังก์ชันบันทึกข้อมูลลง SharedPreferences
   Future<void> _saveUserData(Map<String, dynamic> data) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('role', data['role']);
     await prefs.setString('empId', data['emp_id']);
     await prefs.setString('name', data['name']);
 
-    // company_id อาจจะเป็น null ได้ในบางกรณี (ถ้าไม่ได้ส่งมา)
     if (data['company_id'] != null) {
       await prefs.setString('companyId', data['company_id']);
     }
 
-    // ตั้งค่าว่า Login แล้ว (เผื่อใช้เช็คใน SplashScreen)
-    await prefs.setBool('isLoggedIn', true);
+    if (data['org_id'] != null) {
+      await prefs.setString('orgId', data['org_id']);
+    } else {
+      await prefs.remove('orgId'); // ลบของเก่าทิ้งถ้าคนใหม่ไม่ใช่ Organizer
+    }
 
-    print("User data saved: ${data['name']} (${data['role']})");
+    await prefs.setBool('isLoggedIn', true);
   }
 
   void _navigateToUserMainScreen(String role) {
     Widget destinationScreen;
-
-    // เช็ค Role (แปลงเป็นตัวเล็กเพื่อความชัวร์)
     switch (role.toLowerCase()) {
       case 'admin':
-        destinationScreen = const OrganizerMainScreen();
-        print('Navigate to: Organizer/Admin Screen');
-        break;
       case 'organizer':
         destinationScreen = const OrganizerMainScreen();
-        print('Navigate to: Organizer/Admin Screen');
         break;
       case 'employee':
       default:
         destinationScreen = const EmployeeMainScreen();
-        print('Navigate to: Employee Screen');
         break;
     }
-
-    // ใช้ pushAndRemoveUntil เพื่อไม่ให้กด Back กลับมาหน้า Login ได้
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (context) => destinationScreen),
@@ -133,203 +118,228 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // ... (ส่วน UI Code เหมือนเดิม ไม่ต้องแก้) ...
+    final size = MediaQuery.of(context).size;
+    final isSmallScreen = size.height < 700;
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      const SizedBox(height: 76),
-                      Image.asset(
-                        'assets/images/login_ellipse.png',
-                        height: 200,
-                        errorBuilder: (context, error, stack) =>
-                            const SizedBox.shrink(),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        'Log in to continue',
-                        style: GoogleFonts.poppins(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w400,
-                          color: const Color(0xFF9E9E9E),
-                          letterSpacing: 0.2,
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      TextFormField(
-                        controller: _emailController,
-                        decoration: InputDecoration(
-                          hintText: 'Your Email',
-                          hintStyle: GoogleFonts.poppins(
-                            fontSize: 16,
-                            color: const Color(0xFFBDBDBD),
+        // [UPDATED] LayoutBuilder เพื่อการจัดวางที่สมบูรณ์แบบ
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Center(
+                  // จัดกลางจอถ้าพื้นที่เหลือ
+                  child: Container(
+                    constraints: const BoxConstraints(
+                      maxWidth: 450,
+                    ), // ไม่กว้างเกินไปบน iPad
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            height: isSmallScreen ? 40 : 60,
+                          ), // ปรับระยะห่างตามจอ
+                          // [UPDATED] Responsive Image
+                          Image.asset(
+                            'assets/images/login_ellipse.png',
+                            height: size.height * 0.25, // สูง 25% ของจอ
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stack) =>
+                                const SizedBox(height: 150),
                           ),
-                          prefixIcon: const Icon(Icons.email, size: 20),
-                          contentPadding: const EdgeInsets.symmetric(
-                            vertical: 14,
-                            horizontal: 14,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: const BorderSide(
-                              color: Color(0xFFE0E0E0),
-                            ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: const BorderSide(
-                              color: Color(0xFFE0E0E0),
-                            ),
-                          ),
-                        ),
-                        keyboardType: TextInputType.emailAddress,
-                        validator: (value) {
-                          if (value == null ||
-                              value.isEmpty ||
-                              !value.contains('@')) {
-                            return 'กรุณากรอกอีเมลให้ถูกต้อง';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 20),
-                      TextFormField(
-                        controller: _passwordController,
-                        decoration: InputDecoration(
-                          hintText: 'Password',
-                          hintStyle: GoogleFonts.poppins(
-                            fontSize: 16,
-                            color: const Color(0xFFBDBDBD),
-                          ),
-                          prefixIcon: const Icon(Icons.lock, size: 20),
-                          contentPadding: const EdgeInsets.symmetric(
-                            vertical: 14,
-                            horizontal: 14,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: const BorderSide(
-                              color: Color(0xFFE0E0E0),
-                            ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: const BorderSide(
-                              color: Color(0xFFE0E0E0),
-                            ),
-                          ),
-                        ),
-                        obscureText: true,
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'กรุณากรอกรหัสผ่าน';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 15),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: GestureDetector(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    const ForgotPasswordScreen(),
-                              ),
-                            );
-                          },
-                          child: Text(
-                            'Forgot Password?',
+                          const SizedBox(height: 20),
+
+                          Text(
+                            'Log in to continue',
                             style: GoogleFonts.poppins(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: const Color(0xFF424242),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w400,
+                              color: const Color(0xFF9E9E9E),
                               letterSpacing: 0.2,
                             ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 52,
-                        child: ElevatedButton(
-                          onPressed: _isLoading ? null : _login,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF434343),
-                            foregroundColor: Colors.white,
-                            elevation: 1,
-                            shadowColor: Colors.black.withOpacity(0.15),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                          ),
-                          child: _isLoading
-                              ? const CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2.0,
-                                )
-                              : Text(
-                                  'Log In',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w600,
-                                    letterSpacing: 0.2,
-                                  ),
-                                ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 52,
-                        child: ElevatedButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    const OrganizationRegisterScreen(),
+                          const SizedBox(height: 30),
+
+                          TextFormField(
+                            controller: _emailController,
+                            decoration: InputDecoration(
+                              hintText: 'Your Email',
+                              hintStyle: GoogleFonts.poppins(
+                                fontSize: 16,
+                                color: const Color(0xFFBDBDBD),
                               ),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFD9D9D9),
-                            foregroundColor: Colors.black54,
-                            elevation: 2,
-                            shadowColor: Colors.black.withOpacity(0.15),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
+                              prefixIcon: const Icon(Icons.email, size: 20),
+                              contentPadding: const EdgeInsets.symmetric(
+                                vertical: 16,
+                                horizontal: 14,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: const BorderSide(
+                                  color: Color(0xFFE0E0E0),
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: const BorderSide(
+                                  color: Color(0xFFE0E0E0),
+                                ),
+                              ),
+                            ),
+                            keyboardType: TextInputType.emailAddress,
+                            validator: (value) {
+                              if (value == null ||
+                                  value.isEmpty ||
+                                  !value.contains('@')) {
+                                return 'กรุณากรอกอีเมลให้ถูกต้อง';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 20),
+
+                          TextFormField(
+                            controller: _passwordController,
+                            decoration: InputDecoration(
+                              hintText: 'Password',
+                              hintStyle: GoogleFonts.poppins(
+                                fontSize: 16,
+                                color: const Color(0xFFBDBDBD),
+                              ),
+                              prefixIcon: const Icon(Icons.lock, size: 20),
+                              contentPadding: const EdgeInsets.symmetric(
+                                vertical: 16,
+                                horizontal: 14,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: const BorderSide(
+                                  color: Color(0xFFE0E0E0),
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: const BorderSide(
+                                  color: Color(0xFFE0E0E0),
+                                ),
+                              ),
+                            ),
+                            obscureText: true,
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'กรุณากรอกรหัสผ่าน';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 15),
+
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: GestureDetector(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const ForgotPasswordScreen(),
+                                  ),
+                                );
+                              },
+                              child: Text(
+                                'Forgot Password?',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 14, // ปรับให้อ่านง่ายขึ้น
+                                  fontWeight: FontWeight.w600,
+                                  color: const Color(0xFF424242),
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
                             ),
                           ),
-                          child: Text(
-                            'Register Your Organization',
-                            style: GoogleFonts.poppins(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
+                          const SizedBox(height: 24),
+
+                          SizedBox(
+                            width: double.infinity,
+                            height: 56, // ปุ่มสูงขึ้นนิดหน่อยเพื่อให้กดง่าย
+                            child: ElevatedButton(
+                              onPressed: _isLoading ? null : _login,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF434343),
+                                foregroundColor: Colors.white,
+                                elevation: 1,
+                                shadowColor: Colors.black.withOpacity(0.15),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                              ),
+                              child: _isLoading
+                                  ? const CircularProgressIndicator(
+                                      color: Colors.white,
+                                    )
+                                  : Text(
+                                      'Log In',
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w600,
+                                        letterSpacing: 0.2,
+                                      ),
+                                    ),
                             ),
                           ),
-                        ),
+                          const SizedBox(height: 16),
+
+                          SizedBox(
+                            width: double.infinity,
+                            height: 56,
+                            child: ElevatedButton(
+                              onPressed: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        const OrganizationRegisterScreen(),
+                                  ),
+                                );
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(
+                                  0xFFF5F5F5,
+                                ), // สีอ่อนลงเพื่อให้ปุ่ม Log In เด่นกว่า
+                                foregroundColor: Colors.black87,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                  side: BorderSide(color: Colors.grey.shade300),
+                                ),
+                              ),
+                              child: Text(
+                                'Register Organization',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            height: isSmallScreen ? 40 : 60,
+                          ), // พื้นที่ด้านล่าง
+                        ],
                       ),
-                      const SizedBox(height: 24),
-                    ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );

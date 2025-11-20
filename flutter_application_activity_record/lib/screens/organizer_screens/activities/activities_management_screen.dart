@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'activity_create_screen.dart';
 import 'activity_edit_screen.dart';
@@ -20,17 +21,14 @@ class ActivityManagementScreen extends StatefulWidget {
 class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchText = '';
-  final String _currentOrgId = 'O0001'; // Mock ID
-  List<String> _selectedTypes = []; // เก็บ Type ที่เลือก
-  String? _selectedStatus; // เก็บ Status ที่เลือก
-  List<String> _availableTypes = []; // เก็บ Type ทั้งหมดที่มีใน DB (ดึง Auto)
+  String _currentOrgId = '';
+  List<String> _selectedTypes = [];
+  String? _selectedStatus;
+  List<String> _availableTypes = [];
 
-  int _filterCompulsoryIndex = 0; // 0=All, 1=Compulsory, 2=Optional
-  bool _filterOnlyAvailable = false; // Hide activities that are fully booked
-  // 0 = My Activities, 1 = Other Organizers
+  int _filterCompulsoryIndex = 0;
+  bool _filterOnlyAvailable = false;
   int _selectedOwnerSegment = 0;
-
-  // [NEW] 0 = Active (Today & Future), 1 = History (Past)
   int _selectedTimeFilter = 0;
 
   bool _isLoading = true;
@@ -39,12 +37,20 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   @override
   void initState() {
     super.initState();
-    _fetchActivities();
+    _loadCurrentUser();
     _searchController.addListener(() {
       setState(() {
         _searchText = _searchController.text.trim();
       });
     });
+  }
+
+  Future<void> _loadCurrentUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _currentOrgId = prefs.getString('orgId') ?? '';
+    });
+    _fetchActivities(); // โหลดกิจกรรมหลังจากได้ ID แล้ว
   }
 
   Future<void> _fetchActivities() async {
@@ -60,7 +66,6 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
             .map((json) => Activity.fromJson(json))
             .toList();
 
-        // [NEW] ดึง Type ที่ไม่ซ้ำกันออกมาเพื่อทำตัวเลือก Filter
         final types = loadedActivities.map((a) => a.actType).toSet().toList();
         if (mounted) {
           setState(() {
@@ -83,21 +88,14 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     super.dispose();
   }
 
-  // [UPDATED] Logic การกรองที่ซับซ้อนขึ้น (Owner + Time + Search)
   List<Activity> _filteredActivities() {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
 
     return _activities.where((a) {
-      // 1. Filter by Owner (My vs Others)
-      final isMine =
-          a.orgId == _currentOrgId; // *ในระบบจริงควรเช็คจาก ID ที่ Login
-      // หมายเหตุ: เนื่องจากตอนนี้เรา Mock Login อาจจะต้องปรับ Logic ตรงนี้ให้ตรงกับ ID จริง
-      // หรือถ้าใช้ระบบชื่อแบบหน้า Participant ก็ใช้ a.organizerName == 'My Name'
-
+      final isMine = a.orgId == _currentOrgId;
       final ownerMatch = (_selectedOwnerSegment == 0) ? isMine : !isMine;
 
-      // 2. Filter by Time (Active vs History)
       final actDate = DateTime(
         a.activityDate.year,
         a.activityDate.month,
@@ -106,39 +104,29 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
 
       bool timeMatch;
       if (_selectedTimeFilter == 0) {
-        // Active: วันนี้ หรือ อนาคต
         timeMatch = !actDate.isBefore(today);
       } else {
-        // History: อดีต (เมื่อวานลงไป)
         timeMatch = actDate.isBefore(today);
       }
 
-      // [NEW] 3. Filter by Type (Multiple selection)
       if (_selectedTypes.isNotEmpty && !_selectedTypes.contains(a.actType)) {
         return false;
       }
 
-      // [NEW] 4. Filter by Status (Single selection)
       if (_selectedStatus != null && a.status != _selectedStatus) {
         return false;
       }
 
-      // [NEW] 5. Filter by Compulsory
-      if (_filterCompulsoryIndex == 1 && a.isCompulsory == 0)
-        return false; // เลือก Compulsory แต่กิจกรรมไม่ใช่
-      if (_filterCompulsoryIndex == 2 && a.isCompulsory == 1)
-        return false; // เลือก Optional แต่กิจกรรมเป็น Compulsory
+      if (_filterCompulsoryIndex == 1 && a.isCompulsory == 0) return false;
+      if (_filterCompulsoryIndex == 2 && a.isCompulsory == 1) return false;
 
-      // [NEW] 6. Filter by Availability (Hide Full)
       if (_filterOnlyAvailable) {
-        // ถ้าเต็มแล้ว (และไม่ใช่ 0/0) ให้ซ่อน
         if (a.maxParticipants > 0 &&
             a.currentParticipants >= a.maxParticipants) {
           return false;
         }
       }
 
-      // 3. Filter by Search Text
       if (_searchText.isEmpty) {
         return ownerMatch && timeMatch;
       }
@@ -155,12 +143,9 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   }
 
   Map<DateTime, List<Activity>> _groupActivities(List<Activity> list) {
-    // Sorting
     if (_selectedTimeFilter == 0) {
-      // Active: เรียง วันใกล้ -> ไกล
       list.sort((a, b) => a.activityDate.compareTo(b.activityDate));
     } else {
-      // History: เรียง วันใหม่ -> เก่า
       list.sort((a, b) => b.activityDate.compareTo(a.activityDate));
     }
 
@@ -177,16 +162,13 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     return groups;
   }
 
-  // --- Helper Widgets สำหรับ Filter Modal ---
   Widget _buildBackground() {
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          // สีเริ่มจากเหลืองอ่อน (Organizer Theme) ไล่ลงมาเป็นสีขาว
           colors: [Color(0xFFFFF6CC), Colors.white],
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          // ปรับจุดหยุดของสีเหลืองให้ลงมาลึกหน่อย เพื่อให้ครอบคลุมส่วน Header
           stops: [0.0, 0.4],
         ),
       ),
@@ -199,7 +181,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
       child: GestureDetector(
         onTap: () {
           setStateModal(() => _filterCompulsoryIndex = index);
-          setState(() {}); // อัปเดตหน้าหลักด้วย
+          setState(() {});
         },
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
@@ -225,7 +207,6 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     return Container(width: 1, height: 24, color: Colors.grey.shade300);
   }
 
-  // [NEW] ฟังก์ชันแสดงหน้าต่างกรอง
   void _showFilterModal() {
     showModalBottomSheet(
       context: context,
@@ -275,8 +256,6 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                         ],
                       ),
                       const SizedBox(height: 16),
-
-                      // 1. Type
                       Text(
                         "Type",
                         style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
@@ -312,10 +291,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                           );
                         }).toList(),
                       ),
-
                       const SizedBox(height: 20),
-
-                      // 2. Status
                       Text(
                         "Status",
                         style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
@@ -323,7 +299,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                       const SizedBox(height: 8),
                       Wrap(
                         spacing: 8,
-                        children: ['Open', 'Full', 'Closed', 'Canceled'].map((
+                        children: ['Open', 'Full', 'Closed', 'Cancelled'].map((
                           status,
                         ) {
                           final isSelected = _selectedStatus == status;
@@ -348,12 +324,9 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                           );
                         }).toList(),
                       ),
-
                       const SizedBox(height: 20),
                       const Divider(),
                       const SizedBox(height: 10),
-
-                      // 3. Compulsory
                       Text(
                         "Requirement",
                         style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
@@ -376,10 +349,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                           ],
                         ),
                       ),
-
                       const SizedBox(height: 20),
-
-                      // 4. Availability
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -406,7 +376,6 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                           color: Colors.grey,
                         ),
                       ),
-
                       const SizedBox(height: 30),
                       SizedBox(
                         width: double.infinity,
@@ -420,7 +389,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                             padding: const EdgeInsets.symmetric(vertical: 14),
                           ),
                           child: Text(
-                            "Apply Filters",
+                            "Done",
                             style: GoogleFonts.poppins(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
@@ -468,7 +437,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // ไม่ต้องกำหนด backgroundColor ที่ Scaffold เพราะเราจะใช้ Stack ทับ
+      // ใช้ Stack เพื่อซ้อนพื้นหลัง
       floatingActionButton: SafeArea(
         bottom: true,
         child: Padding(
@@ -487,10 +456,8 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
         ),
       ),
       body: Stack(
-        // [NEW] ใช้ Stack เพื่อซ้อนพื้นหลัง
         children: [
-          _buildBackground(), // [NEW] วางพื้นหลังไว้ล่างสุด
-          // เนื้อหาเดิม
+          _buildBackground(),
           SafeArea(
             child: Column(
               children: [
@@ -498,10 +465,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                 _buildSearchBar(),
                 _buildOwnerSegment(),
                 _buildTimeFilter(),
-
-                // ปรับ Divider ให้จางลงหน่อยเพื่อให้เข้ากับพื้นหลังใหม่
                 const Divider(height: 1, thickness: 1, color: Colors.black12),
-
                 Expanded(
                   child: _isLoading
                       ? const Center(child: CircularProgressIndicator())
@@ -561,7 +525,6 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
         itemBuilder: (context, index) {
           final date = dateKeys[index];
           final activitiesOnDate = groupedMap[date]!;
-          // เช็คว่าเป็นของฉันไหม เพื่อแสดงปุ่ม Edit/Delete
           final isMine = _selectedOwnerSegment == 0;
           return _buildActivityGroup(date, activitiesOnDate, isMine);
         },
@@ -699,8 +662,6 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     );
   }
 
-  // --- UI Components ---
-
   Widget _buildCustomAppBar() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
@@ -755,12 +716,12 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   }
 
   Widget _buildSearchBar() {
-    // เช็คว่ามีการใช้ Filter อยู่หรือไม่ (ถ้าใช้จะเปลี่ยนสีปุ่ม)
     final hasFilter =
         _selectedTypes.isNotEmpty ||
         _selectedStatus != null ||
         _filterCompulsoryIndex != 0 ||
         _filterOnlyAvailable;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
       child: Row(
@@ -794,14 +755,11 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
             ),
           ),
           const SizedBox(width: 12),
-
-          // [NEW] Filter Button
           GestureDetector(
             onTap: _showFilterModal,
             child: Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                // ถ้ามี Filter ให้เป็นสีน้ำเงิน ถ้าไม่มีเป็นสีขาว
                 color: hasFilter ? const Color(0xFF4A80FF) : Colors.white,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
@@ -814,9 +772,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
               ),
               child: Icon(
                 Icons.filter_list_rounded,
-                color: hasFilter
-                    ? Colors.white
-                    : Colors.grey.shade700, // เปลี่ยนสีไอคอน
+                color: hasFilter ? Colors.white : Colors.grey.shade700,
               ),
             ),
           ),
@@ -826,75 +782,84 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   }
 
   Widget _buildOwnerSegment() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 4.0),
-      child: Row(
-        children: [
-          ChoiceChip(
-            avatar: Icon(
-              Icons.person_outline,
-              size: 18,
-              color: _selectedOwnerSegment == 0 ? Colors.black : Colors.grey,
-            ),
-            label: const Text('My Activities'),
-            labelStyle: TextStyle(
-              color: _selectedOwnerSegment == 0 ? Colors.black : Colors.black87,
-              fontWeight: _selectedOwnerSegment == 0
-                  ? FontWeight.bold
-                  : FontWeight.normal,
-            ),
-            selected: _selectedOwnerSegment == 0,
-            onSelected: (selected) {
-              if (selected) setState(() => _selectedOwnerSegment = 0);
-            },
-            backgroundColor: Colors.white,
-            selectedColor: const Color(0xFFFFD600),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24.0),
-              side: BorderSide(
+    // [FIX] เพิ่ม Align ครอบเพื่อให้ชิดซ้าย
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 4.0),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.start,
+          children: [
+            ChoiceChip(
+              avatar: Icon(
+                Icons.person_outline,
+                size: 18,
+                color: _selectedOwnerSegment == 0 ? Colors.black : Colors.grey,
+              ),
+              label: const Text('My Activities'),
+              labelStyle: TextStyle(
                 color: _selectedOwnerSegment == 0
-                    ? const Color(0xFFFFD600)
-                    : Colors.grey.shade400,
+                    ? Colors.black
+                    : Colors.black87,
+                fontWeight: _selectedOwnerSegment == 0
+                    ? FontWeight.bold
+                    : FontWeight.normal,
               ),
+              selected: _selectedOwnerSegment == 0,
+              onSelected: (selected) {
+                if (selected) setState(() => _selectedOwnerSegment = 0);
+              },
+              backgroundColor: Colors.white,
+              selectedColor: const Color(0xFFFFD600),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24.0),
+                side: BorderSide(
+                  color: _selectedOwnerSegment == 0
+                      ? const Color(0xFFFFD600)
+                      : Colors.grey.shade400,
+                ),
+              ),
+              showCheckmark: false,
             ),
-            showCheckmark: false,
-          ),
-          const SizedBox(width: 8.0),
-          ChoiceChip(
-            avatar: Icon(
-              Icons.group_outlined,
-              size: 18,
-              color: _selectedOwnerSegment == 1 ? Colors.black : Colors.grey,
-            ),
-            label: const Text('Other Organizers'),
-            labelStyle: TextStyle(
-              color: _selectedOwnerSegment == 1 ? Colors.black : Colors.black87,
-              fontWeight: _selectedOwnerSegment == 1
-                  ? FontWeight.bold
-                  : FontWeight.normal,
-            ),
-            selected: _selectedOwnerSegment == 1,
-            onSelected: (selected) {
-              if (selected) setState(() => _selectedOwnerSegment = 1);
-            },
-            backgroundColor: Colors.white,
-            selectedColor: const Color(0xFFFFD600),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24.0),
-              side: BorderSide(
+            const SizedBox(width: 8.0),
+            ChoiceChip(
+              avatar: Icon(
+                Icons.group_outlined,
+                size: 18,
+                color: _selectedOwnerSegment == 1 ? Colors.black : Colors.grey,
+              ),
+              label: const Text('Other Organizers'),
+              labelStyle: TextStyle(
                 color: _selectedOwnerSegment == 1
-                    ? const Color(0xFFFFD600)
-                    : Colors.grey.shade400,
+                    ? Colors.black
+                    : Colors.black87,
+                fontWeight: _selectedOwnerSegment == 1
+                    ? FontWeight.bold
+                    : FontWeight.normal,
               ),
+              selected: _selectedOwnerSegment == 1,
+              onSelected: (selected) {
+                if (selected) setState(() => _selectedOwnerSegment = 1);
+              },
+              backgroundColor: Colors.white,
+              selectedColor: const Color(0xFFFFD600),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24.0),
+                side: BorderSide(
+                  color: _selectedOwnerSegment == 1
+                      ? const Color(0xFFFFD600)
+                      : Colors.grey.shade400,
+                ),
+              ),
+              showCheckmark: false,
             ),
-            showCheckmark: false,
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  // [NEW] Time Filter Tabs (Active / History)
   Widget _buildTimeFilter() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
@@ -947,7 +912,6 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     );
   }
 
-  // --- Helpers ---
   bool _isSameDay(DateTime d1, DateTime d2) {
     return d1.year == d2.year && d1.month == d2.month && d1.day == d2.day;
   }
@@ -1107,12 +1071,13 @@ class _OrganizerActivityCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.grey.shade200),
+          // [FIX 1] ดีไซน์ Enterprise: เส้นขอบชัด + เงาฟุ้ง
+          border: Border.all(color: Colors.grey.shade300, width: 1),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
+              color: Colors.black.withOpacity(0.1), // เงาเข้มขึ้น
+              blurRadius: 12,
+              offset: const Offset(0, 6),
             ),
           ],
         ),
@@ -1120,17 +1085,21 @@ class _OrganizerActivityCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // [Row 1] Type & Points & Status Tags
             Row(
               children: [
                 _tag(type, Colors.blue.shade50, Colors.blue.shade700),
                 const SizedBox(width: 8),
-                if (isCompulsory)
+                if (isCompulsory) ...[
                   _tag(
                     "Compulsory",
                     Colors.orange.shade50,
                     Colors.orange.shade700,
                   ),
+                  const SizedBox(width: 8),
+                ],
                 const Spacer(),
+                // Status Tag
                 _tag(
                   status,
                   status == 'Open'
@@ -1143,8 +1112,9 @@ class _OrganizerActivityCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
+
+            // [Row 2] Title + Action Buttons
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
@@ -1152,39 +1122,46 @@ class _OrganizerActivityCard extends StatelessWidget {
                     title,
                     style: GoogleFonts.kanit(
                       fontSize: 16,
-                      fontWeight: FontWeight.w500,
+                      fontWeight: FontWeight.w600, // เพิ่มน้ำหนักตัวหนังสือ
+                      color: const Color(0xFF222222),
                     ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 if (showActions) ...[
                   const SizedBox(width: 8),
+                  // ปุ่ม Edit (ดีไซน์ใหม่: พื้นหลังเทาอ่อน)
                   InkWell(
                     onTap: onEdit,
                     child: Container(
-                      padding: const EdgeInsets.all(6),
+                      padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                         color: Colors.grey.shade100,
                         borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey.shade300),
                       ),
                       child: const Icon(
                         Icons.edit_outlined,
-                        size: 20,
+                        size: 18,
                         color: Colors.blueAccent,
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
+                  // ปุ่ม Delete (ดีไซน์ใหม่: พื้นหลังแดงอ่อน)
                   InkWell(
                     onTap: onDelete,
                     child: Container(
-                      padding: const EdgeInsets.all(6),
+                      padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                         color: Colors.red.shade50,
                         borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red.shade200),
                       ),
                       child: const Icon(
                         Icons.delete_outline,
-                        size: 20,
+                        size: 18,
                         color: Colors.redAccent,
                       ),
                     ),
@@ -1193,6 +1170,8 @@ class _OrganizerActivityCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
+
+            // [Row 3] Time + Duration
             Row(
               children: [
                 Icon(
@@ -1221,7 +1200,10 @@ class _OrganizerActivityCard extends StatelessWidget {
                 ],
               ],
             ),
+
             const SizedBox(height: 6),
+
+            // [Row 4] Location
             Row(
               children: [
                 Icon(
@@ -1243,7 +1225,9 @@ class _OrganizerActivityCard extends StatelessWidget {
                 ),
               ],
             ),
+
             const SizedBox(height: 6),
+            // [Row 5] Host Name
             Row(
               children: [
                 Icon(Icons.person_outline, size: 16, color: Colors.grey[500]),
@@ -1261,9 +1245,12 @@ class _OrganizerActivityCard extends StatelessWidget {
                 ),
               ],
             ),
+
             const SizedBox(height: 12),
-            const Divider(height: 1, color: Color(0xFFEEEEEE)),
+            const Divider(height: 1, color: Color(0xFFF0F0F0)), // เส้นคั่นบางๆ
             const SizedBox(height: 12),
+
+            // [Row 6] Progress Bar & Points
             Row(
               children: [
                 Expanded(
@@ -1275,7 +1262,7 @@ class _OrganizerActivityCard extends StatelessWidget {
                           Icon(
                             Icons.people_alt,
                             size: 16,
-                            color: Colors.grey[800],
+                            color: const Color(0xFF424242),
                           ),
                           const SizedBox(width: 4),
                           Text(
@@ -1283,7 +1270,7 @@ class _OrganizerActivityCard extends StatelessWidget {
                             style: GoogleFonts.poppins(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
-                              color: Colors.grey[800],
+                              color: const Color(0xFF424242),
                             ),
                           ),
                         ],
@@ -1295,7 +1282,7 @@ class _OrganizerActivityCard extends StatelessWidget {
                           value: maxParticipants > 0
                               ? currentParticipants / maxParticipants
                               : 0,
-                          backgroundColor: Colors.grey[100],
+                          backgroundColor: Colors.grey[200],
                           valueColor: const AlwaysStoppedAnimation<Color>(
                             Color(0xFF4A80FF),
                           ),
@@ -1306,25 +1293,31 @@ class _OrganizerActivityCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 16),
+                // Points Badge
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
                     vertical: 4,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFF6CC),
+                    color: const Color(0xFFFFF8E1), // สีเหลืองอ่อน
                     borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.orange.shade100),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.star, size: 14, color: Colors.orange),
+                      Icon(
+                        Icons.star_rounded,
+                        size: 16,
+                        color: Colors.orange.shade800,
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         "$points Pts",
                         style: GoogleFonts.poppins(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          color: Colors.orange.shade800,
+                          color: Colors.orange.shade900,
                         ),
                       ),
                     ],
@@ -1340,10 +1333,13 @@ class _OrganizerActivityCard extends StatelessWidget {
 
   Widget _tag(String text, Color bg, Color fg) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 4,
+      ), // เพิ่ม Padding นิดหน่อย
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(6), // ปรับมุมโค้ง
       ),
       child: Text(
         text,

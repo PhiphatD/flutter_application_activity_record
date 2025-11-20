@@ -19,7 +19,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late Timer _timer;
   Duration _duration = const Duration(minutes: 10);
 
-  // --- ตัวแปรข้อมูลพนักงาน ---
   String empName = "Loading...";
   String empTitle = "";
   String empId = "...";
@@ -28,14 +27,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String companyName = "...";
   String avatarUrl = "https://i.pravatar.cc/150?img=12";
   String qrData = "";
-
-  // --- ตัวแปรใหม่สำหรับ Lower Section ---
   String empEmail = "-";
   String empPhone = "-";
   String empStartDateFormatted = "-";
   String serviceDuration = "-";
 
-  // API URL
   final String apiUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
 
   @override
@@ -55,28 +51,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final response = await http.get(
         Uri.parse('$apiUrl/employees/$storedEmpId'),
       );
-
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-
-        setState(() {
-          empId = data['EMP_ID'] ?? storedEmpId;
-          empTitle = data['EMP_TITLE_EN'] ?? "";
-          empName = data['EMP_NAME_EN'] ?? "Unknown";
-          empPosition = data['EMP_POSITION'] ?? "-";
-          empDepartment = data['DEP_NAME'] ?? "-";
-          companyName = data['COMPANY_NAME'] ?? "-";
-          empEmail = data['EMP_EMAIL'] ?? "-";
-          empPhone = data['EMP_PHONE'] ?? "-";
-
-          qrData = empId;
-
-          if (data['EMP_STARTDATE'] != null) {
-            DateTime startDate = DateTime.parse(data['EMP_STARTDATE']);
-            empStartDateFormatted = DateFormat('d MMM y').format(startDate);
-            _calculateServiceDuration(startDate);
-          }
-        });
+        if (mounted) {
+          setState(() {
+            empId = data['EMP_ID'] ?? storedEmpId;
+            empTitle = data['EMP_TITLE_EN'] ?? "";
+            empName = data['EMP_NAME_EN'] ?? "Unknown";
+            empPosition = data['EMP_POSITION'] ?? "-";
+            empDepartment = data['DEP_NAME'] ?? "-";
+            companyName = data['COMPANY_NAME'] ?? "-";
+            empEmail = data['EMP_EMAIL'] ?? "-";
+            empPhone = data['EMP_PHONE'] ?? "-";
+            qrData = empId;
+            if (data['EMP_STARTDATE'] != null) {
+              DateTime startDate = DateTime.parse(data['EMP_STARTDATE']);
+              empStartDateFormatted = DateFormat('d MMM y').format(startDate);
+              _calculateServiceDuration(startDate);
+            }
+          });
+        }
       }
     } catch (e) {
       print("Error fetching profile: $e");
@@ -88,14 +82,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     int days = now.difference(startDate).inDays;
     int years = days ~/ 365;
     int months = (days % 365) ~/ 30;
-
-    setState(() {
-      if (years > 0) {
-        serviceDuration = "$years Years ${months > 0 ? '$months Months' : ''}";
-      } else {
-        serviceDuration = "$months Months";
-      }
-    });
+    if (mounted) {
+      setState(() {
+        if (years > 0)
+          serviceDuration =
+              "$years Years ${months > 0 ? '$months Months' : ''}";
+        else
+          serviceDuration = "$months Months";
+      });
+    }
   }
 
   @override
@@ -133,22 +128,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
       SnackBar(
         content: Text('$label copied to clipboard'),
         duration: const Duration(seconds: 1),
-        behavior: SnackBarBehavior.floating,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    // สีเริ่มต้นของ Gradient (ใช้เป็นสี AppBar ด้วยเพื่อความเนียน)
-    const Color topGradientColor = Color(0xFFE6EFFF);
+    const Color topGradientColor = Color(0xFFE6EFFF); // สีฟ้าอ่อน
+    final screenSize = MediaQuery.of(context).size;
 
     return Scaffold(
-      // 1. ปิดการขยาย Body ไปหลัง AppBar เพื่อแก้ปัญหาทับซ้อน
       extendBodyBehindAppBar: false,
-
       appBar: AppBar(
-        // 2. เปลี่ยนสีพื้นหลัง AppBar ให้ตรงกับสีเริ่มของ Gradient
         backgroundColor: topGradientColor,
         elevation: 0,
         foregroundColor: const Color(0xFF375987),
@@ -198,13 +189,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onPressed: () async {
               final prefs = await SharedPreferences.getInstance();
               await prefs.clear();
-              if (mounted) {
+              if (mounted)
                 Navigator.pushNamedAndRemoveUntil(
                   context,
                   '/',
                   (route) => false,
                 );
-              }
             },
           ),
         ],
@@ -212,26 +202,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            _buildBackground(topGradientColor), // ส่งสีเข้าไป
+            _buildBackground(topGradientColor),
             SingleChildScrollView(
-              // 3. ปรับ Padding หลังย้ายหัวข้อขึ้น AppBar
               padding: const EdgeInsets.only(bottom: 20),
               child: Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const SizedBox(height: 20),
-
-                    // --- Flip Card Section ---
-                    SizedBox(
-                      height: 450,
-                      child: FlipCard(
-                        direction: FlipDirection.HORIZONTAL,
-                        front: _buildInfoCard(),
-                        back: _buildQrCard(),
+                    // [UPDATED] Responsive Card
+                    Container(
+                      width: (screenSize.width * 0.85).clamp(300.0, 380.0),
+                      constraints: BoxConstraints(
+                        maxHeight: screenSize.height * 0.6,
+                        minHeight: 350,
+                      ),
+                      child: AspectRatio(
+                        aspectRatio: 0.7,
+                        child: FlipCard(
+                          direction: FlipDirection.HORIZONTAL,
+                          front: _buildInfoCard(),
+                          back: _buildQrCard(),
+                        ),
                       ),
                     ),
-
                     const SizedBox(height: 16),
                     const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -248,10 +242,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 30),
-
-                    // --- Lower Section: Information List ---
                     _buildInfoSection(),
                   ],
                 ),
@@ -259,6 +250,183 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildBackground(Color topColor) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [topColor, Colors.white],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoCard() {
+    return Container(
+      padding: const EdgeInsets.all(25.0),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        image: const DecorationImage(
+          image: AssetImage('assets/images/card_background.png'),
+          fit: BoxFit.cover,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              companyName,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF375987),
+              ),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircleAvatar(
+                  radius: 50,
+                  backgroundImage: NetworkImage(avatarUrl),
+                ),
+                const SizedBox(height: 15),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    '$empTitle $empName',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF375987),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 32.0,
+                    vertical: 10.0,
+                  ),
+                  child: Divider(
+                    color: Colors.black.withOpacity(0.2),
+                    thickness: 1,
+                  ),
+                ),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Position : $empPosition',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      color: Color(0xFF375987),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 5),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Department : $empDepartment',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      color: Color(0xFF375987),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQrCard() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 25.0, horizontal: 25.0),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        image: const DecorationImage(
+          image: AssetImage('assets/images/card_background.png'),
+          fit: BoxFit.cover,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text(
+            "DIGITAL KEYPASS",
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF375987),
+            ),
+          ),
+          const SizedBox(height: 15),
+          Expanded(
+            child: Center(
+              child: AspectRatio(
+                aspectRatio: 1,
+                child: QrImageView(
+                  data: qrData,
+                  version: QrVersions.auto,
+                  gapless: false,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 15),
+          const Text(
+            'Show this to Organizer',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: Color(0xFF375987)),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 32.0,
+              vertical: 8.0,
+            ),
+            child: Divider(color: Colors.black.withOpacity(0.4), thickness: 1),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.timer, color: Color(0xFF375987)),
+              const SizedBox(width: 8),
+              Text(
+                _formatDuration(_duration),
+                style: const TextStyle(fontSize: 20, color: Color(0xFF375987)),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -299,7 +467,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _buildInfoTile(
             icon: Icons.calendar_today_outlined,
             label: "Start Date",
-            value: "$empStartDateFormatted",
+            value: empStartDateFormatted,
             subValue: "Duration: $serviceDuration",
             showAction: false,
           ),
@@ -340,6 +508,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               fontWeight: FontWeight.w600,
               color: Color(0xFF375987),
             ),
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
           ),
           if (subValue != null)
             Text(
@@ -363,153 +533,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             )
           : null,
       onTap: showAction ? onTap : null,
-    );
-  }
-
-  Widget _buildBackground(Color topColor) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [topColor, Colors.white], // ใช้สีที่ส่งเข้ามาเพื่อให้เนียน
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
-      ),
-    );
-  }
-
-  // ... (ส่วน Card Widgets อื่นๆ คงเดิม) ...
-  Widget _buildInfoCard() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 30.0),
-      padding: const EdgeInsets.all(25.0),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        image: const DecorationImage(
-          image: AssetImage('assets/images/card_background.png'),
-          fit: BoxFit.cover,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            companyName,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF375987),
-            ),
-          ),
-          const SizedBox(height: 15),
-          CircleAvatar(radius: 60, backgroundImage: NetworkImage(avatarUrl)),
-          const SizedBox(height: 15),
-          Text(
-            '$empTitle $empName',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF375987),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 32.0,
-              vertical: 8.0,
-            ),
-            child: Divider(color: Colors.black.withOpacity(0.4), thickness: 1),
-          ),
-          Text(
-            'Position : $empPosition',
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 19, color: Color(0xFF375987)),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            'Department : $empDepartment',
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 19, color: Color(0xFF375987)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQrCard() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 30.0),
-      padding: const EdgeInsets.symmetric(vertical: 25.0, horizontal: 25.0),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        image: const DecorationImage(
-          image: AssetImage('assets/images/card_background.png'),
-          fit: BoxFit.cover,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text(
-            'DIGITAL KEYPASS',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF375987),
-            ),
-          ),
-          const SizedBox(height: 15),
-          QrImageView(
-            data: qrData,
-            version: QrVersions.auto,
-            size: 181.0,
-            gapless: false,
-          ),
-          const SizedBox(height: 15),
-          const Text(
-            'Show this to Organizer to check-in',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: Color(0xFF375987)),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 32.0,
-              vertical: 8.0,
-            ),
-            child: Divider(color: Colors.black.withOpacity(0.4), thickness: 1),
-          ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.timer, color: Color(0xFF375987)),
-              const SizedBox(width: 8),
-              Text(
-                _formatDuration(_duration),
-                style: const TextStyle(fontSize: 20, color: Color(0xFF375987)),
-              ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 }

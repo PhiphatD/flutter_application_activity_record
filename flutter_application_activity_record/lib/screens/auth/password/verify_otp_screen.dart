@@ -6,7 +6,7 @@ import 'dart:convert';
 import 'reset_password_screen.dart';
 
 class VerifyOtpScreen extends StatefulWidget {
-  final String email; // รับ Email เข้ามา
+  final String email;
   const VerifyOtpScreen({super.key, required this.email});
 
   @override
@@ -16,9 +16,12 @@ class VerifyOtpScreen extends StatefulWidget {
 class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
   String _otpCode = "";
   final String apiUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
+  bool _isLoading = false;
 
   Future<void> _verify() async {
     if (_otpCode.length != 6) return;
+
+    setState(() => _isLoading = true);
 
     try {
       final response = await http.post(
@@ -29,7 +32,6 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
 
       if (response.statusCode == 200) {
         if (mounted) {
-          // ผ่านแล้ว ส่ง Email ไปหน้าตั้งรหัสใหม่
           Navigator.push(
             context,
             MaterialPageRoute(
@@ -38,20 +40,36 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
           );
         }
       } else {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Invalid OTP')));
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Invalid OTP')));
+        }
       }
     } catch (e) {
-      print(e);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Connection Error')));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     const Color primaryColor = Color(0xFF4A80FF);
+
+    // [UPDATED] คำนวณขนาด Pin Box ให้พอดีจอ
+    final screenWidth = MediaQuery.of(context).size.width;
+    final pinBoxSize = (screenWidth - 80) / 6; // ลบ Padding แล้วหาร 6
+    final double finalSize = pinBoxSize > 56
+        ? 56
+        : pinBoxSize; // ไม่ให้ใหญ่เกิน 56
+
     final defaultPinTheme = PinTheme(
-      width: 56,
+      width: finalSize,
       height: 60,
       textStyle: GoogleFonts.poppins(fontSize: 22, color: Colors.black),
       decoration: BoxDecoration(
@@ -60,6 +78,7 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         border: Border.all(color: Colors.transparent),
       ),
     );
+
     final focusedPinTheme = defaultPinTheme.copyWith(
       decoration: defaultPinTheme.decoration!.copyWith(
         border: Border.all(color: primaryColor),
@@ -77,69 +96,89 @@ class _VerifyOtpScreenState extends State<VerifyOtpScreen> {
         ),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 16),
-                Text(
-                  'Check Your Email',
-                  style: GoogleFonts.poppins(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'We\'ve sent a 6-digit code to:\n${widget.email}',
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    color: Colors.black54,
-                    height: 1.5,
-                  ),
-                ),
-                const SizedBox(height: 40),
-                Center(
-                  child: Pinput(
-                    length: 6,
-                    defaultPinTheme: defaultPinTheme,
-                    focusedPinTheme: focusedPinTheme,
-                    onCompleted: (pin) {
-                      _otpCode = pin;
-                      // _verify(); // จะให้เช็คเลยหรือรอกดปุ่มก็ได้
-                    },
-                    onChanged: (value) => _otpCode = value,
-                  ),
-                ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _verify,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF434343),
-                      padding: const EdgeInsets.symmetric(vertical: 16.0),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12.0),
-                      ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Center(
+                  child: Container(
+                    constraints: const BoxConstraints(maxWidth: 450),
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Check Your Email',
+                          style: GoogleFonts.poppins(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'We\'ve sent a 6-digit code to:\n${widget.email}',
+                          style: GoogleFonts.poppins(
+                            fontSize: 16,
+                            color: Colors.black54,
+                            height: 1.5,
+                          ),
+                        ),
+                        const SizedBox(height: 40),
+                        Center(
+                          child: Pinput(
+                            length: 6,
+                            defaultPinTheme: defaultPinTheme,
+                            focusedPinTheme: focusedPinTheme,
+                            onCompleted: (pin) {
+                              _otpCode = pin;
+                              _verify(); // Auto verify when completed
+                            },
+                            onChanged: (value) => _otpCode = value,
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          ),
+                        ),
+                        const SizedBox(height: 32),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 56,
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : _verify,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF434343),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12.0),
+                              ),
+                            ),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    height: 24,
+                                    width: 24,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2.5,
+                                    ),
+                                  )
+                                : Text(
+                                    'VERIFY',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(height: 40),
+                      ],
                     ),
-                    child: Text(
-                      'VERIFY',
-                      style: GoogleFonts.poppins(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
                   ),
                 ),
-                // ... Resend Button logic (Optional)
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         ),
       ),
     );

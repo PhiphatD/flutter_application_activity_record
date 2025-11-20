@@ -58,12 +58,12 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   // Date & Time
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
-  DateTime? _selectedDate; // [NEW] เพิ่มตัวแปรวันที่
+  DateTime? _selectedDate;
 
   // Organizer Info
   final _guestCtrl = TextEditingController();
   final _hostCtrl = TextEditingController();
-  final _organizerNameCtrl = TextEditingController(); // จะดึงชื่อจาก Prefs
+  final _organizerNameCtrl = TextEditingController();
   final _contactCtrl = TextEditingController();
   final _maxParticipantsCtrl = TextEditingController();
   final _feeCtrl = TextEditingController();
@@ -86,7 +86,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
     _fetchInitialData();
   }
 
-  // โหลดข้อมูลเริ่มต้น (Dropdown + User Info + Activity Data if Edit)
   Future<void> _fetchInitialData() async {
     try {
       // 1. Fetch Departments
@@ -137,7 +136,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
       _descCtrl.text = act['ACT_DESCRIPTIONS'] ?? '';
       _pointsCtrl.text = (act['ACT_POINT'] ?? 0).toString();
 
-      // Load Type
       String type = act['ACT_TYPE'] ?? 'Training';
       if (!_activityTypes.contains(type)) {
         _selectedType = 'Other';
@@ -148,7 +146,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
 
       _selectedStatus = act['ACT_STATUS'] ?? 'Open';
 
-      // Load Host Dept
       String depName = act['DEP_ID'] ?? '';
       if (_dbDepartments.contains(depName)) {
         _selectedHostDept = depName;
@@ -167,10 +164,8 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
       _conditionCtrl.text = act['ACT_PARTICIPATION_CONDITION'] ?? '';
       _isCompulsory = (act['ACT_ISCOMPULSORY'] ?? 0) == 1 ? 1 : 0;
 
-      // Load Target Criteria
       if (act['ACT_TARGET_CRITERIA'] != null) {
         try {
-          // API อาจส่งมาเป็น String หรือ Map แล้วแต่การ parse
           final criteria = act['ACT_TARGET_CRITERIA'] is String
               ? jsonDecode(act['ACT_TARGET_CRITERIA'])
               : act['ACT_TARGET_CRITERIA'];
@@ -196,11 +191,9 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
     if (sessions != null && sessions.isNotEmpty) {
       final first = sessions.first;
       _locationCtrl.text = first['LOCATION'] ?? '';
-      // Load Date
       if (first['SESSION_DATE'] != null) {
         _selectedDate = DateTime.parse(first['SESSION_DATE']);
       }
-      // Load Time
       if (first['START_TIME'] != null)
         _startTime = _parseTime(first['START_TIME']);
       if (first['END_TIME'] != null) _endTime = _parseTime(first['END_TIME']);
@@ -217,7 +210,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
     }
   }
 
-  // --- Logic การบันทึกข้อมูล ---
   Future<void> _submitData() async {
     if (_nameCtrl.text.isEmpty || _locationCtrl.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -228,7 +220,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
 
     setState(() => _isSubmitting = true);
 
-    // 1. Prepare Data
     final finalType = _selectedType == 'Other'
         ? _customTypeCtrl.text
         : _selectedType;
@@ -242,11 +233,9 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
       "positions": _targetType == 'specific' ? _selectedTargetPositions : [],
     };
 
-    // ใช้ _selectedDate หรือ Default อีก 5 วัน
     final sessionDate =
         _selectedDate ?? DateTime.now().add(const Duration(days: 5));
 
-    // Format Time to HH:mm
     final startStr = _startTime != null
         ? '${_startTime!.hour.toString().padLeft(2, '0')}:${_startTime!.minute.toString().padLeft(2, '0')}'
         : "09:00";
@@ -287,23 +276,18 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
       ],
     };
 
-    // 2. Send API
     try {
       http.Response response;
       final prefs = await SharedPreferences.getInstance();
 
       if (widget.isEdit && widget.actId != null) {
-        // Update (PUT)
         response = await http.put(
           Uri.parse('$baseUrl/activities/${widget.actId}'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode(body),
         );
       } else {
-        // Create (POST)
-        // ดึง empId จากเครื่องเพื่อส่งไปผูกกับ Organizer
         final empId = prefs.getString('empId') ?? '';
-
         response = await http.post(
           Uri.parse('$baseUrl/activities?emp_id=$empId'),
           headers: {'Content-Type': 'application/json'},
@@ -403,7 +387,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // --- Section 1: Basic Info ---
               _buildSectionTitle('Basic Information'),
               _buildTextField(
                 controller: _nameCtrl,
@@ -411,7 +394,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
                 hint: 'Ex. AI Workshop 2025',
               ),
 
-              // Activity Type
               _buildDropdownField(
                 label: 'Activity Type',
                 value: _selectedType,
@@ -433,7 +415,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
                 maxLines: 3,
               ),
 
-              // Status
               _buildDropdownField(
                 label: 'Status',
                 value: _selectedStatus,
@@ -443,10 +424,8 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
               ),
 
               const SizedBox(height: 24),
-              // --- Section 2: Date & Location ---
               _buildSectionTitle('Date & Location'),
 
-              // Date Picker Button
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
                 child: Column(
@@ -520,10 +499,8 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
               ),
 
               const SizedBox(height: 24),
-              // --- Section 3: Host & Organizer ---
               _buildSectionTitle('Host & Organizer'),
 
-              // Hosting Dept
               _buildDropdownField(
                 label: 'Hosting Department *',
                 value: _selectedHostDept,
@@ -560,7 +537,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
               ),
 
               const SizedBox(height: 24),
-              // --- Section 4: Target Audience ---
               _buildSectionTitle('Target Audience & Quota'),
 
               Text(
@@ -681,7 +657,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
               ),
 
               const SizedBox(height: 24),
-              // --- Section 5: More Details ---
               _buildSectionTitle('More Details'),
               _buildTextField(
                 controller: _foodCtrl,
@@ -723,8 +698,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
       ),
     );
   }
-
-  // --- Custom Widgets ---
 
   Widget _buildSectionTitle(String title) {
     return Padding(
@@ -864,9 +837,16 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  time?.format(context) ?? 'Select',
-                  style: GoogleFonts.inter(),
+                // [UPDATED] ใช้ FittedBox เพื่อกันเวลาล้นถ้าตั้ง Font ใหญ่
+                Expanded(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      time?.format(context) ?? 'Select',
+                      style: GoogleFonts.inter(),
+                    ),
+                  ),
                 ),
                 const Icon(Icons.access_time, size: 18, color: Colors.grey),
               ],

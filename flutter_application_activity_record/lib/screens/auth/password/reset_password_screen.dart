@@ -5,7 +5,7 @@ import 'dart:convert';
 import '../register/registration_successful_screen.dart';
 
 class ResetPasswordScreen extends StatefulWidget {
-  final String email; // รับ Email เข้ามา
+  final String email;
   const ResetPasswordScreen({super.key, required this.email});
 
   @override
@@ -18,14 +18,24 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
   final String apiUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
+  bool _isLoading = false;
 
   Future<void> _savePassword() async {
+    if (_passwordController.text.isEmpty || _confirmController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please fill in all fields')),
+      );
+      return;
+    }
+
     if (_passwordController.text != _confirmController.text) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Passwords do not match')));
       return;
     }
+
+    setState(() => _isLoading = true);
 
     try {
       final response = await http.post(
@@ -48,21 +58,28 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           );
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to reset password')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Failed to reset password')),
+          );
+        }
       }
     } catch (e) {
-      print(e);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Connection Error')));
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     const Color primaryColor = Color(0xFF4A80FF);
-    // ... (ใช้ code เดิม แต่เปลี่ยน onPressed ของปุ่ม SAVE เป็น _savePassword และผูก controller)
+
     return Scaffold(
-      // ... AppBar เดิม ...
       backgroundColor: Colors.white,
       appBar: AppBar(
         backgroundColor: Colors.white,
@@ -73,112 +90,142 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         ),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 16),
-                Text(
-                  'Set New Password',
-                  style: GoogleFonts.poppins(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Center(
+                  child: Container(
+                    constraints: const BoxConstraints(maxWidth: 450),
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Set New Password',
+                          style: GoogleFonts.poppins(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 40),
+                        TextFormField(
+                          controller: _passwordController,
+                          obscureText: _isPasswordObscured,
+                          decoration: InputDecoration(
+                            labelText: 'New Password',
+                            prefixIcon: const Icon(
+                              Icons.lock_outline,
+                              color: primaryColor,
+                            ),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _isPasswordObscured
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                                color: Colors.grey,
+                              ),
+                              onPressed: () => setState(
+                                () =>
+                                    _isPasswordObscured = !_isPasswordObscured,
+                              ),
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12.0),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12.0),
+                              borderSide: const BorderSide(
+                                color: primaryColor,
+                                width: 2.0,
+                              ),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 16,
+                              horizontal: 16,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        TextFormField(
+                          controller: _confirmController,
+                          obscureText: _isConfirmPasswordObscured,
+                          decoration: InputDecoration(
+                            labelText: 'Confirm New Password',
+                            prefixIcon: const Icon(
+                              Icons.lock_outline,
+                              color: primaryColor,
+                            ),
+                            suffixIcon: IconButton(
+                              icon: Icon(
+                                _isConfirmPasswordObscured
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                                color: Colors.grey,
+                              ),
+                              onPressed: () => setState(
+                                () => _isConfirmPasswordObscured =
+                                    !_isConfirmPasswordObscured,
+                              ),
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12.0),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12.0),
+                              borderSide: const BorderSide(
+                                color: primaryColor,
+                                width: 2.0,
+                              ),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 16,
+                              horizontal: 16,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 32),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 56,
+                          child: ElevatedButton(
+                            onPressed: _isLoading ? null : _savePassword,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF434343),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12.0),
+                              ),
+                            ),
+                            child: _isLoading
+                                ? const SizedBox(
+                                    height: 24,
+                                    width: 24,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2.5,
+                                    ),
+                                  )
+                                : Text(
+                                    'SAVE PASSWORD',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(height: 40),
+                      ],
+                    ),
                   ),
                 ),
-                // ...
-                const SizedBox(height: 40),
-                TextFormField(
-                  controller: _passwordController, // ผูก
-                  obscureText: _isPasswordObscured,
-                  decoration: InputDecoration(
-                    labelText: 'New Password',
-                    prefixIcon: const Icon(
-                      Icons.lock_outline,
-                      color: primaryColor,
-                    ),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _isPasswordObscured
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
-                      ),
-                      onPressed: () => setState(
-                        () => _isPasswordObscured = !_isPasswordObscured,
-                      ),
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12.0),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12.0),
-                      borderSide: const BorderSide(
-                        color: primaryColor,
-                        width: 2.0,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                TextFormField(
-                  controller: _confirmController, // ผูก
-                  obscureText: _isConfirmPasswordObscured,
-                  decoration: InputDecoration(
-                    labelText: 'Confirm New Password',
-                    prefixIcon: const Icon(
-                      Icons.lock_outline,
-                      color: primaryColor,
-                    ),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _isConfirmPasswordObscured
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
-                      ),
-                      onPressed: () => setState(
-                        () => _isConfirmPasswordObscured =
-                            !_isConfirmPasswordObscured,
-                      ),
-                    ),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12.0),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12.0),
-                      borderSide: const BorderSide(
-                        color: primaryColor,
-                        width: 2.0,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _savePassword, // เรียกฟังก์ชัน
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF434343),
-                      padding: const EdgeInsets.symmetric(vertical: 16.0),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12.0),
-                      ),
-                    ),
-                    child: Text(
-                      'SAVE PASSWORD',
-                      style: GoogleFonts.poppins(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         ),
       ),
     );

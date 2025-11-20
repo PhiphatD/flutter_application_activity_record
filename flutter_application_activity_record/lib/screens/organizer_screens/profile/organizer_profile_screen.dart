@@ -3,9 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'dart:async';
 import 'package:flip_card/flip_card.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // 1. Import
-import 'package:http/http.dart' as http; // 2. Import http
-import 'dart:convert'; // 3. Import json
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'package:intl/intl.dart';
 
 class OrganizerProfileScreen extends StatefulWidget {
@@ -25,7 +25,7 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
   String empPosition = "...";
   String empDepartment = "...";
   String companyName = "...";
-  String avatarUrl = "https://i.pravatar.cc/150?img=32";
+  String avatarUrl = "https://i.pravatar.cc/150?img=69";
   String qrData = "";
 
   String empEmail = "-";
@@ -38,7 +38,7 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _fetchOrganizerProfile(); // เรียกฟังก์ชันโหลดข้อมูล
+    _fetchOrganizerProfile();
     _startTimer();
   }
 
@@ -53,22 +53,24 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
       );
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-        setState(() {
-          empId = data['EMP_ID'] ?? storedEmpId;
-          empTitle = data['EMP_TITLE_EN'] ?? "";
-          empName = data['EMP_NAME_EN'] ?? "Unknown";
-          empPosition = data['EMP_POSITION'] ?? "-";
-          empDepartment = data['DEP_NAME'] ?? "-";
-          companyName = data['COMPANY_NAME'] ?? "-";
-          empEmail = data['EMP_EMAIL'] ?? "-";
-          empPhone = data['EMP_PHONE'] ?? "-";
-          qrData = empId;
-          if (data['EMP_STARTDATE'] != null) {
-            DateTime startDate = DateTime.parse(data['EMP_STARTDATE']);
-            empStartDateFormatted = DateFormat('d MMM y').format(startDate);
-            _calculateServiceDuration(startDate);
-          }
-        });
+        if (mounted) {
+          setState(() {
+            empId = data['EMP_ID'] ?? storedEmpId;
+            empTitle = data['EMP_TITLE_EN'] ?? "";
+            empName = data['EMP_NAME_EN'] ?? "Unknown";
+            empPosition = data['EMP_POSITION'] ?? "-";
+            empDepartment = data['DEP_NAME'] ?? "-";
+            companyName = data['COMPANY_NAME'] ?? "-";
+            empEmail = data['EMP_EMAIL'] ?? "-";
+            empPhone = data['EMP_PHONE'] ?? "-";
+            qrData = empId;
+            if (data['EMP_STARTDATE'] != null) {
+              DateTime startDate = DateTime.parse(data['EMP_STARTDATE']);
+              empStartDateFormatted = DateFormat('d MMM y').format(startDate);
+              _calculateServiceDuration(startDate);
+            }
+          });
+        }
       }
     } catch (e) {
       print("Error fetching organizer profile: $e");
@@ -80,13 +82,16 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
     final days = now.difference(startDate).inDays;
     final years = days ~/ 365;
     final months = (days % 365) ~/ 30;
-    setState(() {
-      if (years > 0) {
-        serviceDuration = "$years Years ${months > 0 ? '$months Months' : ''}";
-      } else {
-        serviceDuration = "$months Months";
-      }
-    });
+    if (mounted) {
+      setState(() {
+        if (years > 0) {
+          serviceDuration =
+              "$years Years ${months > 0 ? '$months Months' : ''}";
+        } else {
+          serviceDuration = "$months Months";
+        }
+      });
+    }
   }
 
   @override
@@ -131,11 +136,12 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // ธีมสีเหลืองของ Organizer
     const Color topGradientColor = Color(0xFFFFF6CC);
+    final screenSize = MediaQuery.of(context).size;
 
+    // [POLISH] ใช้ LayoutBuilder เพื่อความแม่นยำสูงสุด
     return Scaffold(
-      extendBodyBehindAppBar: false, // ปรับไม่ให้ซ้อนทับเหมือน Employee
+      extendBodyBehindAppBar: false,
       appBar: AppBar(
         backgroundColor: topGradientColor,
         elevation: 0,
@@ -181,7 +187,6 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
           ),
         ),
         actions: [
-          // เพิ่มปุ่ม Logout ให้ Organizer ด้วย
           IconButton(
             icon: const Icon(Icons.logout, color: Color(0xFF375987)),
             onPressed: () async {
@@ -209,32 +214,41 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const SizedBox(height: 20),
-                    SizedBox(
-                      height: 450,
-                      child: FlipCard(
-                        direction: FlipDirection.HORIZONTAL,
-                        front: _buildInfoCard(),
-                        back: _buildQrCard(),
+
+                    // [UPDATED] Responsive Card Container (Perfect Logic)
+                    Container(
+                      // ความกว้าง: 85% ของจอ แต่ไม่เกิน 380px (สำหรับ iPad) และไม่ต่ำกว่า 300px (สำหรับ iPhone SE)
+                      width: (screenSize.width * 0.85).clamp(300.0, 380.0),
+                      // ความสูง: ปล่อยให้ AspectRatio จัดการ แต่กำหนด constraints ไว้กันเหนียว
+                      constraints: BoxConstraints(
+                        maxHeight: screenSize.height * 0.6, // ไม่เกิน 60% ของจอ
+                        minHeight: 350, // ไม่ต่ำกว่านี้
+                      ),
+                      child: AspectRatio(
+                        aspectRatio: 0.7, // สัดส่วนบัตรแนวตั้งมาตรฐาน
+                        child: FlipCard(
+                          direction: FlipDirection.HORIZONTAL,
+                          front: _buildInfoCard(),
+                          back: _buildQrCard(),
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 15),
-                    const Padding(
-                      padding: EdgeInsets.only(top: 20.0),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.touch_app_outlined,
-                            color: Colors.grey,
-                            size: 18,
-                          ),
-                          SizedBox(width: 8),
-                          Text(
-                            'แตะที่บัตรเพื่อพลิก',
-                            style: TextStyle(color: Colors.grey),
-                          ),
-                        ],
-                      ),
+
+                    const SizedBox(height: 16),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.touch_app_outlined,
+                          color: Colors.grey,
+                          size: 18,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'แตะที่บัตรเพื่อพลิก',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 30),
                     _buildInfoSection(),
@@ -262,8 +276,7 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
 
   Widget _buildInfoCard() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 30.0),
-      padding: const EdgeInsets.all(25.0),
+      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 25.0),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
@@ -280,47 +293,83 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
         ],
       ),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            companyName,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF375987),
+          // --- [HEADER] ชื่อบริษัท (อยู่บนสุด) ---
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              companyName,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF375987),
+              ),
             ),
           ),
-          const SizedBox(height: 30),
-          CircleAvatar(radius: 60, backgroundImage: NetworkImage(avatarUrl)),
-          const SizedBox(height: 15),
-          Text(
-            '$empTitle $empName',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF375987),
+
+          // --- [BODY] ส่วนเนื้อหา (จัดกึ่งกลางในพื้นที่ที่เหลือ) ---
+          Expanded(
+            child: Column(
+              mainAxisAlignment:
+                  MainAxisAlignment.center, // จัดให้อยู่กลางแนวตั้ง
+              children: [
+                CircleAvatar(
+                  radius: 60,
+                  backgroundImage: NetworkImage(avatarUrl),
+                  backgroundColor: Colors.grey.shade200,
+                ),
+                const SizedBox(height: 15),
+
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    '$empTitle $empName',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF375987),
+                    ),
+                  ),
+                ),
+
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 40.0, // บีบเส้นให้สั้นลงหน่อย ดูสวยขึ้น
+                    vertical: 10.0,
+                  ),
+                  child: Divider(
+                    color: Colors.black.withOpacity(0.2),
+                    thickness: 1,
+                  ),
+                ),
+
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Position : $empPosition',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      color: Color(0xFF375987),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    'Department : $empDepartment',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      color: Color(0xFF375987),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 32.0,
-              vertical: 8.0,
-            ),
-            child: Divider(color: Colors.black.withOpacity(0.4), thickness: 1),
-          ),
-          Text(
-            'Position : $empPosition',
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 19, color: Color(0xFF375987)),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            'Department : $empDepartment',
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 19, color: Color(0xFF375987)),
           ),
         ],
       ),
@@ -329,7 +378,6 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
 
   Widget _buildQrCard() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 30.0),
       padding: const EdgeInsets.symmetric(vertical: 25.0, horizontal: 25.0),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -359,11 +407,18 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
             ),
           ),
           const SizedBox(height: 15),
-          QrImageView(
-            data: qrData,
-            version: QrVersions.auto,
-            size: 181.0,
-            gapless: false,
+          // [UPDATED] Flexible QR Code
+          Expanded(
+            child: Center(
+              child: AspectRatio(
+                aspectRatio: 1,
+                child: QrImageView(
+                  data: qrData,
+                  version: QrVersions.auto,
+                  gapless: false,
+                ),
+              ),
+            ),
           ),
           const SizedBox(height: 15),
           const Text(
@@ -464,6 +519,7 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // [UPDATED] ใช้ SelectableText หรือ Text ที่ย่อได้
           Text(
             value,
             style: const TextStyle(
@@ -471,6 +527,8 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
               fontWeight: FontWeight.w600,
               color: Color(0xFF375987),
             ),
+            overflow: TextOverflow.ellipsis, // กันล้น
+            maxLines: 1,
           ),
           if (subValue != null)
             Text(
@@ -480,6 +538,8 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
                 color: Colors.green,
                 fontWeight: FontWeight.w500,
               ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
             ),
         ],
       ),

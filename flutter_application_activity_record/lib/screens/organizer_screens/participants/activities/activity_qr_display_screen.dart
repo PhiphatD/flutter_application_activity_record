@@ -12,8 +12,9 @@ import 'package:permission_handler/permission_handler.dart';
 class ActivityQrDisplayScreen extends StatefulWidget {
   final String activityName;
   final String actId;
-  final String qrData; // Format: "ACTION:CHECKIN|ACT_ID:xxxxx"
+  final String qrData;
   final String timeInfo;
+
   const ActivityQrDisplayScreen({
     super.key,
     required this.activityName,
@@ -28,25 +29,20 @@ class ActivityQrDisplayScreen extends StatefulWidget {
 }
 
 class _ActivityQrDisplayScreenState extends State<ActivityQrDisplayScreen> {
-  // Controller สำหรับจับภาพหน้าจอ (เฉพาะส่วน Card)
   final ScreenshotController _screenshotController = ScreenshotController();
   bool _isSaving = false;
 
-  // ฟังก์ชัน Save รูป
   Future<void> _saveQrImage() async {
     setState(() => _isSaving = true);
 
-    // 1. ขอสิทธิ์ (Android/iOS)
     var status = await Permission.storage.status;
     if (!status.isGranted) {
       await Permission.storage.request();
     }
 
-    // 2. จับภาพ Widget
     final Uint8List? image = await _screenshotController.capture();
 
     if (image != null) {
-      // 3. บันทึกลง Gallery
       await Gal.putImageBytes(image, name: "GrowPerks_${widget.actId}");
 
       if (mounted) {
@@ -61,7 +57,6 @@ class _ActivityQrDisplayScreenState extends State<ActivityQrDisplayScreen> {
     setState(() => _isSaving = false);
   }
 
-  // ฟังก์ชัน Share รูป
   Future<void> _shareQrImage() async {
     final Uint8List? image = await _screenshotController.capture();
     if (image != null) {
@@ -77,7 +72,9 @@ class _ActivityQrDisplayScreenState extends State<ActivityQrDisplayScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // พื้นหลังสีฟ้าไล่ระดับ (เหมือนรูปที่ 3)
+    // [UPDATED] ดึงขนาดหน้าจอ
+    final screenSize = MediaQuery.of(context).size;
+
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
@@ -90,21 +87,22 @@ class _ActivityQrDisplayScreenState extends State<ActivityQrDisplayScreen> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF00B4DB), // ฟ้าสดใส
-              Color(0xFF0083B0), // ฟ้าเข้ม
-            ],
+            colors: [Color(0xFF00B4DB), Color(0xFF0083B0)],
           ),
         ),
         child: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // --- ส่วนที่จับภาพ (QR Card) ---
               Screenshot(
                 controller: _screenshotController,
                 child: Container(
-                  width: 320,
+                  // [UPDATED] ปรับความกว้างให้ Responsive (85% ของจอ, ไม่เกิน 350px)
+                  width: screenSize.width * 0.85,
+                  constraints: const BoxConstraints(
+                    maxWidth: 350,
+                    minWidth: 280,
+                  ),
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
                     color: Colors.white,
@@ -120,7 +118,6 @@ class _ActivityQrDisplayScreenState extends State<ActivityQrDisplayScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Logo / Header
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -142,26 +139,27 @@ class _ActivityQrDisplayScreenState extends State<ActivityQrDisplayScreen> {
                       ),
                       const Divider(height: 30),
 
-                      // Activity Name
-                      Text(
-                        widget.activityName,
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.kanit(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.black87,
+                      // [UPDATED] ใช้ FittedBox กันชื่อยาวเกิน
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          widget.activityName,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.kanit(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 24),
 
-                      // QR Code
                       QrImageView(
                         data: widget.qrData,
                         version: QrVersions.auto,
                         size: 220.0,
-                        embeddedImageStyle: const QrEmbeddedImageStyle(
-                          size: Size(40, 40),
-                        ),
+                        // ใส่ Logo ตรงกลาง (Optional)
+                        // embeddedImage: const NetworkImage('...'),
                       ),
 
                       const SizedBox(height: 24),
@@ -206,8 +204,6 @@ class _ActivityQrDisplayScreenState extends State<ActivityQrDisplayScreen> {
 
               const SizedBox(height: 40),
 
-              // --- Action Buttons (Save / Share) ---
-              // สไตล์เหมือนรูปที่ 2
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 40),
                 child: Row(

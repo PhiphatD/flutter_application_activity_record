@@ -14,7 +14,6 @@ class EditActivityScreen extends StatefulWidget {
 class _EditActivityScreenState extends State<EditActivityScreen> {
   bool _isLoading = true;
   Map<String, dynamic>? _initialData;
-  // URL API
   final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
 
   @override
@@ -30,7 +29,6 @@ class _EditActivityScreenState extends State<EditActivityScreen> {
 
       if (response.statusCode == 200) {
         final data = json.decode(utf8.decode(response.bodyBytes));
-        // แปลงโครงสร้างข้อมูลจาก API ให้เป็นโครงสร้างที่ Form ต้องการ
         final formattedData = _transformData(data);
 
         if (mounted) {
@@ -40,18 +38,14 @@ class _EditActivityScreenState extends State<EditActivityScreen> {
           });
         }
       } else {
-        // Error handling
         if (mounted) Navigator.pop(context);
       }
     } catch (e) {
-      // Error handling
       if (mounted) Navigator.pop(context);
     }
   }
 
-  // แปลงข้อมูล API Response -> Form Data Structure
   Map<String, dynamic> _transformData(Map<String, dynamic> apiData) {
-    // เตรียม Sessions list
     List<Map<String, dynamic>> sessions = [];
     if (apiData['sessions'] != null) {
       for (var s in apiData['sessions']) {
@@ -73,8 +67,7 @@ class _EditActivityScreenState extends State<EditActivityScreen> {
         'ACT_GUEST_SPEAKER': apiData['guestSpeaker'],
         'ACT_EVENT_HOST': apiData['eventHost'],
         'ACT_MAX_PARTICIPANTS': apiData['maxParticipants'],
-        'DEP_ID':
-            apiData['depName'], // ระวังตรงนี้ Form อาจจะต้องการ ID หรือ Name
+        'DEP_ID': apiData['depName'],
         'ACT_COST': apiData['cost'],
         'ACT_TRAVEL_INFO': apiData['travelInfo'],
         'ACT_FOOD_INFO': apiData['foodInfo'],

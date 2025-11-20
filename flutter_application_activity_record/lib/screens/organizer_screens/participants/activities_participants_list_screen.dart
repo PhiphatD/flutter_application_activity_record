@@ -23,18 +23,17 @@ class _ActivitiesParticipantsListScreenState
 
   final TextEditingController _search = TextEditingController();
   String _query = '';
-  int _selectedTab = 0; // 0=Active, 1=History
+  int _selectedTab = 0;
   bool _isLoading = true;
   List<_Activity> _activities = [];
   String _currentOrganizerName = "";
 
-  // ตัวแปรเก็บค่า Filter ที่เลือก
   List<String> _selectedTypes = [];
   String? _selectedStatus;
-  List<String> _availableTypes = []; // ดึงจาก DB
+  List<String> _availableTypes = [];
 
-  int _filterCompulsoryIndex = 0; // 0=All, 1=Compulsory, 2=Optional
-  bool _filterOnlyAvailable = false; // true = ซ่อนงานที่เต็มแล้ว
+  int _filterCompulsoryIndex = 0;
+  bool _filterOnlyAvailable = false;
 
   @override
   void initState() {
@@ -56,7 +55,6 @@ class _ActivitiesParticipantsListScreenState
         final loadedActivities = data
             .map((json) => _Activity.fromJson(json))
             .toList();
-        // [NEW] ดึง Type ทั้งหมดที่มีในระบบมาทำเป็นตัวเลือก Filter (Unique values)
         final types = loadedActivities.map((a) => a.actType).toSet().toList();
         if (mounted) {
           setState(() {
@@ -78,30 +76,24 @@ class _ActivitiesParticipantsListScreenState
     final today = DateTime(now.year, now.month, now.day);
 
     final filteredList = _activities.where((a) {
-      // Filter 1: Organizer (Only mine)
       final isMine = a.organizerName == _currentOrganizerName;
       if (!isMine) return false;
 
-      // Filter 2: Search
       final matchesSearch =
           _query.isEmpty || a.name.toLowerCase().contains(_query.toLowerCase());
       if (!matchesSearch) return false;
 
-      // 3. [NEW] Filter Type
       if (_selectedTypes.isNotEmpty && !_selectedTypes.contains(a.actType)) {
         return false;
       }
 
-      // 4. [NEW] Filter Status
       if (_selectedStatus != null && a.status != _selectedStatus) {
         return false;
       }
 
-      // 5. [NEW] Filter Compulsory
       if (_filterCompulsoryIndex == 1 && a.isCompulsory == 0) return false;
       if (_filterCompulsoryIndex == 2 && a.isCompulsory == 1) return false;
 
-      // 6. [NEW] Filter Availability (Hide Full)
       if (_filterOnlyAvailable) {
         if (a.maxParticipants > 0 &&
             a.currentParticipants >= a.maxParticipants) {
@@ -109,7 +101,6 @@ class _ActivitiesParticipantsListScreenState
         }
       }
 
-      // 7. Filter Date (Tab)
       final actDate = DateTime(
         a.activityDate.year,
         a.activityDate.month,
@@ -148,23 +139,16 @@ class _ActivitiesParticipantsListScreenState
     final dateKeys = groupedMap.keys.toList();
 
     return Scaffold(
-      // [1] ลบ backgroundColor เดิมออก (หรือ comment ไว้) เพราะเราจะใช้ Gradient ทับ
-      // backgroundColor: organizerBg,
       body: Stack(
-        // [2] ใช้ Stack เพื่อซ้อน Layer
         children: [
-          _buildBackground(), // [3] วางพื้นหลังไว้ล่างสุด
-          // เนื้อหาหลัก
+          _buildBackground(),
           SafeArea(
             child: Column(
               children: [
                 _buildHeader(),
                 _buildSearchBar(),
                 _buildTabs(),
-
-                // [4] ปรับสีเส้นคั่นให้จางลงเล็กน้อยเพื่อให้เข้ากับพื้นหลังใหม่
                 const Divider(height: 1, thickness: 1, color: Colors.black12),
-
                 Expanded(
                   child: _isLoading
                       ? const Center(child: CircularProgressIndicator())
@@ -197,16 +181,14 @@ class _ActivitiesParticipantsListScreenState
     );
   }
 
-  // [5] เพิ่มฟังก์ชันสร้างพื้นหลัง
   Widget _buildBackground() {
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          // สีเหลืองอ่อนไล่ลงมาเป็นสีขาว (Theme Organizer)
           colors: [Color(0xFFFFF6CC), Colors.white],
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          stops: [0.0, 0.4], // ไล่สีถึงประมาณ 40% ของจอ
+          stops: [0.0, 0.4],
         ),
       ),
     );
@@ -228,7 +210,6 @@ class _ActivitiesParticipantsListScreenState
     );
   }
 
-  // [UPDATED] Helper สำหรับข้อความ Relative Date (Today, This Week)
   String _getRelativeDateString(DateTime eventDate) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -239,32 +220,27 @@ class _ActivitiesParticipantsListScreenState
     );
     final differenceInDays = cleanEventDate.difference(today).inDays;
 
-    // --- Future (Active Tab) ---
     if (differenceInDays == 0) return "Today";
     if (differenceInDays == 1) return "Tomorrow";
     if (differenceInDays > 1 && differenceInDays <= 7) return "This Week";
     if (differenceInDays > 7 && differenceInDays <= 30) return "This Month";
     if (differenceInDays > 30) return "Upcoming";
 
-    // --- Past (History Tab) ---
     if (differenceInDays < 0) {
       final daysAgo = differenceInDays.abs();
-      if (daysAgo == 1)
-        return "Yesterday"; // เพิ่ม Yesterday ให้ดูใส่ใจรายละเอียด
+      if (daysAgo == 1) return "Yesterday";
       if (daysAgo <= 7) return "Last Week";
-      if (daysAgo <= 30) return "Last Month"; // เพิ่ม Last Month
-      return "Past Event"; // เก็บตกรายการที่เก่ากว่า 1 เดือน
+      if (daysAgo <= 30) return "Last Month";
+      return "Past Event";
     }
     return "";
   }
 
-  // [UPDATED] 4. อัปเดต List เพื่อซ่อนปุ่ม Scan
   Widget _buildActivityGroup({
     required DateTime date,
     required List<_Activity> cards,
   }) {
     final relativeDate = _getRelativeDateString(date);
-    // เช็คว่าตอนนี้อยู่ Tab History หรือไม่
     final isHistory = _selectedTab == 1;
 
     return Column(
@@ -273,17 +249,18 @@ class _ActivitiesParticipantsListScreenState
         Padding(
           padding: const EdgeInsets.only(top: 24.0, bottom: 12.0),
           child: Row(
-            crossAxisAlignment:
-                CrossAxisAlignment.baseline, // จัดให้ตัวหนังสือวางแนวเดียวกัน
+            crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              Text(
-                // Format: "Tue, 25 Nov 2025"
-                DateFormat('EEE, d MMM y', 'en_US').format(date),
-                style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16, // ปรับขนาดให้ใหญ่ขึ้นนิดหน่อยตามรูป
-                  color: Colors.black,
+              // [UPDATED] ใช้ Flexible ป้องกันวันที่สุดขอบจอ
+              Flexible(
+                child: Text(
+                  DateFormat('EEE, d MMM y', 'en_US').format(date),
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: Colors.black,
+                  ),
                 ),
               ),
               if (relativeDate.isNotEmpty) ...[
@@ -326,7 +303,6 @@ class _ActivitiesParticipantsListScreenState
           activityDate: a.activityDate,
           location: a.location,
           isHistory: isHistory,
-          // [เพิ่ม 3 บรรทัดนี้ครับ] ส่งข้อมูลเวลาและสถานะบังคับไปด้วย
           startTime: a.startTime,
           endTime: a.endTime,
           isCompulsory: a.isCompulsory,
@@ -335,21 +311,16 @@ class _ActivitiesParticipantsListScreenState
     );
   }
 
-  // 1. เปิด Scanner (Mode A: สแกนพนักงาน)
   void _scanQrDirectly(_Activity activity) async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => const EnterpriseScannerScreen(),
-      ), // ใช้หน้าจอใหม่
+      MaterialPageRoute(builder: (_) => const EnterpriseScannerScreen()),
     );
 
     if (result != null) {
-      if (result == "SHOW_ACTIVITY_QR") {
-        // Organizer อยากเปิด QR กิจกรรมแทน (Mode B)
+      if (result == "SHOW_MY_QR") {
         _showActivityQr(activity);
       } else {
-        // ได้ผลลัพธ์เป็น QR Code (EMP_ID) -> เรียก API เช็คอิน
         _processCheckIn(result, activity.actId);
       }
     }
@@ -360,15 +331,12 @@ class _ActivitiesParticipantsListScreenState
 
     try {
       final start = DateFormat("HH:mm").parse(activity.startTime);
-      // เวลาเริ่มเปิดให้เช็คอิน (ก่อน 1 ชม.)
       final openTime = start.subtract(const Duration(hours: 1));
 
       DateTime closeTime;
       if (activity.isCompulsory == 1) {
-        // งานบังคับ: ปิดหลังเริ่ม 30 นาที
         closeTime = start.add(const Duration(minutes: 30));
       } else {
-        // งานทั่วไป: ปิดตอนจบงาน
         closeTime = DateFormat("HH:mm").parse(activity.endTime);
       }
 
@@ -378,7 +346,6 @@ class _ActivitiesParticipantsListScreenState
     }
   }
 
-  // 2. เปิดหน้า QR กิจกรรม (Mode B: ให้พนักงานสแกน)
   void _showActivityQr(_Activity activity) {
     Navigator.push(
       context,
@@ -387,34 +354,39 @@ class _ActivitiesParticipantsListScreenState
           activityName: activity.name,
           actId: activity.actId,
           qrData: "ACTION:CHECKIN|ACT_ID:${activity.actId}",
-          timeInfo: _getValidTimeRange(activity), // [NEW] ส่งเวลาที่คำนวณแล้วไป
+          timeInfo: _getValidTimeRange(activity),
         ),
       ),
     );
   }
 
   Future<void> _processCheckIn(String empId, String actId) async {
-    // TODO: Implement actual API call
     print("Processing check-in for EMP: $empId at ACT: $actId");
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/activities/$actId/checkin'),
+        Uri.parse('$baseUrl/checkin'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'empId': empId}),
+        body: jsonEncode({
+          'emp_id': empId,
+          'act_id': actId,
+          'scanned_by': 'organizer',
+        }),
       );
 
       if (mounted) {
+        final body = jsonDecode(utf8.decode(response.bodyBytes));
         if (response.statusCode == 200) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Check-in Successful!"),
+            SnackBar(
+              content: Text("Success: ${body['message']}"),
               backgroundColor: Colors.green,
             ),
           );
+          _fetchActivities();
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text("Check-in Failed: ${response.body}"),
+              content: Text("Failed: ${body['detail']}"),
               backgroundColor: Colors.red,
             ),
           );
@@ -491,7 +463,6 @@ class _ActivitiesParticipantsListScreenState
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
       child: Row(
-        // เปลี่ยนเป็น Row เพื่อวางปุ่ม Filter คู่กับ Search
         children: [
           Expanded(
             child: Container(
@@ -510,9 +481,7 @@ class _ActivitiesParticipantsListScreenState
                 controller: _search,
                 decoration: InputDecoration(
                   hintText: 'Search my activities...',
-                  hintStyle: GoogleFonts.poppins(
-                    color: Colors.grey[400],
-                  ), // แก้สี Hint ให้จางลงหน่อย
+                  hintStyle: GoogleFonts.poppins(color: Colors.grey[400]),
                   prefixIcon: Icon(Icons.search, color: Colors.grey.shade500),
                   border: InputBorder.none,
                   contentPadding: const EdgeInsets.symmetric(
@@ -524,16 +493,12 @@ class _ActivitiesParticipantsListScreenState
             ),
           ),
           const SizedBox(width: 12),
-
-          // ปุ่ม Filter
           GestureDetector(
             onTap: _showFilterModal,
             child: Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: hasFilter
-                    ? const Color(0xFF4A80FF)
-                    : Colors.white, // เปลี่ยนสีถ้ามีการเลือก Filter
+                color: hasFilter ? const Color(0xFF4A80FF) : Colors.white,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: [
                   BoxShadow(
@@ -603,8 +568,6 @@ class _ActivitiesParticipantsListScreenState
                         ],
                       ),
                       const SizedBox(height: 16),
-
-                      // 1. Type
                       Text(
                         "Type",
                         style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
@@ -640,10 +603,7 @@ class _ActivitiesParticipantsListScreenState
                           );
                         }).toList(),
                       ),
-
                       const SizedBox(height: 20),
-
-                      // 2. Status
                       Text(
                         "Status",
                         style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
@@ -676,12 +636,9 @@ class _ActivitiesParticipantsListScreenState
                           );
                         }).toList(),
                       ),
-
                       const SizedBox(height: 20),
                       const Divider(),
                       const SizedBox(height: 10),
-
-                      // 3. Compulsory
                       Text(
                         "Requirement",
                         style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
@@ -704,10 +661,7 @@ class _ActivitiesParticipantsListScreenState
                           ],
                         ),
                       ),
-
                       const SizedBox(height: 20),
-
-                      // 4. Availability
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -734,7 +688,6 @@ class _ActivitiesParticipantsListScreenState
                           color: Colors.grey,
                         ),
                       ),
-
                       const SizedBox(height: 30),
                       SizedBox(
                         width: double.infinity,
@@ -895,12 +848,16 @@ class _EnterpriseActivityCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.grey.shade200),
+          // [FIX 1] เพิ่มความเข้มของเส้นขอบจาก shade200 เป็น shade300
+          border: Border.all(color: Colors.grey.shade300, width: 1),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
+              // [FIX 2] เพิ่ม Opacity จาก 0.03 เป็น 0.1 (เข้มขึ้น)
+              color: Colors.black.withOpacity(0.1),
+              // [FIX 3] เพิ่ม Blur จาก 8 เป็น 12 (ฟุ้งขึ้น)
+              blurRadius: 12,
+              // [FIX 4] เพิ่ม Offset ให้แสงเงาดูเหมือนส่องมาจากด้านบน
+              offset: const Offset(0, 6),
             ),
           ],
         ),
@@ -965,11 +922,12 @@ class _EnterpriseActivityCard extends StatelessWidget {
             const SizedBox(height: 12),
 
             // [Row 2] Title
+            // [UPDATED] ใช้ Flexible เพื่อกันชื่อกิจกรรมยาวเกินไป
             Text(
               activity.name,
               style: GoogleFonts.kanit(
                 fontSize: 16,
-                fontWeight: FontWeight.w600, // เพิ่มน้ำหนักฟอนต์
+                fontWeight: FontWeight.w600,
                 color: const Color(0xFF222222),
               ),
               maxLines: 2,
@@ -1007,11 +965,15 @@ class _EnterpriseActivityCard extends StatelessWidget {
               children: [
                 Icon(Icons.access_time, size: 16, color: Colors.grey[500]),
                 const SizedBox(width: 6),
-                Text(
-                  displayTime,
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    color: Colors.grey[800],
+                // [UPDATED] ใช้ Flexible กับเวลา
+                Flexible(
+                  child: Text(
+                    displayTime,
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: Colors.grey[800],
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 if (duration.isNotEmpty) ...[
@@ -1031,7 +993,7 @@ class _EnterpriseActivityCard extends StatelessWidget {
             const Divider(height: 1, color: Color(0xFFF0F0F0)),
             const SizedBox(height: 12),
 
-            // [Row 5] Participants Progress Bar (เหมือนหน้า Management)
+            // [Row 5] Participants Progress Bar
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

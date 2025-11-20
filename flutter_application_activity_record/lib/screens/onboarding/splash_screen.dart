@@ -19,24 +19,18 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkOnboardingStatus() async {
-    // 1. หน่วงเวลาเพื่อแสดงโลโก้ (จำลองการโหลด)
     await Future.delayed(const Duration(seconds: 3));
 
-    // 2. ตรวจสอบค่าใน SharedPreferences
     final prefs = await SharedPreferences.getInstance();
-    // ถ้าไม่เคยมีค่านี้ (เปิดครั้งแรก) ให้ default เป็น false
     final bool hasSeenOnboarding = prefs.getBool('hasSeenOnboarding') ?? false;
 
-    // 3. เปลี่ยนหน้าจอ
     if (mounted) {
       if (hasSeenOnboarding) {
-        // ถ้าเคยเห็นแล้ว -> ไปหน้า Login
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const LoginScreen()),
         );
       } else {
-        // ถ้ายังไม่เคยเห็น (ครั้งแรก) -> ไปหน้า Onboarding
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const OnboardingScreen()),
@@ -47,12 +41,17 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // [UPDATED] Responsive Size
+    final size = MediaQuery.of(context).size;
+    final animSize = size.width * 0.5; // ความกว้าง 50% ของจอ
+
     return Scaffold(
       body: Center(
         child: Lottie.asset(
           'assets/animations/Material wave loading.json',
-          width: 200,
-          height: 200,
+          width: animSize,
+          height: animSize,
+          fit: BoxFit.contain,
         ),
       ),
     );

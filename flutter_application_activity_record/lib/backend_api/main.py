@@ -258,22 +258,27 @@ def parse_time_safe(t_str: str) -> time:
 
 # --- API Endpoints ---
 
+# ในไฟล์ main.py ส่วน Endpoint /login
+
 @app.post("/login")
 def login(req: LoginRequest, db: Session = Depends(get_db)):
-    # 1. ค้นหา Employee จาก Email
     user = db.query(models.Employee).filter(models.Employee.EMP_EMAIL == req.email).first()
     
-    # 2. ตรวจสอบว่ามี User ไหม และ Password ตรงกันไหม
     if not user or not verify_password(req.password, user.EMP_PASSWORD):
         raise HTTPException(status_code=400, detail="อีเมลหรือรหัสผ่านไม่ถูกต้อง")
     
-    # 3. ส่งข้อมูลกลับ (Role สำคัญมาก เพื่อให้ Flutter ตัดสินใจว่าจะไปหน้าไหน)
+    # [NEW] หา org_id ถ้ามี
+    org_id = None
+    if user.organizer_profile:
+        org_id = user.organizer_profile.ORG_ID
+
     return {
         "message": "Login successful",
         "role": user.EMP_ROLE,
         "emp_id": user.EMP_ID,
-        "company_id": user.COMPANY_ID, # ส่ง Company ID กลับไปด้วยเผื่อใช้
-        "name": user.EMP_NAME_EN
+        "company_id": user.COMPANY_ID,
+        "name": user.EMP_NAME_EN,
+        "org_id": org_id # [ADDED] ส่งค่านี้กลับไป
     }
 
 @app.post("/register_organization")

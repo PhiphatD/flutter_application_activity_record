@@ -4,7 +4,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 
-// [UPDATED] Model Class
 class ActivityDetail {
   final String id;
   final String type;
@@ -13,7 +12,7 @@ class ActivityDetail {
   final String organizer;
   final int points;
   final DateTime activityDate;
-  final String timeRange; // [NEW] เพิ่มฟิลด์เก็บช่วงเวลา (Start - End)
+  final String timeRange;
   final String status;
   final String guestSpeaker;
   final String eventHost;
@@ -35,7 +34,7 @@ class ActivityDetail {
     required this.organizer,
     required this.points,
     required this.activityDate,
-    required this.timeRange, // [NEW]
+    required this.timeRange,
     required this.status,
     required this.guestSpeaker,
     required this.eventHost,
@@ -53,25 +52,23 @@ class ActivityDetail {
   factory ActivityDetail.fromJson(Map<String, dynamic> json) {
     String loc = "-";
     DateTime date = DateTime.now();
-    String tRange = "-"; // ตัวแปรสำหรับเก็บช่วงเวลา
+    String tRange = "-";
 
     if (json['sessions'] != null && (json['sessions'] as List).isNotEmpty) {
       final firstSession = json['sessions'][0];
       final dateStr = firstSession['date'];
       final startTimeStr = firstSession['startTime'].toString();
-      final endTimeStr = firstSession['endTime'].toString(); // ดึงเวลาสิ้นสุด
+      final endTimeStr = firstSession['endTime'].toString();
 
-      // จัดรูปแบบเวลา ตัดวินาทีออก (HH:mm:ss -> HH:mm)
       final startParts = startTimeStr.split(':');
       final endParts = endTimeStr.split(':');
 
       final formattedStart = "${startParts[0]}:${startParts[1]}";
       final formattedEnd = "${endParts[0]}:${endParts[1]}";
 
-      loc = firstSession['location']; // เก็บเฉพาะสถานที่
+      loc = firstSession['location'];
       date = DateTime.parse("$dateStr $startTimeStr");
-      tRange =
-          "$formattedStart - $formattedEnd"; // สร้าง string ช่วงเวลา เช่น 09:00 - 12:00
+      tRange = "$formattedStart - $formattedEnd";
     }
 
     final cost = json['cost'];
@@ -85,7 +82,7 @@ class ActivityDetail {
       organizer: json['organizerName'] ?? '-',
       points: json['point'] ?? 0,
       activityDate: date,
-      timeRange: tRange, // [NEW] ใส่ค่าที่เตรียมไว้
+      timeRange: tRange,
       status: json['status'] ?? 'Open',
       guestSpeaker: json['guestSpeaker'] ?? '-',
       eventHost: json['eventHost'] ?? '-',
@@ -118,7 +115,6 @@ class ActivityDetailScreen extends StatefulWidget {
 class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
   ActivityDetail? _activityData;
   bool _isLoading = true;
-  // URL ของ API (Ngrok)
   final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
 
   @override
@@ -129,16 +125,12 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
 
   Future<void> _fetchActivityDetails() async {
     setState(() => _isLoading = true);
-
     final url = Uri.parse('$baseUrl/activities/${widget.activityId}');
-
     try {
       final response = await http.get(url);
-
       if (response.statusCode == 200) {
         final data = json.decode(utf8.decode(response.bodyBytes));
         final activity = ActivityDetail.fromJson(data);
-
         if (mounted) {
           setState(() {
             _activityData = activity;
@@ -146,11 +138,9 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
           });
         }
       } else {
-        debugPrint("Error fetching detail: ${response.statusCode}");
         if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
-      debugPrint("Error connecting to API: $e");
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -197,7 +187,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
         children: [
           _buildHeader(),
           const SizedBox(height: 24),
-          _buildTimeInfo(), // ส่วนแสดงเวลาที่อัปเดตแล้ว
+          _buildTimeInfo(),
           const SizedBox(height: 16),
           const Divider(),
           const SizedBox(height: 16),
@@ -231,7 +221,6 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
             'Participation Fee',
             _activityData!.participationFee,
           ),
-
           _buildDetailItem(
             Icons.restaurant_menu,
             'Food',
@@ -243,7 +232,6 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
             _activityData!.travelInfo,
           ),
           _buildDetailItem(Icons.rule, 'Condition', _activityData!.condition),
-
           const SizedBox(height: 16),
           const Divider(),
           const SizedBox(height: 16),
@@ -307,6 +295,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // [UPDATED] ใช้ Expanded เพื่อให้ชื่อกิจกรรมขึ้นบรรทัดใหม่ได้
             Expanded(
               child: Text(
                 _activityData!.title,
@@ -339,7 +328,9 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
           ],
         ),
         const SizedBox(height: 16),
-        Row(
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
           children: [
             Container(
               padding: const EdgeInsets.symmetric(
@@ -360,7 +351,6 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                 ),
               ),
             ),
-            const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(
                 horizontal: 10.0,
@@ -417,40 +407,51 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              Icon(
-                Icons.calendar_today_outlined,
-                color: Colors.grey[700],
-                size: 20,
-              ),
-              const SizedBox(width: 12),
-              Text(
-                formattedDate,
-                style: GoogleFonts.kanit(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
+          Expanded(
+            child: Row(
+              children: [
+                Icon(
+                  Icons.calendar_today_outlined,
+                  color: Colors.grey[700],
+                  size: 20,
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+                // [UPDATED] Flexible
+                Flexible(
+                  child: Text(
+                    formattedDate,
+                    style: GoogleFonts.kanit(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
           ),
-          Row(
-            children: [
-              Icon(
-                Icons.access_time_outlined,
-                color: Colors.grey[700],
-                size: 20,
-              ),
-              const SizedBox(width: 12),
-              // [UPDATED] แสดงเวลาแบบ Start - End
-              Text(
-                _activityData!.timeRange,
-                style: GoogleFonts.kanit(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                Icon(
+                  Icons.access_time_outlined,
+                  color: Colors.grey[700],
+                  size: 20,
                 ),
-              ),
-            ],
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    _activityData!.timeRange,
+                    style: GoogleFonts.kanit(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),

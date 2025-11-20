@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:flutter_application_activity_record/theme/app_colors.dart';
 import 'enterprise_scanner_screen.dart';
 import 'activities/activity_qr_display_screen.dart';
 
@@ -14,7 +14,6 @@ class ParticipantsDetailsScreen extends StatefulWidget {
   final String location;
   final bool isHistory;
 
-  // [NEW] เพิ่ม Field เหล่านี้เพื่อใช้คำนวณเวลาในหน้า QR
   final String startTime;
   final String endTime;
   final int isCompulsory;
@@ -26,7 +25,6 @@ class ParticipantsDetailsScreen extends StatefulWidget {
     required this.activityDate,
     required this.location,
     required this.isHistory,
-    // [NEW] รับค่าเพิ่ม
     this.startTime = "-",
     this.endTime = "-",
     this.isCompulsory = 0,
@@ -44,16 +42,32 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
   List<Map<String, dynamic>> _filteredParticipants = [];
 
   bool _isLoading = true;
-  String _searchQuery = "";
+  final TextEditingController _searchController = TextEditingController();
 
   // Stats
   int _totalRegistered = 0;
   int _totalJoined = 0;
 
+  // Filter State
+  String? _selectedStatusFilter; // All, Joined, Registered/Absent
+  String? _selectedDepartmentFilter; // All, IT, HR, ...
+  List<String> _availableDepartments = []; // Dynamic List
+
   @override
   void initState() {
     super.initState();
     _fetchParticipants();
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged() {
+    _applyFilters();
   }
 
   Future<void> _fetchParticipants() async {
@@ -73,16 +87,23 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
         // Calculate stats
         int joined = parsed.where((p) => p['status'] == 'Joined').length;
 
+        // Extract unique departments for filter
+        final depts = parsed
+            .map((p) => p['department'] as String? ?? "-")
+            .toSet()
+            .toList();
+        depts.sort();
+
         if (mounted) {
           setState(() {
             _allParticipants = parsed;
             _filteredParticipants = parsed;
             _totalRegistered = parsed.length;
             _totalJoined = joined;
+            _availableDepartments = depts;
             _isLoading = false;
           });
-          // Apply filter again in case search query exists
-          if (_searchQuery.isNotEmpty) _filterList(_searchQuery);
+          _applyFilters(); // Apply default filters (All)
         }
       } else {
         if (mounted) setState(() => _isLoading = false);
@@ -92,38 +113,218 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
     }
   }
 
-  void _filterList(String query) {
+  // [CORE LOGIC] Smart Filtering
+  void _applyFilters() {
+    final query = _searchController.text.toLowerCase();
+
     setState(() {
-      _searchQuery = query;
-      if (query.isEmpty) {
-        _filteredParticipants = _allParticipants;
-      } else {
-        _filteredParticipants = _allParticipants.where((p) {
-          final name = p['name'].toString().toLowerCase();
-          final dept = p['department'].toString().toLowerCase();
-          final search = query.toLowerCase();
-          return name.contains(search) || dept.contains(search);
-        }).toList();
-      }
+      _filteredParticipants = _allParticipants.where((p) {
+        // 1. Search Text
+        final name = (p['name'] ?? "").toString().toLowerCase();
+        final dept = (p['department'] ?? "").toString().toLowerCase();
+        final empId = (p['empId'] ?? "").toString().toLowerCase();
+        final matchesSearch =
+            name.contains(query) ||
+            dept.contains(query) ||
+            empId.contains(query);
+
+        // 2. Status Filter
+        bool matchesStatus = true;
+        if (_selectedStatusFilter != null) {
+          final pStatus = p['status']; // "Joined" or "Registered"
+
+          if (_selectedStatusFilter == 'Joined') {
+            matchesStatus = pStatus == 'Joined';
+          } else if (_selectedStatusFilter == 'Not Joined') {
+            // Not Joined = Registered (ยังไม่เช็คอิน) หรือ Absent (ถ้าจบงานแล้ว)
+            matchesStatus = pStatus != 'Joined';
+          }
+        }
+
+        // 3. Department Filter
+        bool matchesDept = true;
+        if (_selectedDepartmentFilter != null) {
+          matchesDept = (p['department'] ?? "-") == _selectedDepartmentFilter;
+        }
+
+        return matchesSearch && matchesStatus && matchesDept;
+      }).toList();
     });
   }
 
-  // --- [NEW LOGIC START] ส่วนจัดการ Check-in ---
+  // [UI] Filter Modal (Fixed Bottom Padding)
+  void _showFilterModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true, // [FIX 1] เปิดโหมดนี้เพื่อให้ Modal ยืดหยุ่น
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateModal) {
+            // [FIX 2] คำนวณ Padding เองเพื่อความชัวร์ (24px + พื้นที่ Safe Area ด้านล่าง)
+            final bottomPadding = MediaQuery.of(context).padding.bottom + 24;
 
-  // 1. ฟังก์ชันคำนวณเวลา (เอาไว้โชว์ใน QR Screen)
+            return Container(
+              padding: EdgeInsets.fromLTRB(24, 24, 24, bottomPadding),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "Filter Participants",
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _selectedStatusFilter = null;
+                            _selectedDepartmentFilter = null;
+                          });
+                          _applyFilters();
+                          Navigator.pop(context);
+                        },
+                        child: Text(
+                          "Reset",
+                          style: GoogleFonts.poppins(color: Colors.red),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Status Filter
+                  Text(
+                    "Status",
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      _buildFilterChip(
+                        "All",
+                        _selectedStatusFilter == null,
+                        () {
+                          setStateModal(() => _selectedStatusFilter = null);
+                        },
+                      ),
+                      _buildFilterChip(
+                        "Joined",
+                        _selectedStatusFilter == 'Joined',
+                        () {
+                          setStateModal(() => _selectedStatusFilter = 'Joined');
+                        },
+                      ),
+                      _buildFilterChip(
+                        widget.isHistory ? "Absent" : "Pending",
+                        _selectedStatusFilter == 'Not Joined',
+                        () {
+                          setStateModal(
+                            () => _selectedStatusFilter = 'Not Joined',
+                          );
+                        },
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Department Filter
+                  Text(
+                    "Department",
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _buildFilterChip(
+                        "All",
+                        _selectedDepartmentFilter == null,
+                        () {
+                          setStateModal(() => _selectedDepartmentFilter = null);
+                        },
+                      ),
+                      ..._availableDepartments.map((dept) {
+                        return _buildFilterChip(
+                          dept,
+                          _selectedDepartmentFilter == dept,
+                          () {
+                            setStateModal(
+                              () => _selectedDepartmentFilter = dept,
+                            );
+                          },
+                        );
+                      }).toList(),
+                    ],
+                  ),
+
+                  const SizedBox(height: 30),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        _applyFilters();
+                        Navigator.pop(context);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4A80FF),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        "Apply Filters",
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildFilterChip(String label, bool isSelected, VoidCallback onTap) {
+    return FilterChip(
+      label: Text(label),
+      selected: isSelected,
+      selectedColor: const Color(0xFFFFF6CC), // Theme Yellow
+      checkmarkColor: Colors.orange.shade900,
+      labelStyle: GoogleFonts.poppins(
+        color: isSelected ? Colors.orange.shade900 : Colors.black87,
+        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+      ),
+      onSelected: (_) => onTap(),
+    );
+  }
+
+  // --- Check-in Logic ---
   String _getValidTimeRange() {
     if (widget.startTime == "-" || widget.endTime == "-") return "TBA";
     try {
       final start = DateFormat("HH:mm").parse(widget.startTime);
-      // เปิดให้เช็คอินก่อน 1 ชม.
       final openTime = start.subtract(const Duration(hours: 1));
-
       DateTime closeTime;
       if (widget.isCompulsory == 1) {
-        // งานบังคับ: ปิดหลังเริ่ม 30 นาที
         closeTime = start.add(const Duration(minutes: 30));
       } else {
-        // งานทั่วไป: ปิดตอนจบงาน
         closeTime = DateFormat("HH:mm").parse(widget.endTime);
       }
       return "${DateFormat('HH:mm').format(openTime)} - ${DateFormat('HH:mm').format(closeTime)}";
@@ -132,7 +333,6 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
     }
   }
 
-  // 2. แสดง Modal เลือกโหมด
   void _showCheckInOptions() {
     showModalBottomSheet(
       context: context,
@@ -157,7 +357,6 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
                     ),
                   ),
                 ),
-                // Option 1: Scan Employee
                 ListTile(
                   leading: Container(
                     padding: const EdgeInsets.all(10),
@@ -184,7 +383,6 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
                   },
                 ),
                 const Divider(indent: 20, endIndent: 20),
-                // Option 2: Show Event QR
                 ListTile(
                   leading: Container(
                     padding: const EdgeInsets.all(10),
@@ -215,7 +413,6 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
     );
   }
 
-  // 3. เปิดหน้า Scanner
   void _openScanner() async {
     final result = await Navigator.push(
       context,
@@ -224,16 +421,13 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
 
     if (result != null && mounted) {
       if (result == "SHOW_MY_QR") {
-        // กรณีเผื่อไว้
         _openEventQrDisplay();
       } else {
-        // ได้ QR Code (EMP_ID) -> ยิง API
         _processCheckIn(result);
       }
     }
   }
 
-  // 4. เปิดหน้าแสดง QR กิจกรรม
   void _openEventQrDisplay() {
     Navigator.push(
       context,
@@ -242,15 +436,13 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
           activityName: widget.activityName,
           actId: widget.activityId,
           qrData: "ACTION:CHECKIN|ACT_ID:${widget.activityId}",
-          timeInfo: _getValidTimeRange(), // ส่งเวลาที่คำนวณแล้วไปแสดง
+          timeInfo: _getValidTimeRange(),
         ),
       ),
     );
   }
 
-  // 5. ฟังก์ชันยิง API Check-in
   Future<void> _processCheckIn(String empId) async {
-    // Show Loading
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -268,7 +460,6 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
         }),
       );
 
-      // Hide Loading
       if (mounted) Navigator.pop(context);
 
       if (response.statusCode == 200) {
@@ -278,7 +469,7 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
           title: "Check-in Success!",
           message: "${data['emp_name']}\nEarned +${data['points_earned']} pts",
         );
-        _fetchParticipants(); // Refresh list เพื่ออัปเดตสถานะ Joined ทันที
+        _fetchParticipants();
       } else {
         final errorData = jsonDecode(utf8.decode(response.bodyBytes));
         _showResultDialog(
@@ -355,14 +546,17 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
       ),
     );
   }
-  // --- [NEW LOGIC END] ---
 
   @override
   Widget build(BuildContext context) {
+    final hasFilter =
+        _selectedStatusFilter != null || _selectedDepartmentFilter != null;
+
+    // [UPDATED] ไม่ต้องใช้ตัวแปร topGradientColor แล้ว เพราะเราจะใช้สีขาว
+
     return Scaffold(
-      backgroundColor: organizerBg,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.white, // [UPDATED] เปลี่ยนเป็นสีขาว
         elevation: 0,
         leading: const BackButton(color: Colors.black),
         title: Text(
@@ -373,9 +567,9 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
           ),
         ),
         centerTitle: true,
+        // [OPTIONAL] ถ้าต้องการให้ Status Bar ไอคอนเป็นสีดำชัดเจน
+        systemOverlayStyle: SystemUiOverlayStyle.dark,
       ),
-
-      // [NEW] ปุ่ม Check-in มุมขวาล่าง (ซ่อนถ้าเป็น History)
       floatingActionButton: widget.isHistory
           ? null
           : FloatingActionButton.extended(
@@ -390,85 +584,167 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
                 ),
               ),
             ),
-
-      body: Column(
+      body: Stack(
+        // [UPDATED] ใช้ Stack
         children: [
-          // 1. Summary Dashboard
-          _buildDashboard(),
+          _buildBackground(), // [UPDATED] วางพื้นหลังไว้ล่างสุด
+          SafeArea(
+            child: Column(
+              children: [
+                // 1. Dashboard
+                _buildDashboard(),
 
-          // 2. Search Bar
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
+                // 2. Search & Filter Bar
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
                   ),
-                ],
-              ),
-              child: TextField(
-                onChanged: _filterList,
-                decoration: InputDecoration(
-                  hintText: "Search by name or department...",
-                  hintStyle: GoogleFonts.poppins(color: Colors.grey[400]),
-                  prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-              ),
-            ),
-          ),
-
-          // 3. List
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _filteredParticipants.isEmpty
-                ? _buildEmptyState()
-                : RefreshIndicator(
-                    onRefresh: _fetchParticipants,
-                    child: ListView.builder(
-                      padding: const EdgeInsets.only(
-                        left: 20,
-                        right: 20,
-                        top: 8,
-                        bottom: 80, // [FIXED] เผื่อที่ให้ FAB ไม่บัง List
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: TextField(
+                            controller: _searchController,
+                            decoration: InputDecoration(
+                              hintText: "Search name, dept...",
+                              hintStyle: GoogleFonts.poppins(
+                                color: Colors.grey[400],
+                              ),
+                              prefixIcon: Icon(
+                                Icons.search,
+                                color: Colors.grey[400],
+                              ),
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                vertical: 14,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                      itemCount: _filteredParticipants.length,
-                      itemBuilder: (context, index) {
-                        return _ParticipantCard(
-                          data: _filteredParticipants[index],
-                        );
-                      },
-                    ),
+                      const SizedBox(width: 10),
+
+                      // Filter Button
+                      GestureDetector(
+                        onTap: _showFilterModal,
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: hasFilter
+                                ? const Color(0xFF4A80FF)
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            Icons.filter_list_rounded,
+                            color: hasFilter
+                                ? Colors.white
+                                : Colors.grey.shade700,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
+                ),
+
+                // 3. List
+                Expanded(
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _filteredParticipants.isEmpty
+                      ? _buildEmptyState()
+                      : RefreshIndicator(
+                          onRefresh: _fetchParticipants,
+                          child: ListView.builder(
+                            padding: const EdgeInsets.only(
+                              left: 20,
+                              right: 20,
+                              top: 8,
+                              bottom: 80,
+                            ),
+                            itemCount: _filteredParticipants.length,
+                            itemBuilder: (context, index) {
+                              return _ParticipantCard(
+                                data: _filteredParticipants[index],
+                                isHistory: widget.isHistory,
+                              );
+                            },
+                          ),
+                        ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
-  // ... (ส่วน Widget ย่อยอื่นๆ เช่น _buildDashboard, _ParticipantCard ใช้ของเดิมได้เลยครับ)
+
+  // [UPDATED] ปรับพื้นหลัง: ขาว (บน) -> เหลือง (กลาง) -> ขาว (ล่าง)
+  Widget _buildBackground() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.white, // เริ่มต้นด้วยสีขาว (ส่วน AppBar/Header)
+            Color(0xFFFFF6CC), // ตรงกลางเป็นสีเหลืองอ่อน (Theme)
+            Colors.white, // ไล่กลับไปเป็นสีขาวด้านล่าง
+          ],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          // กำหนดจุดเปลี่ยนสี:
+          // 0.0 - 0.15 : ขาวล้วน
+          // 0.15 - 0.4 : ไล่ไปเหลือง
+          // 0.4 - 1.0  : ไล่กลับไปขาว
+          stops: [0.0, 0.15, 0.6],
+        ),
+      ),
+    );
+  }
 
   Widget _buildDashboard() {
-    // ... (Code เดิมของคุณ) ...
-    // copy โค้ดเดิมส่วนล่างมาใส่ต่อตรงนี้ได้เลยครับ (ตั้งแต่ _buildDashboard ลงไปจนจบไฟล์)
+    // คำนวณ Pending/Absent Label
+    final pendingLabel = widget.isHistory ? "Absent" : "Pending";
+    final pendingColor = widget.isHistory ? Colors.red : Colors.orange;
+
+    // คำนวณยอด Pending
+    final pendingCount = _totalRegistered - _totalJoined;
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color: Colors.black.withOpacity(
+              0.08,
+            ), // [UPDATED] เงาเข้มขึ้นนิดนึง
+            blurRadius: 15,
+            offset: const Offset(0, 5),
           ),
         ],
         borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
+        // [UPDATED] เพิ่มขอบบางๆ ให้ดูตัดกับพื้นหลังสีขาว
+        border: Border.all(color: Colors.grey.shade100, width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -521,11 +797,7 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
               Expanded(child: _statCard("Joined", _totalJoined, Colors.green)),
               const SizedBox(width: 12),
               Expanded(
-                child: _statCard(
-                  "Pending",
-                  _totalRegistered - _totalJoined,
-                  Colors.orange,
-                ),
+                child: _statCard(pendingLabel, pendingCount, pendingColor),
               ),
             ],
           ),
@@ -544,12 +816,15 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
       ),
       child: Column(
         children: [
-          Text(
-            "$count",
-            style: GoogleFonts.poppins(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: color.shade800,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              "$count",
+              style: GoogleFonts.poppins(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: color.shade800,
+              ),
             ),
           ),
           Text(
@@ -583,19 +858,12 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
 
 class _ParticipantCard extends StatelessWidget {
   final Map<String, dynamic> data;
+  final bool isHistory;
 
-  const _ParticipantCard({required this.data});
+  const _ParticipantCard({required this.data, required this.isHistory});
 
   String _getAvatarUrl(String? title, String empId) {
-    final seed = empId;
-    if (title == null) {
-      return 'https://avatar.iran.liara.run/public/boy?username=$seed';
-    }
-    final t = title.toLowerCase().trim().replaceAll('.', '');
-    if (['ms', 'mrs', 'miss', 'นาง', 'นางสาว'].contains(t)) {
-      return 'https://avatar.iran.liara.run/public/girl?username=$seed';
-    }
-    return 'https://avatar.iran.liara.run/public/boy?username=$seed';
+    return "https://avatar.iran.liara.run/public/boy?username=$empId";
   }
 
   @override
@@ -620,7 +888,9 @@ class _ParticipantCard extends StatelessWidget {
         border: Border.all(
           color: isJoined
               ? Colors.green.withOpacity(0.3)
-              : Colors.grey.shade100,
+              : (isHistory
+                    ? Colors.red.withOpacity(0.2)
+                    : Colors.grey.shade100),
         ),
       ),
       child: Row(
@@ -671,6 +941,7 @@ class _ParticipantCard extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
+
           if (isJoined)
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -713,6 +984,22 @@ class _ParticipantCard extends StatelessWidget {
                   ),
                 ),
               ],
+            )
+          else if (isHistory)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                "Absent",
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.red.shade700,
+                ),
+              ),
             )
           else
             Container(

@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:lottie/lottie.dart'; // <-- 1. Import Lottie
+import 'package:lottie/lottie.dart';
 import '../login_screen.dart';
 
 class RegistrationSuccessfulScreen extends StatefulWidget {
@@ -20,10 +20,8 @@ class _RegistrationSuccessfulScreenState
   }
 
   void _navigateToLogin() {
-    // หน่วงเวลา 3 วินาที (เผื่อให้ Animation เล่นจบ)
     Timer(const Duration(seconds: 3), () {
       if (mounted) {
-        // ไปหน้า Login และลบทุกหน้าก่อนหน้าออก
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -35,22 +33,22 @@ class _RegistrationSuccessfulScreenState
 
   @override
   Widget build(BuildContext context) {
+    // [UPDATED] Responsive Size
+    final size = MediaQuery.of(context).size;
+    final animSize = size.width * 0.6; // 60% ของความกว้างจอ
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // --- 2. นี่คือส่วนที่เปลี่ยน ---
-            // โหลด Animation จากไฟล์ .json ที่เราเพิ่มไว้
             Lottie.asset(
-              'assets/animations/Success.json', // <-- แก้ชื่อไฟล์ตรงนี้ถ้าไม่ตรงกัน
-              width: 200,
-              height: 200,
-              repeat: false, // เล่นแค่ครั้งเดียว
+              'assets/animations/Success.json',
+              width: animSize,
+              height: animSize,
+              repeat: false,
             ),
-            // (คุณสามารถลบ Text 'Registration Successful' ออกไปได้เลย
-            // หรือจะเก็บไว้ใต้ Animation ก็ได้ครับ)
           ],
         ),
       ),
