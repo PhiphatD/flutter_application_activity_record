@@ -311,7 +311,26 @@ class _ActivitiesParticipantsListScreenState
     );
   }
 
+  String _parseEmpIdFromQr(String scannedData) {
+    // กรณีที่ 1: สแกน QR แบบใหม่ (Ticket Style)
+    // รูปแบบ: ACTION:CHECKIN|SESSION:xxxxx|EMP:E0001
+    if (scannedData.contains("ACTION:CHECKIN") &&
+        scannedData.contains("EMP:")) {
+      final parts = scannedData.split('|');
+      for (var part in parts) {
+        if (part.startsWith("EMP:")) {
+          return part.substring(4); // ตัดคำว่า "EMP:" ออก เหลือแค่รหัส "E0001"
+        }
+      }
+    }
+
+    // กรณีที่ 2: สแกน QR ประจำตัวพนักงาน (แบบเก่า/บัตรพนักงาน)
+    // รูปแบบ: E0001 (รหัสเพียวๆ)
+    return scannedData;
+  }
+
   void _scanQrDirectly(_Activity activity) async {
+    // หรือใน Detail Screen ก็แก้เหมือนกัน
     final result = await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const EnterpriseScannerScreen()),
@@ -319,9 +338,12 @@ class _ActivitiesParticipantsListScreenState
 
     if (result != null) {
       if (result == "SHOW_MY_QR") {
+        // กรณี Organizer กดดู QR กิจกรรม
         _showActivityQr(activity);
       } else {
-        _processCheckIn(result, activity.actId);
+        // [FIX] เรียกฟังก์ชันแกะรหัสก่อนส่งไปเช็คอิน
+        final cleanEmpId = _parseEmpIdFromQr(result);
+        _processCheckIn(cleanEmpId, activity.actId);
       }
     }
   }

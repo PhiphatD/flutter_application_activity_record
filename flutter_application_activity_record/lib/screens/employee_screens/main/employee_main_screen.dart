@@ -17,12 +17,6 @@ class EmployeeMainScreen extends StatefulWidget {
 class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
   int _selectedIndex = 0;
 
-  static const List<Widget> _widgetOptions = <Widget>[
-    ActivityFeedScreen(),
-    TodoScreen(),
-    RewardScreen(),
-  ];
-
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
@@ -34,9 +28,15 @@ class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
     // Theme สีฟ้าสำหรับ Employee
     const Color primaryColor = Color(0xFF4A80FF);
 
+    final List<Widget> widgetOptions = <Widget>[
+      ActivityFeedScreen(onGoToTodo: () => _onItemTapped(1)),
+      const TodoScreen(),
+      const RewardScreen(),
+    ];
+
     return Scaffold(
       backgroundColor: employeeBg,
-      body: IndexedStack(index: _selectedIndex, children: _widgetOptions),
+      body: IndexedStack(index: _selectedIndex, children: widgetOptions),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: Colors.white,

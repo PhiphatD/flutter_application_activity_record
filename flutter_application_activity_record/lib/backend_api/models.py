@@ -90,7 +90,9 @@ class Activity(Base):
     ACT_TRAVEL_INFO = Column(String(100))
     ACT_MORE_DETAILS = Column(Text)
     ACT_TARGET_CRITERIA = Column(Text, nullable=True)
-    
+    ACT_IMAGE = Column(String(255))
+    ACT_AGENDA = Column(Text)
+
     # Relationships
     company = relationship("Company", back_populates="activities")
     organizer = relationship("Organizer", back_populates="activities")
@@ -112,7 +114,7 @@ class ActivitySession(Base):
 # --- 7. ตารางลงทะเบียน ---
 class Registration(Base):
     __tablename__ = "REGISTRATION"
-    REG_ID = Column(String(5), primary_key=True, index=True)
+    REG_ID = Column(String(20), primary_key=True, index=True)
     EMP_ID = Column(String(5), ForeignKey("EMPLOYEE.EMP_ID"), nullable=False)
     SESSION_ID = Column(String(6), ForeignKey("ACTIVITY_SESSION.SESSION_ID"), nullable=False)
     REG_DATE = Column(Date, nullable=False)
@@ -120,7 +122,7 @@ class Registration(Base):
 # --- 8. ตารางเช็คอิน ---
 class CheckIn(Base):
     __tablename__ = "CHECKIN"
-    CHECKIN_ID = Column(String(5), primary_key=True, index=True)
+    CHECKIN_ID = Column(String(20), primary_key=True, index=True)
     EMP_ID = Column(String(5), ForeignKey("EMPLOYEE.EMP_ID"), nullable=False)
     SESSION_ID = Column(String(6), ForeignKey("ACTIVITY_SESSION.SESSION_ID"), nullable=False)
     CHECKIN_DATE = Column(Date, nullable=False)
@@ -139,11 +141,11 @@ class Points(Base):
 # --- 10. ตารางประวัติคะแนน (NEW) ---
 class PointTransaction(Base):
     __tablename__ = "POINT_TRANSACTION"
-    TXN_ID = Column(String(8), primary_key=True)
+    TXN_ID = Column(String(20), primary_key=True)
     EMP_ID = Column(String(5), ForeignKey("EMPLOYEE.EMP_ID"), nullable=False)
     TXN_TYPE = Column(String(10), nullable=False) # Earn / Redeem
     REF_TYPE = Column(String(10), nullable=False) # CHECKIN / REDEEM
-    REF_ID = Column(String(8), nullable=False)
+    REF_ID = Column(String(20), nullable=False)
     POINTS = Column(Integer, nullable=False)
     TXN_DATE = Column(DateTime, nullable=False)
 
@@ -160,13 +162,13 @@ class Prize(Base):
     STATUS = Column(String(20), default="Available")
     EXPIRED_DATE = Column(Date)
     MANAGED_BY = Column(String(5), ForeignKey("EMPLOYEE.EMP_ID"), nullable=False)
-
+    PICKUP_INSTRUCTION = Column(String(255), default='Contact HR')
     company = relationship("Company", back_populates="prizes")
 
 # --- 12. ตารางแลกของรางวัล ---
 class Redeem(Base):
     __tablename__ = "REDEEM"
-    REDEEM_ID = Column(String(5), primary_key=True, index=True)
+    REDEEM_ID = Column(String(20), primary_key=True, index=True)
     EMP_ID = Column(String(5), ForeignKey("EMPLOYEE.EMP_ID"), nullable=False)
     PRIZE_ID = Column(String(5), ForeignKey("PRIZE.PRIZE_ID"), nullable=False)
     REDEEM_DATE = Column(Date, nullable=False)

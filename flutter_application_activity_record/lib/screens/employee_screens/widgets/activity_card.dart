@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../activities/activity_detail_screen.dart';
 
-class ActivityCard extends StatefulWidget {
+class ActivityCard extends StatelessWidget {
   final String id;
   final String type;
   final String title;
@@ -12,6 +12,9 @@ class ActivityCard extends StatefulWidget {
   final int currentParticipants;
   final int maxParticipants;
   final bool isCompulsory;
+  final String status; // Open, Full, Closed, Joined, Missed, Upcoming
+  final bool isFavorite;
+  final VoidCallback? onToggleFavorite;
 
   const ActivityCard({
     super.key,
@@ -24,260 +27,296 @@ class ActivityCard extends StatefulWidget {
     required this.currentParticipants,
     required this.maxParticipants,
     this.isCompulsory = false,
+    this.status = 'Open',
+    this.isFavorite = false,
+    this.onToggleFavorite,
   });
 
-  @override
-  State<ActivityCard> createState() => _ActivityCardState();
-}
-
-class _ActivityCardState extends State<ActivityCard>
-    with SingleTickerProviderStateMixin {
-  bool _isFavorited = false;
-  late AnimationController _animationController;
-  late Animation<double> _scaleAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 200),
-    );
-    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.3).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
-    );
-  }
-
-  @override
-  void dispose() {
-    _animationController.dispose();
-    super.dispose();
-  }
-
-  void _toggleFavorite() {
-    setState(() {
-      _isFavorited = !_isFavorited;
-    });
-
-    _animationController.forward().then((_) {
-      _animationController.reverse();
-    });
-  }
-
-  IconData _getIconForType(String type) {
+  Color _getTypeColor(String type) {
     switch (type.toLowerCase()) {
       case 'training':
-        return Icons.model_training;
+        return const Color(0xFF4A80FF); // Blue
       case 'seminar':
-        return Icons.campaign_outlined;
+        return const Color(0xFFFF9F1C); // Orange
       case 'workshop':
-        return Icons.construction;
+        return const Color(0xFF2EC4B6); // Teal
       default:
-        return Icons.event;
+        return const Color(0xFF9E9E9E); // Grey
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    const Color secondaryTextColor = Colors.black54;
-    const Color cardBackgroundColor = Colors.white;
-    const Color brandBlue = Color(0xFF375987);
+    final typeColor = _getTypeColor(type);
+    final bool isFull = currentParticipants >= maxParticipants;
 
-    return Stack(
-      children: [
-        Container(
-          width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 16.0),
-          decoration: BoxDecoration(
-            color: cardBackgroundColor,
-            border: Border.all(color: const Color.fromRGBO(0, 0, 0, 0.15), width: 1.0),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 6.0, offset: const Offset(0, 3)),
-            ],
-            borderRadius: BorderRadius.circular(20.0),
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ActivityDetailScreen(
-                      activityId: widget.id,
-                    ),
-                  ),
-                );
-              },
-              borderRadius: BorderRadius.circular(20.0),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16.0,
-                  vertical: 12.0,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                widget.title,
-                                style: GoogleFonts.kanit(
-                                  fontWeight: FontWeight.w400,
-                                  fontSize: 16,
-                                  color: Colors.black,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 40), // Space for the icon
-                      ],
-                    ),
+    // [UPDATED] Logic สีป้ายสถานะ (Button Color)
+    Color statusColor;
+    Color statusBg;
+    String statusText;
 
-                    const Divider(color: Colors.grey),
-                    const SizedBox(height: 8.0),
-                    _buildInfoRow(
-                      icon: Icons.location_on_outlined,
-                      text: widget.location,
-                    ),
-                    const SizedBox(height: 8.0),
-                    _buildInfoRow(
-                      icon: Icons.person_outline,
-                      text: 'Organizers : ${widget.organizer}',
-                    ),
-                    const SizedBox(height: 8.0),
-                    _buildInfoRow(
-                      icon: Icons.star_border_purple500_outlined,
-                      text: 'Points : ${widget.points}',
-                    ),
-                    const SizedBox(height: 8.0),
-                    Row(
-                      children: [
-                        _buildTypePill(widget.type),
-                        const Spacer(),
-                        const Icon(
-                          Icons.people_alt_outlined,
-                          color: brandBlue,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 4.0),
-                        Text(
-                          '${widget.currentParticipants}/${widget.maxParticipants}',
-                          style: GoogleFonts.kanit(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: widget.currentParticipants >= widget.maxParticipants
-                                ? const Color(0xFFD91A1A)
-                                : brandBlue,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-        Positioned(
-          top: 5,
-          right: 8,
-          child: ScaleTransition(
-            scale: _scaleAnimation,
-            child: IconButton(
-              icon: Icon(
-                _isFavorited ? Icons.favorite : Icons.favorite_border,
-                color: _isFavorited ? Colors.red : Colors.grey,
-                size: 24,
-              ),
-              onPressed: _toggleFavorite,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+    switch (status) {
+      case 'Joined':
+        statusColor = Colors.green.shade700;
+        statusBg = Colors.green.shade50;
+        statusText = "Completed";
+        break;
+      case 'Missed':
+        statusColor = Colors.red.shade700;
+        statusBg = Colors.red.shade50;
+        statusText = "Missed";
+        break;
+      case 'Upcoming':
+        statusColor = Colors.orange.shade800;
+        statusBg = Colors.orange.shade50;
+        statusText = "Upcoming";
+        break;
+      case 'Full':
+        statusColor = Colors.red;
+        statusBg = Colors.red.shade50;
+        statusText = "Full";
+        break;
+      default: // Open
+        if (isCompulsory) {
+          statusColor = Colors.orange.shade800;
+          statusBg = Colors.orange.shade50;
+          statusText = "Mandatory";
+        } else {
+          statusColor = Colors.blue.shade700;
+          statusBg = Colors.blue.shade50;
+          statusText = "Join Now";
+        }
+    }
 
-  // Helper widget for info rows
-  Widget _buildInfoRow({required String text, IconData? icon}) {
-    return Row(
-      children: [
-        if (icon != null) ...[
-          Icon(icon, color: const Color(0xFF375987), size: 22),
-          const SizedBox(width: 12.0),
-        ],
-        Expanded(
-          child: Text(
-            text,
-            style: GoogleFonts.kanit(
-              fontWeight: FontWeight.w400,
-              fontSize: 14,
-              color: Colors.black,
-            ),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // --- Widget ย่อยสำหรับแถวที่มีข้อมูลด้านขวา (เช่น ผู้เข้าร่วม) ---
-  Widget _buildInfoRowWithTrailing({
-    required IconData icon,
-    required Color iconColor,
-    required String text,
-    required String trailingText,
-  }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, color: iconColor, size: 22.0),
-        const SizedBox(width: 12.0),
-        Expanded(
-          child: Text(
-            text,
-            style: GoogleFonts.kanit(
-              fontWeight: FontWeight.w400,
-              fontSize: 14,
-              color: Colors.black,
-              height: 1.4,
-            ),
-          ),
-        ),
-        const SizedBox(width: 12.0),
-        Text(
-          trailingText,
-          style: GoogleFonts.kanit(
-            fontWeight: FontWeight.w400,
-            fontSize: 14,
-            color: Colors.black,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // --- Widget ย่อยสำหรับป้าย Type ---
-  Widget _buildTypePill(String type) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20.0),
-        border: Border.all(color: Colors.grey.shade400),
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(color: Colors.grey.shade200),
       ),
-      child: Text(
-        'TYPE: $type',
-        style: GoogleFonts.kanit(
-          color: Colors.black54,
-          fontWeight: FontWeight.bold,
-          fontSize: 10,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ActivityDetailScreen(activityId: id),
+              ),
+            );
+          },
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment:
+                  CrossAxisAlignment.stretch, // ยืดให้เต็มความสูง
+              children: [
+                // 1. Color Strip
+                Container(width: 6, color: typeColor),
+
+                // 2. Content Area
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Header Row: Type & Favorite
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: typeColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                type.toUpperCase(),
+                                style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: typeColor,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            if (isCompulsory)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.shade50,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  "COMPULSORY",
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.red,
+                                  ),
+                                ),
+                              ),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: onToggleFavorite,
+                              child: Icon(
+                                isFavorite
+                                    ? Icons.favorite
+                                    : Icons.favorite_border,
+                                size: 20,
+                                color: isFavorite
+                                    ? Colors.red
+                                    : Colors.grey.shade400,
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 6),
+
+                        // Title
+                        Text(
+                          title,
+                          style: GoogleFonts.kanit(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87,
+                            height: 1.2,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+
+                        const SizedBox(height: 6),
+
+                        // Meta Data (Location | Host)
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.location_on_outlined,
+                              size: 14,
+                              color: Colors.grey.shade500,
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                "$location  |  $organizer",
+                                style: GoogleFonts.kanit(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade600,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 12), // เว้นระยะห่างก่อน Footer
+                        // Row 4 (Footer)
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.group_outlined,
+                                        size: 18,
+                                        color: Colors.grey[600],
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        "$currentParticipants/$maxParticipants Registered",
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.grey[700],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(2),
+                                    child: LinearProgressIndicator(
+                                      value: maxParticipants > 0
+                                          ? currentParticipants /
+                                                maxParticipants
+                                          : 0,
+                                      backgroundColor: Colors.grey.shade100,
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        isFull ? Colors.red : typeColor,
+                                      ),
+                                      minHeight: 3,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+
+                            // Status Badge/Button
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: statusBg,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: statusColor.withOpacity(0.2),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  if (status == 'Joined')
+                                    Padding(
+                                      padding: const EdgeInsets.only(right: 4),
+                                      child: Icon(
+                                        Icons.check_circle,
+                                        size: 14,
+                                        color: statusColor,
+                                      ),
+                                    ),
+
+                                  Text(
+                                    statusText,
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: statusColor,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

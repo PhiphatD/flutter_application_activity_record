@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
-// removed external bottom sheet import; implement local confirm bottom sheet
 import 'package:flutter_application_activity_record/widgets/reward_confirmation_bottom_sheet.dart';
 
 class RewardDetailScreen extends StatefulWidget {
@@ -40,28 +39,6 @@ class _RewardDetailScreenState extends State<RewardDetailScreen> {
   }
 
   void _handleRedeem() {
-    if (widget.stock <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('This reward is out of stock', style: GoogleFonts.poppins()),
-          backgroundColor: Colors.red,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-
-    if (widget.userPoints < widget.pointsCost) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Insufficient points. You need ${widget.pointsCost} points', style: GoogleFonts.poppins()),
-          backgroundColor: Colors.orange,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-
     RewardConfirmationBottomSheet.show(
       context: context,
       rewardName: widget.rewardName,
@@ -79,130 +56,383 @@ class _RewardDetailScreenState extends State<RewardDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final canRedeem = widget.stock > 0 && widget.userPoints >= widget.pointsCost;
+    // Logic คำนวณสถานะ
+    final bool isOutOfStock = widget.stock <= 0;
+    final bool isAffordable = widget.userPoints >= widget.pointsCost;
+    final int pointsNeeded = widget.pointsCost - widget.userPoints;
+    final double progress = (widget.userPoints / widget.pointsCost).clamp(
+      0.0,
+      1.0,
+    );
+
     return Scaffold(
       backgroundColor: Colors.white,
-      body: CustomScrollView(
-        slivers: [
-          SliverAppBar(
-            expandedHeight: 200,
-            pinned: true,
-            backgroundColor: Colors.white,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Column(
-                children: [
-                  SizedBox(
-                    height: 200,
-                    child: Stack(
-                      children: [
-                        PageView.builder(
-                          controller: _pageController,
-                          itemCount: widget.imageUrls.length,
-                          itemBuilder: (context, index) {
-                            return Container(
-                              width: double.infinity,
-                              height: 300,
-                              decoration: BoxDecoration(
-                                image: DecorationImage(image: NetworkImage(widget.imageUrls[index]), fit: BoxFit.cover),
-                              ),
-                            );
-                          },
-                        ),
-                        if (widget.imageUrls.length > 1)
-                          Positioned(
-                            bottom: 16,
-                            left: 0,
-                            right: 0,
-                            child: Center(
-                              child: SmoothPageIndicator(
-                                controller: _pageController,
-                                count: widget.imageUrls.length,
-                                effect: const ExpandingDotsEffect(dotHeight: 8, dotWidth: 8, activeDotColor: Colors.white, dotColor: Colors.white54),
+      body: Stack(
+        children: [
+          CustomScrollView(
+            slivers: [
+              // 1. Parallax Image Header
+              SliverAppBar(
+                expandedHeight: 300,
+                pinned: true,
+                backgroundColor: Colors.white,
+                leading: Container(
+                  margin: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.9),
+                    shape: BoxShape.circle,
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.black),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+                flexibleSpace: FlexibleSpaceBar(
+                  background: Stack(
+                    children: [
+                      PageView.builder(
+                        controller: _pageController,
+                        itemCount: widget.imageUrls.length,
+                        itemBuilder: (context, index) {
+                          return Image.network(
+                            widget.imageUrls[index],
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                          );
+                        },
+                      ),
+                      if (widget.imageUrls.length > 1)
+                        Positioned(
+                          bottom: 16,
+                          left: 0,
+                          right: 0,
+                          child: Center(
+                            child: SmoothPageIndicator(
+                              controller: _pageController,
+                              count: widget.imageUrls.length,
+                              effect: const ExpandingDotsEffect(
+                                dotHeight: 8,
+                                dotWidth: 8,
+                                activeDotColor: Colors.white,
+                                dotColor: Colors.white54,
                               ),
                             ),
                           ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // 2. Content Body
+              SliverToBoxAdapter(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(24),
+                    ),
+                  ),
+                  // [UX] เลื่อนเนื้อหาขึ้นมาทับรูปนิดนึงให้ดู Modern
+                  transform: Matrix4.translationValues(0, -20, 0),
+                  padding: EdgeInsets.fromLTRB(
+                    24,
+                    32,
+                    24,
+                    // [FIXED] เพิ่มพื้นที่ด้านล่างให้มากกว่าความสูงของ Bottom Bar + Safe Area
+                    150 + MediaQuery.of(context).padding.bottom,
+                  ), // Bottom padding for Sticky Bar
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Header: Category & Stock Badge
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[100],
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              widget.category.toUpperCase(),
+                              style: GoogleFonts.inter(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ),
+                          const Spacer(),
+                          _buildStockBadge(widget.stock),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Title
+                      Text(
+                        widget.rewardName,
+                        style: GoogleFonts.kanit(
+                          fontSize: 24,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF1F2937),
+                          height: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      // Points Cost (Hero Element)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            "${widget.pointsCost}",
+                            style: GoogleFonts.poppins(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: const Color(0xFF4A80FF),
+                              height: 1,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text(
+                              "points",
+                              style: GoogleFonts.poppins(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 24),
+                      const Divider(height: 1),
+                      const SizedBox(height: 24),
+
+                      // Description
+                      _buildSectionTitle("Description"),
+                      const SizedBox(height: 8),
+                      Text(
+                        widget.description,
+                        style: GoogleFonts.kanit(
+                          fontSize: 15,
+                          color: Colors.grey[700],
+                          height: 1.6,
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
+
+                      // Terms (Better Layout)
+                      _buildSectionTitle("Terms & Conditions"),
+                      const SizedBox(height: 12),
+                      _buildTermRow(
+                        Icons.calendar_today_outlined,
+                        "Valid for 30 days after redemption",
+                      ),
+                      _buildTermRow(
+                        Icons.block_outlined,
+                        "Non-refundable and cannot be exchanged for cash",
+                      ),
+                      _buildTermRow(
+                        Icons.confirmation_number_outlined,
+                        "Show code at counter to claim",
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          // 3. Sticky Bottom Bar (The Game Changer)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Container(
+              padding: EdgeInsets.fromLTRB(
+                24,
+                20,
+                24,
+                20 + MediaQuery.of(context).padding.bottom,
+              ),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 20,
+                    offset: const Offset(0, -5),
+                  ),
+                ],
+                border: const Border(top: BorderSide(color: Color(0xFFF3F4F6))),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Progress Bar (ถ้าแต้มไม่พอ)
+                  if (!isAffordable && !isOutOfStock) ...[
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          "You have ${widget.userPoints} pts",
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        Text(
+                          "Need $pointsNeeded more",
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: Colors.orange[700],
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ],
+                    ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        backgroundColor: Colors.grey[200],
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Colors.orange.shade400,
+                        ),
+                        minHeight: 6,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Action Button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 54,
+                    child: ElevatedButton(
+                      onPressed: (isAffordable && !isOutOfStock)
+                          ? _handleRedeem
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isOutOfStock
+                            ? Colors.grey[300]
+                            : (isAffordable
+                                  ? const Color(0xFF4A80FF)
+                                  : Colors.grey[200]),
+                        foregroundColor: isAffordable
+                            ? Colors.white
+                            : Colors.grey[500],
+                        elevation: (isAffordable && !isOutOfStock) ? 4 : 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        shadowColor: const Color(0xFF4A80FF).withOpacity(0.4),
+                      ),
+                      child: Text(
+                        isOutOfStock
+                            ? "Out of Stock"
+                            : (isAffordable
+                                  ? "Redeem Now"
+                                  : "Not Enough Points"),
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
           ),
-          SliverToBoxAdapter(
-            child: Container(
-              decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Expanded(child: Text(widget.rewardName, style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87))),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(color: const Color(0xFF4A80FF).withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFF4A80FF).withOpacity(0.3))),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.monetization_on, color: Colors.amber[600], size: 16),
-                        const SizedBox(width: 4),
-                        Text('${widget.pointsCost} pts', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.bold, color: const Color(0xFF4A80FF))),
-                      ]),
-                    ),
-                  ]),
-                  const SizedBox(height: 8),
-                  Row(children: [
-                    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(12)), child: Text(widget.category, style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600]))),
-                    const SizedBox(width: 8),
-                    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), decoration: BoxDecoration(color: widget.stock > 0 ? Colors.green[50] : Colors.red[50], borderRadius: BorderRadius.circular(12)), child: Text('Stock: ${widget.stock}', style: GoogleFonts.poppins(fontSize: 12, color: widget.stock > 0 ? Colors.green[600] : Colors.red[600]))),
-                  ]),
-                  const SizedBox(height: 20),
-                  Text('Description', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-                  const SizedBox(height: 8),
-                  Text(widget.description, style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600], height: 1.5)),
-                  const SizedBox(height: 20),
-                  Text('Terms & Conditions', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
-                  const SizedBox(height: 8),
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    _buildTermItem('• Valid for 30 days from redemption'),
-                    _buildTermItem('• Cannot be exchanged for cash'),
-                    _buildTermItem('• Limited to one per customer'),
-                    _buildTermItem('• Subject to availability'),
-                  ]),
-                  const SizedBox(height: 30),
-                  Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey[200]!)), child: Row(children: [
-                    Icon(Icons.account_balance_wallet, color: Colors.grey[600], size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Your Points', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600])),
-                      Text('${widget.userPoints} points', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
-                    ])),
-                    if (widget.userPoints < widget.pointsCost)
-                      Text('Need ${widget.pointsCost - widget.userPoints} more', style: GoogleFonts.poppins(fontSize: 12, color: Colors.orange[600])),
-                  ])),
-                  const SizedBox(height: 20),
-                ]),
-              ),
-            ),
-          ),
         ],
-      ),
-      bottomNavigationBar: SafeArea(
-        bottom: true,
-        child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, -5))]),
-        child: ElevatedButton(
-          onPressed: canRedeem ? _handleRedeem : null,
-          style: ElevatedButton.styleFrom(backgroundColor: canRedeem ? const Color(0xFF4A80FF) : Colors.grey[300], padding: const EdgeInsets.symmetric(vertical: 16), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Icon(Icons.card_giftcard, color: canRedeem ? Colors.amber[600] : Colors.grey[500], size: 20),
-            const SizedBox(width: 8),
-            Text(canRedeem ? 'Redeem for ${widget.pointsCost} points' : widget.stock <= 0 ? 'Out of Stock' : 'Insufficient Points', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold, color: canRedeem ? Colors.white : Colors.grey[600])),
-          ]),
-        ),
-        ),
       ),
     );
   }
 
-  Widget _buildTermItem(String text) {
-    return Padding(padding: const EdgeInsets.only(bottom: 4), child: Text(text, style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600])));
+  Widget _buildStockBadge(int stock) {
+    Color color;
+    String text;
+
+    if (stock <= 0) {
+      color = Colors.red;
+      text = "Out of Stock";
+    } else if (stock < 10) {
+      color = Colors.orange;
+      text = "Only $stock left!";
+    } else {
+      color = Colors.green;
+      text = "In Stock";
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.inventory_2_outlined, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Text(
+      title,
+      style: GoogleFonts.poppins(
+        fontSize: 18,
+        fontWeight: FontWeight.bold,
+        color: const Color(0xFF111827),
+      ),
+    );
+  }
+
+  Widget _buildTermRow(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12.0),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF3F4F6),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, size: 18, color: Colors.grey[700]),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: GoogleFonts.inter(fontSize: 14, color: Colors.grey[700]),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

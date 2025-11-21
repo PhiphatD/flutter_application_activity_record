@@ -1,55 +1,81 @@
+import 'dart:convert';
+import 'dart:math'; // Import Math เพื่อหา Min/Max
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../profile/profile_screen.dart';
 import 'package:flutter_application_activity_record/theme/app_colors.dart';
 import 'reward_detail_screen.dart';
 import 'redeemed_detail_screen.dart';
 
-class _RewardItem {
+// Enums for Sorting
+enum SortOption { none, pointsLowHigh, pointsHighLow }
+
+// Models
+class RewardItem {
   final String id;
   final String name;
   final int pointsCost;
-  final String vendorOrCategory;
-  int stock;
-  final DateTime expiryDate;
+  final int stock;
   final String? imageUrl;
-  final List<String> imageUrls;
   final String description;
+  final String category;
 
-  _RewardItem({
+  RewardItem({
     required this.id,
     required this.name,
     required this.pointsCost,
-    required this.vendorOrCategory,
     required this.stock,
-    required this.expiryDate,
     this.imageUrl,
-    this.imageUrls = const [],
     required this.description,
+    this.category = 'General',
   });
+
+  factory RewardItem.fromJson(Map<String, dynamic> json) {
+    return RewardItem(
+      id: json['id'],
+      name: json['name'],
+      pointsCost: json['pointCost'],
+      stock: json['stock'],
+      imageUrl: json['image'],
+      description: json['description'],
+      category: json['category'] ?? 'General',
+    );
+  }
 }
 
-class _RedeemedItem {
+class RedeemedItem {
   final String id;
-  final String name;
+  final String prizeName;
   final int pointsCost;
-  final String vendorOrCategory;
-  final DateTime redeemedAt;
-  final String? sourceRewardId;
-  final String? description;
-  final List<String> imageUrls;
+  final DateTime redeemDate;
+  final String status;
+  final String? imageUrl;
+  final String pickupInstruction;
 
-  _RedeemedItem({
+  RedeemedItem({
     required this.id,
-    required this.name,
+    required this.prizeName,
     required this.pointsCost,
-    required this.vendorOrCategory,
-    required this.redeemedAt,
-    this.sourceRewardId,
-    this.description,
-    this.imageUrls = const [],
+    required this.redeemDate,
+    required this.status,
+    this.imageUrl,
+    this.pickupInstruction = "Contact HR",
   });
+
+  factory RedeemedItem.fromJson(Map<String, dynamic> json) {
+    return RedeemedItem(
+      id: json['redeemId'],
+      prizeName: json['prizeName'],
+      pointsCost: json['pointCost'],
+      redeemDate: DateTime.parse(json['redeemDate']),
+      status: json['status'],
+      imageUrl: json['image'],
+      pickupInstruction: json['pickupInstruction'] ?? "Contact HR",
+    );
+  }
 }
 
 class RewardScreen extends StatefulWidget {
@@ -60,163 +86,189 @@ class RewardScreen extends StatefulWidget {
 }
 
 class _RewardScreenState extends State<RewardScreen> {
-  int _userPoints = 1250;
+  final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
+
+  int _userPoints = 0;
+  String _userName = "Loading...";
+  bool _isLoading = true;
+
+  List<RewardItem> _allRewards = [];
+  List<RedeemedItem> _myRedemptions = [];
+
+  // --- Filter & Sort State ---
   bool _showRedeemed = false;
-  String _searchText = '';
-  String _userName = 'Phiphat Deepee';
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = "";
 
-  final List<_RewardItem> _availableRewards = [
-    _RewardItem(
-      id: 'r1',
-      name: 'Starbucks eVoucher 100 THB',
-      pointsCost: 300,
-      vendorOrCategory: 'Voucher',
-      stock: 15,
-      expiryDate: DateTime.now().add(const Duration(days: 30)),
-      imageUrls: [
-        'https://images.unsplash.com/photo-1511920170033-f8396924c348?auto=format&fit=crop&w=800&q=80',
-        'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=800&q=80',
-        'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?auto=format&fit=crop&w=800&q=80',
-      ],
-      description:
-          'บัตรกำนัลใช้ได้ทุกสาขา ภายใน 30 วัน สามารถใช้ได้กับเครื่องดื่มและขนมทุกชนิด',
-    ),
-    _RewardItem(
-      id: 'r2',
-      name: 'Amazon Gift Card 500 THB',
-      pointsCost: 1200,
-      vendorOrCategory: 'Shopping',
-      stock: 8,
-      expiryDate: DateTime.now().add(const Duration(days: 60)),
-      imageUrls: [
-        'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=800&q=80',
-        'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?auto=format&fit=crop&w=800&q=80',
-      ],
-      description:
-          'บัตรของขวัญ Amazon มูลค่า 500 บาท สามารถใช้ซื้อสินค้าได้ทุกประเภท',
-    ),
-    _RewardItem(
-      id: 'r3',
-      name: 'Food Court Coupon 50 THB',
-      pointsCost: 200,
-      vendorOrCategory: 'Food',
-      stock: 0,
-      expiryDate: DateTime.now().add(const Duration(days: 15)),
-      imageUrl:
-          'https://images.unsplash.com/photo-1551218808-94e220e084d2?auto=format&fit=crop&w=800&q=80',
-      description:
-          'คูปองใช้ได้ที่โรงอาหารในบริษัท สามารถใช้ได้กับร้านค้าที่ร่วมรายการ',
-    ),
-    _RewardItem(
-      id: 'r4',
-      name: 'Movie Ticket',
-      pointsCost: 350,
-      vendorOrCategory: 'Entertainment',
-      stock: 12,
-      expiryDate: DateTime.now().add(const Duration(days: 45)),
-      imageUrls: [
-        'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?auto=format&fit=crop&w=800&q=80',
-        'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?auto=format&fit=crop&w=800&q=80',
-        'https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&w=800&q=80',
-      ],
-      description: 'ตั๋วภาพยนตร์ 1 ที่นั่ง สามารถใช้ได้กับภาพยนตร์ทุกเรื่อง',
-    ),
-  ];
+  List<String> _selectedCategories = [];
+  List<String> _availableCategories = ['General', 'Voucher', 'Gadget', 'Food'];
 
-  final List<_RedeemedItem> _redeemedRewards = [
-    _RedeemedItem(
-      id: 'rd1',
-      name: 'Movie Ticket',
-      pointsCost: 250,
-      vendorOrCategory: 'Voucher',
-      redeemedAt: DateTime.now().subtract(const Duration(days: 3)),
-    ),
-  ];
+  // [NEW] Dynamic Point Range & Sort
+  double _minPointDb = 0; // ค่าต่ำสุดจริงจาก DB
+  double _maxPointDb = 10000; // ค่าสูงสุดจริงจาก DB
+  RangeValues _currentPointRange = const RangeValues(0, 10000);
+  SortOption _selectedSort = SortOption.none;
 
-  List<_RewardItem> get _filteredAvailableRewards {
-    if (_searchText.isEmpty) return _availableRewards;
-    return _availableRewards
-        .where((r) => r.name.toLowerCase().contains(_searchText.toLowerCase()))
-        .toList();
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() {
+      setState(() => _searchQuery = _searchController.text);
+    });
+    _fetchInitialData();
   }
 
-  List<_RedeemedItem> get _filteredRedeemedRewards {
-    if (_searchText.isEmpty) return _redeemedRewards;
-    return _redeemedRewards
-        .where((r) => r.name.toLowerCase().contains(_searchText.toLowerCase()))
-        .toList();
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
-  void _redeemReward(_RewardItem item) {
-    final canRedeem = item.stock > 0 && _userPoints >= item.pointsCost;
-    if (!canRedeem) return;
+  Future<void> _fetchInitialData() async {
+    setState(() => _isLoading = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final empId = prefs.getString('empId') ?? '';
+      final name = prefs.getString('name') ?? 'Employee';
 
-    // Process the redemption
-    setState(() {
-      _userPoints -= item.pointsCost;
-      item.stock -= 1;
-      _redeemedRewards.insert(
-        0,
-        _RedeemedItem(
-          id: 'rd_${item.id}_${DateTime.now().millisecondsSinceEpoch}',
-          name: item.name,
-          pointsCost: item.pointsCost,
-          vendorOrCategory: item.vendorOrCategory,
-          redeemedAt: DateTime.now(),
-          sourceRewardId: item.id,
-          description: item.description,
-          imageUrls: item.imageUrls.isNotEmpty
-              ? item.imageUrls
-              : (item.imageUrl != null ? [item.imageUrl!] : []),
-        ),
+      final rewardsRes = await http.get(Uri.parse('$baseUrl/rewards'));
+      final historyRes = await http.get(
+        Uri.parse('$baseUrl/my-redemptions/$empId'),
       );
-    });
 
-    // Show success message
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Successfully redeemed ${item.name}!',
-          style: GoogleFonts.poppins(),
-        ),
-        backgroundColor: Colors.green,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+      if (rewardsRes.statusCode == 200) {
+        final List rData = json.decode(utf8.decode(rewardsRes.bodyBytes));
+        _allRewards = rData.map((e) => RewardItem.fromJson(e)).toList();
+
+        // [NEW] Calculate Dynamic Range & Categories
+        if (_allRewards.isNotEmpty) {
+          // 1. Categories
+          final cats = _allRewards.map((e) => e.category).toSet().toList();
+          if (cats.isNotEmpty) _availableCategories = cats;
+
+          // 2. Points Range
+          final points = _allRewards
+              .map((e) => e.pointsCost.toDouble())
+              .toList();
+          double minP = points.reduce(min);
+          double maxP = points.reduce(max);
+
+          // เผื่อกรณี min=max
+          if (minP == maxP) {
+            minP = 0;
+            maxP = maxP + 100;
+          }
+
+          _minPointDb = minP;
+          _maxPointDb = maxP;
+          _currentPointRange = RangeValues(_minPointDb, _maxPointDb);
+        }
+      }
+
+      if (historyRes.statusCode == 200) {
+        final List hData = json.decode(utf8.decode(historyRes.bodyBytes));
+        _myRedemptions = hData.map((e) => RedeemedItem.fromJson(e)).toList();
+      }
+
+      // Mock Points Logic (Temporary)
+      int points = 0;
+      if (empId == 'E0004')
+        points = 1500;
+      else if (empId == 'E0005')
+        points = 850;
+      else if (empId == 'E0006')
+        points = 300;
+      else
+        points = 0;
+
+      if (mounted) {
+        setState(() {
+          _userName = name;
+          _userPoints = points;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print("Error fetching rewards: $e");
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
-  void _navigateToRewardDetail(_RewardItem item) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => RewardDetailScreen(
-          rewardName: item.name,
-          pointsCost: item.pointsCost,
-          description: item.description,
-          imageUrls: item.imageUrls.isNotEmpty
-              ? item.imageUrls
-              : (item.imageUrl != null ? [item.imageUrl!] : []),
-          category: item.vendorOrCategory,
-          stock: item.stock,
-          userPoints: _userPoints,
-          onRedeem: () {
-            _redeemReward(item);
-            // Switch to redeemed view after successful redemption
-            if (mounted) {
-              setState(() {
-                _showRedeemed = true;
-              });
-            }
-          },
-        ),
-      ),
-    ).then((_) {
-      // Update user points when returning from detail screen
-      if (mounted) {
-        setState(() {});
+  void _onRedeem(RewardItem item) async {
+    final prefs = await SharedPreferences.getInstance();
+    final empId = prefs.getString('empId') ?? '';
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/rewards/redeem'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'emp_id': empId, 'prize_id': item.id}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final remaining = data['remaining_points'];
+
+        setState(() {
+          _userPoints = remaining;
+          _showRedeemed = true;
+        });
+
+        _fetchInitialData();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Redeem Successful!"),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else {
+        final err = jsonDecode(utf8.decode(response.bodyBytes));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(err['detail'] ?? "Failed"),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
-    });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  // [UPDATED] Logic กรองและเรียงลำดับ
+  List<RewardItem> _getFilteredRewards() {
+    var list = _allRewards.where((item) {
+      // 1. Search
+      if (_searchQuery.isNotEmpty) {
+        if (!item.name.toLowerCase().contains(_searchQuery.toLowerCase())) {
+          return false;
+        }
+      }
+      // 2. Category
+      if (_selectedCategories.isNotEmpty) {
+        if (!_selectedCategories.contains(item.category)) {
+          return false;
+        }
+      }
+      // 3. [NEW] Point Range
+      if (item.pointsCost < _currentPointRange.start ||
+          item.pointsCost > _currentPointRange.end) {
+        return false;
+      }
+      return true;
+    }).toList();
+
+    // 4. [NEW] Sorting
+    if (_selectedSort == SortOption.pointsLowHigh) {
+      list.sort((a, b) => a.pointsCost.compareTo(b.pointsCost));
+    } else if (_selectedSort == SortOption.pointsHighLow) {
+      list.sort((a, b) => b.pointsCost.compareTo(a.pointsCost));
+    }
+
+    return list;
   }
 
   @override
@@ -227,15 +279,25 @@ class _RewardScreenState extends State<RewardScreen> {
         child: Column(
           children: [
             _buildCustomAppBar(),
-            _buildLoyaltyCard(),
-            _buildViewSwitcher(),
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20.0),
-                child: _showRedeemed
-                    ? _buildRedeemedList()
-                    : _buildAvailableList(),
-              ),
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : RefreshIndicator(
+                      onRefresh: _fetchInitialData,
+                      child: CustomScrollView(
+                        slivers: [
+                          SliverToBoxAdapter(child: _buildLoyaltyCard()),
+                          SliverToBoxAdapter(child: _buildSearchAndFilter()),
+                          SliverToBoxAdapter(child: _buildViewSwitcher()),
+
+                          _showRedeemed
+                              ? _buildRedeemedSliverList()
+                              : _buildAvailableSliverGrid(),
+
+                          const SliverToBoxAdapter(child: SizedBox(height: 80)),
+                        ],
+                      ),
+                    ),
             ),
           ],
         ),
@@ -245,85 +307,562 @@ class _RewardScreenState extends State<RewardScreen> {
 
   Widget _buildLoyaltyCard() {
     final pointsText = NumberFormat.decimalPattern().format(_userPoints);
-    final expiryText = DateFormat(
-      'MM/yy',
-    ).format(DateTime.now().add(const Duration(days: 180)));
+    final expiryText = "31/12/${DateTime.now().year}";
+
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
+      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
       child: Container(
-        padding: const EdgeInsets.all(16.0),
+        height: 180,
+        padding: const EdgeInsets.all(20.0),
         decoration: BoxDecoration(
           image: const DecorationImage(
             image: AssetImage('assets/images/bgcredit.jpg'),
             fit: BoxFit.cover,
-            colorFilter: ColorFilter.mode(Colors.black26, BlendMode.darken),
+            colorFilter: ColorFilter.mode(Colors.black38, BlendMode.darken),
           ),
-          borderRadius: BorderRadius.circular(16.0),
+          borderRadius: BorderRadius.circular(20.0),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.3),
+              blurRadius: 15,
+              offset: const Offset(0, 8),
+            ),
+          ],
         ),
-        child: Row(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        _userName,
-                        style: GoogleFonts.poppins(
-                          fontSize: 14,
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  "Grow Perks Card",
+                  style: GoogleFonts.poppins(
+                    color: Colors.white.withOpacity(0.8),
+                    fontSize: 14,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const Icon(Icons.wifi, color: Colors.white54, size: 20),
+              ],
+            ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(
+                  pointsText,
+                  style: GoogleFonts.poppins(
+                    fontSize: 40,
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    shadows: [
+                      const Shadow(
+                        blurRadius: 10,
+                        color: Colors.black45,
+                        offset: Offset(0, 2),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10.0),
-                  Text(
-                    'Current Points',
-                    style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      color: const Color.fromRGBO(255, 208, 0, 1),
-                      fontWeight: FontWeight.w500,
-                    ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  "PTS",
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    color: const Color(0xFFFFD700),
+                    fontWeight: FontWeight.bold,
                   ),
-                  const SizedBox(height: 2.0),
-                  Text(
-                    pointsText,
-                    style: GoogleFonts.poppins(
-                      fontSize: 28,
-                      color: const Color.fromRGBO(255, 208, 0, 1),
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 2.0),
-                  Text(
-                    'Points can be redeemed for rewards',
-                    style: GoogleFonts.poppins(
-                      fontSize: 11,
-                      color: const Color.fromARGB(255, 255, 228, 107),
-                    ),
-                  ),
-                  const SizedBox(height: 10.0),
-                  Container(height: 1, color: Colors.white.withOpacity(0.4)),
-                  const SizedBox(height: 6.0),
-                  Text(
-                    'Expiry  $expiryText',
-                    style: GoogleFonts.poppins(
-                      fontSize: 11,
-                      color: Colors.white.withOpacity(0.9),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-            const SizedBox(width: 12.0),
-            Icon(Icons.emoji_events, color: Colors.amber.shade300, size: 56),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "CARD HOLDER",
+                      style: GoogleFonts.poppins(
+                        fontSize: 9,
+                        color: Colors.white60,
+                      ),
+                    ),
+                    Text(
+                      _userName.toUpperCase(),
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      "VALID THRU",
+                      style: GoogleFonts.poppins(
+                        fontSize: 9,
+                        color: Colors.white60,
+                      ),
+                    ),
+                    Text(
+                      expiryText,
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ],
         ),
       ),
     );
+  }
+
+  // [UPDATED] Search & Filter Bar
+  Widget _buildSearchAndFilter() {
+    bool isFilterActive =
+        _selectedCategories.isNotEmpty ||
+        _selectedSort != SortOption.none ||
+        _currentPointRange.start != _minPointDb ||
+        _currentPointRange.end != _maxPointDb;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              height: 45,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search rewards...',
+                  hintStyle: GoogleFonts.poppins(
+                    color: Colors.grey[400],
+                    fontSize: 14,
+                  ),
+                  prefixIcon: Icon(Icons.search, color: Colors.grey.shade400),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          GestureDetector(
+            onTap: _showFilterModal,
+            child: Container(
+              height: 45,
+              width: 45,
+              decoration: BoxDecoration(
+                color: isFilterActive ? const Color(0xFF4A80FF) : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: isFilterActive
+                        ? const Color(0xFF4A80FF).withOpacity(0.3)
+                        : Colors.black.withOpacity(0.05),
+                    blurRadius: 10,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.tune_rounded,
+                color: isFilterActive ? Colors.white : Colors.grey.shade600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // [UPDATED] Advanced Filter Modal
+  void _showFilterModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateModal) {
+            return Container(
+              padding: EdgeInsets.only(
+                top: 24,
+                left: 24,
+                right: 24,
+                bottom: MediaQuery.of(context).padding.bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "Filter & Sort",
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          setState(() {
+                            _selectedCategories.clear();
+                            _selectedSort = SortOption.none;
+                            _currentPointRange = RangeValues(
+                              _minPointDb,
+                              _maxPointDb,
+                            );
+                          });
+                          setStateModal(() {});
+                        },
+                        child: Text(
+                          "Reset",
+                          style: GoogleFonts.poppins(color: Colors.red),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Sort Options
+                  Text(
+                    "Sort By",
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 10,
+                    children: [
+                      ChoiceChip(
+                        label: const Text("Points: Low to High"),
+                        selected: _selectedSort == SortOption.pointsLowHigh,
+                        onSelected: (val) => setStateModal(
+                          () => _selectedSort = val
+                              ? SortOption.pointsLowHigh
+                              : SortOption.none,
+                        ),
+                      ),
+                      ChoiceChip(
+                        label: const Text("Points: High to Low"),
+                        selected: _selectedSort == SortOption.pointsHighLow,
+                        onSelected: (val) => setStateModal(
+                          () => _selectedSort = val
+                              ? SortOption.pointsHighLow
+                              : SortOption.none,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Point Range Slider
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        "Points Range",
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                      ),
+                      Text(
+                        "${_currentPointRange.start.toInt()} - ${_currentPointRange.end.toInt()} pts",
+                        style: GoogleFonts.poppins(
+                          color: const Color(0xFF4A80FF),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  RangeSlider(
+                    values: _currentPointRange,
+                    min: _minPointDb,
+                    max: _maxPointDb,
+                    divisions: (_maxPointDb - _minPointDb) > 0 ? 20 : 1,
+                    activeColor: const Color(0xFF4A80FF),
+                    labels: RangeLabels(
+                      _currentPointRange.start.round().toString(),
+                      _currentPointRange.end.round().toString(),
+                    ),
+                    onChanged: (RangeValues values) {
+                      setStateModal(() => _currentPointRange = values);
+                    },
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Categories
+                  Text(
+                    "Category",
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _availableCategories.map((cat) {
+                      final isSelected = _selectedCategories.contains(cat);
+                      return FilterChip(
+                        label: Text(cat),
+                        selected: isSelected,
+                        selectedColor: const Color(0xFFE6EFFF),
+                        checkmarkColor: const Color(0xFF4A80FF),
+                        onSelected: (val) {
+                          setState(() {
+                            if (val)
+                              _selectedCategories.add(cat);
+                            else
+                              _selectedCategories.remove(cat);
+                          });
+                          setStateModal(() {});
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 30),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        setState(() {}); // Trigger rebuild on main screen
+                        Navigator.pop(context);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4A80FF),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        "Apply Filters",
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildViewSwitcher() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Row(
+          children: [
+            Expanded(child: _buildSwitchButton("Rewards", !_showRedeemed)),
+            Expanded(child: _buildSwitchButton("History", _showRedeemed)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSwitchButton(String text, bool isActive) {
+    return GestureDetector(
+      onTap: () {
+        if ((text == "Rewards" && _showRedeemed) ||
+            (text == "History" && !_showRedeemed)) {
+          setState(() => _showRedeemed = !_showRedeemed);
+        }
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: isActive ? const Color(0xFF4A80FF) : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: GoogleFonts.poppins(
+            color: isActive ? Colors.white : Colors.grey.shade600,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAvailableSliverGrid() {
+    final filteredRewards = _getFilteredRewards();
+
+    if (filteredRewards.isEmpty) {
+      return const SliverToBoxAdapter(
+        child: _EmptyState(message: "No rewards match your filter."),
+      );
+    }
+
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      sliver: SliverGrid(
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          mainAxisSpacing: 16.0,
+          crossAxisSpacing: 16.0,
+          // [FIX] Adjusted Child Aspect Ratio to prevent overflow on small screens
+          childAspectRatio: 0.65,
+        ),
+        delegate: SliverChildBuilderDelegate((context, index) {
+          final item = filteredRewards[index];
+          return _RewardItemCard(
+            item: item,
+            userPoints: _userPoints,
+            onTap: () => _navigateToRewardDetail(item),
+          );
+        }, childCount: filteredRewards.length),
+      ),
+    );
+  }
+
+  Widget _buildRedeemedSliverList() {
+    if (_myRedemptions.isEmpty) {
+      return const SliverToBoxAdapter(
+        child: _EmptyState(message: "You haven't redeemed anything yet."),
+      );
+    }
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate((context, index) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12.0),
+            child: _RedeemedItemCard(
+              item: _myRedemptions[index],
+              onTap: () => _openRedeemedDetail(_myRedemptions[index]),
+            ),
+          );
+        }, childCount: _myRedemptions.length),
+      ),
+    );
+  }
+
+  void _navigateToRewardDetail(RewardItem item) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RewardDetailScreen(
+          rewardName: item.name,
+          pointsCost: item.pointsCost,
+          description: item.description,
+          imageUrls: item.imageUrl != null ? [item.imageUrl!] : [],
+          category: item.category,
+          stock: item.stock,
+          userPoints: _userPoints,
+          onRedeem: () => _onRedeem(item),
+        ),
+      ),
+    );
+  }
+
+  void _openRedeemedDetail(RedeemedItem item) {
+    final List<String> images = item.imageUrl != null ? [item.imageUrl!] : [];
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RedeemedDetailScreen(
+          redeemId: item.id,
+          name: item.prizeName,
+          pointsCost: item.pointsCost,
+          category: "Reward",
+          redeemedAt: item.redeemDate,
+          description: "Reward redemption",
+          imageUrls: images,
+          status: item.status,
+          pickupLocation: item.pickupInstruction,
+          // [NEW] ส่ง Logic การยกเลิกเข้าไป
+          onCancel: () => _onCancelRedeem(item),
+        ),
+      ),
+    );
+  }
+
+  // [NEW] ฟังก์ชันเรียก API Cancel
+  Future<void> _onCancelRedeem(RedeemedItem item) async {
+    final prefs = await SharedPreferences.getInstance();
+    final empId = prefs.getString('empId') ?? '';
+
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/rewards/cancel'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'emp_id': empId, 'redeem_id': item.id}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() {
+          _userPoints = data['remaining_points'];
+        });
+        _fetchInitialData(); // Refresh list
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Cancelled & Refunded"),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Failed to cancel redemption"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print("Cancel Error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   Widget _buildCustomAppBar() {
@@ -332,191 +871,45 @@ class _RewardScreenState extends State<RewardScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          GestureDetector(
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const ProfileScreen()),
-              );
-            },
-            child: CircleAvatar(
-              radius: 22,
-              backgroundColor: Colors.grey.shade200,
-              backgroundImage: const NetworkImage(
-                'https://i.pravatar.cc/150?img=45',
-              ),
-            ),
-          ),
           Text(
-            'Reward',
+            'Rewards',
             style: GoogleFonts.poppins(
-              fontSize: 20,
+              fontSize: 24,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF375987),
+              color: const Color(0xFF375987),
             ),
           ),
-          IconButton(
-            icon: const Icon(
-              Icons.notifications_outlined,
-              color: Colors.black54,
-              size: 28,
+          GestureDetector(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const ProfileScreen()),
             ),
-            onPressed: () {},
+            child: const CircleAvatar(
+              radius: 20,
+              backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=12'),
+            ),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildHeaderPoints() {
+class _EmptyState extends StatelessWidget {
+  final String message;
+  const _EmptyState({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        decoration: BoxDecoration(
-          color: const Color(0x4DE2F3FF),
-          borderRadius: BorderRadius.circular(12.0),
-          border: Border.all(color: const Color.fromRGBO(0, 0, 0, 0.1)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      padding: const EdgeInsets.only(top: 40),
+      child: Center(
+        child: Column(
           children: [
-            Text(
-              'Your Points',
-              style: GoogleFonts.poppins(
-                fontSize: 16,
-                color: Colors.black87,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            Text(
-              '$_userPoints',
-              style: GoogleFonts.poppins(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFF4A80FF),
-              ),
-            ),
+            Icon(Icons.inbox_outlined, size: 50, color: Colors.grey[300]),
+            const SizedBox(height: 16),
+            Text(message, style: GoogleFonts.poppins(color: Colors.grey[500])),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildViewSwitcher() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: Row(
-        children: [
-          ChoiceChip(
-            label: const Text('Reward items'),
-            labelStyle: TextStyle(
-              color: _showRedeemed ? Colors.black87 : Colors.white,
-              fontWeight: _showRedeemed ? FontWeight.normal : FontWeight.bold,
-            ),
-            selected: !_showRedeemed,
-            onSelected: (selected) {
-              if (selected) setState(() => _showRedeemed = false);
-            },
-            backgroundColor: Colors.white,
-            selectedColor: const Color(0xFF4A80FF),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20.0),
-              side: BorderSide(
-                color: _showRedeemed
-                    ? Colors.grey.shade400
-                    : const Color(0xFF4A80FF),
-              ),
-            ),
-            showCheckmark: false,
-          ),
-          const SizedBox(width: 8.0),
-          ChoiceChip(
-            label: const Text('Redeemed items'),
-            labelStyle: TextStyle(
-              color: _showRedeemed ? Colors.white : Colors.black87,
-              fontWeight: _showRedeemed ? FontWeight.bold : FontWeight.normal,
-            ),
-            selected: _showRedeemed,
-            onSelected: (selected) {
-              if (selected) setState(() => _showRedeemed = true);
-            },
-            backgroundColor: Colors.white,
-            selectedColor: const Color(0xFF4A80FF),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20.0),
-              side: BorderSide(
-                color: _showRedeemed
-                    ? const Color(0xFF4A80FF)
-                    : Colors.grey.shade400,
-              ),
-            ),
-            showCheckmark: false,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAvailableList() {
-    final items = _filteredAvailableRewards;
-    return GridView.builder(
-      itemCount: items.length,
-      padding: EdgeInsets.only(
-        top: 10.0,
-        bottom: 20.0 + MediaQuery.of(context).padding.bottom,
-      ),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        mainAxisSpacing: 16.0,
-        crossAxisSpacing: 16.0,
-        childAspectRatio: 0.72,
-      ),
-      itemBuilder: (context, index) {
-        final item = items[index];
-        return _RewardItemCard(
-          item: item,
-          userPoints: _userPoints,
-          onTap: () => _navigateToRewardDetail(item),
-        );
-      },
-    );
-  }
-
-  Widget _buildRedeemedList() {
-    final items = _filteredRedeemedRewards;
-    return ListView.builder(
-      itemCount: items.length,
-      padding: EdgeInsets.only(
-        top: 10.0,
-        bottom: 20.0 + MediaQuery.of(context).padding.bottom,
-      ),
-      itemBuilder: (context, index) {
-        final item = items[index];
-        return Padding(
-          padding: EdgeInsets.only(top: index == 0 ? 0 : 16.0),
-          child: InkWell(
-            onTap: () => _openRedeemedDetail(item),
-            child: _RedeemedItemCard(item: item),
-          ),
-        );
-      },
-    );
-  }
-
-  void _openRedeemedDetail(_RedeemedItem item) {
-    final images = item.imageUrls;
-    final desc = item.description;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => RedeemedDetailScreen(
-          name: item.name,
-          pointsCost: item.pointsCost,
-          category: item.vendorOrCategory,
-          redeemedAt: item.redeemedAt,
-          description: desc,
-          imageUrls: images,
         ),
       ),
     );
@@ -524,12 +917,11 @@ class _RewardScreenState extends State<RewardScreen> {
 }
 
 class _RewardItemCard extends StatelessWidget {
-  final _RewardItem item;
+  final RewardItem item;
   final int userPoints;
   final VoidCallback onTap;
 
   const _RewardItemCard({
-    super.key,
     required this.item,
     required this.userPoints,
     required this.onTap,
@@ -538,90 +930,129 @@ class _RewardItemCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final canRedeem = item.stock > 0 && userPoints >= item.pointsCost;
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(
-          color: const Color.fromRGBO(0, 0, 0, 0.2),
-          width: 1.0,
+    final isOutOfStock = item.stock <= 0;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.25),
-            blurRadius: 4.0,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        borderRadius: BorderRadius.circular(20.0),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12.0),
-              child: SizedBox(
-                width: double.infinity,
-                height: 100,
-                child: item.imageUrl != null
-                    ? Image.network(item.imageUrl!, fit: BoxFit.cover)
-                    : Container(color: Colors.grey[300]),
-              ),
-            ),
-            const SizedBox(height: 10.0),
-            Text(
-              item.name,
-              style: GoogleFonts.kanit(
-                fontWeight: FontWeight.w400,
-                fontSize: 14,
-                color: Colors.black,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 4.0),
-            Text(
-              'Stock: ${item.stock}',
-              style: GoogleFonts.kanit(fontSize: 12, color: Colors.black54),
-            ),
-            const Spacer(),
-            SizedBox(
-              width: double.infinity,
-              height: 36,
-              child: OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: canRedeem
-                      ? const Color(0xFF4A80FF)
-                      : Colors.grey[600],
-                  side: BorderSide(
-                    color: canRedeem
-                        ? const Color(0xFF4A80FF)
-                        : Colors.grey.shade400,
-                    width: 2,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12.0),
-                  ),
+            Expanded(
+              flex: 4,
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(16),
                 ),
-                onPressed: onTap,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+                child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    Text(
-                      'View',
-                      style: GoogleFonts.kanit(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                    item.imageUrl != null
+                        ? Image.network(item.imageUrl!, fit: BoxFit.cover)
+                        : Container(
+                            color: Colors.grey[100],
+                            child: const Icon(Icons.image, color: Colors.grey),
+                          ),
+                    if (isOutOfStock)
+                      Container(
+                        color: Colors.black54,
+                        child: Center(
+                          child: Text(
+                            "SOLD OUT",
+                            style: GoogleFonts.poppins(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
                       ),
+                  ],
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 3,
+              child: Padding(
+                padding: const EdgeInsets.all(10.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // [FIX] Overflow: Use Flexible/TextOverflow
+                        Text(
+                          item.name,
+                          style: GoogleFonts.kanit(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                            color: isOutOfStock ? Colors.grey : Colors.black87,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${item.pointsCost} pts',
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: isOutOfStock
+                                ? Colors.grey
+                                : const Color(0xFF4A80FF),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 6.0),
-                    Icon(
-                      Icons.visibility_outlined,
-                      color: canRedeem
-                          ? const Color(0xFF4A80FF)
-                          : Colors.grey[600],
-                      size: 18,
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      decoration: BoxDecoration(
+                        color: isOutOfStock
+                            ? Colors.grey.shade100
+                            : (canRedeem
+                                  ? const Color(0xFFE6F6E7)
+                                  : Colors.orange.shade50),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: isOutOfStock
+                              ? Colors.transparent
+                              : (canRedeem
+                                    ? Colors.green.shade200
+                                    : Colors.orange.shade200),
+                        ),
+                      ),
+                      child: Center(
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            isOutOfStock
+                                ? "Out of Stock"
+                                : (canRedeem ? "Redeem" : "Need Points"),
+                            style: GoogleFonts.poppins(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: isOutOfStock
+                                  ? Colors.grey
+                                  : (canRedeem
+                                        ? Colors.green.shade700
+                                        : Colors.orange.shade700),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -632,167 +1063,106 @@ class _RewardItemCard extends StatelessWidget {
       ),
     );
   }
-
-  Widget _buildTypePill(String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20.0),
-        border: Border.all(color: Colors.grey.shade400),
-      ),
-      child: Text(
-        label,
-        style: GoogleFonts.kanit(
-          color: Colors.black54,
-          fontWeight: FontWeight.bold,
-          fontSize: 10,
-        ),
-      ),
-    );
-  }
 }
 
 class _RedeemedItemCard extends StatelessWidget {
-  final _RedeemedItem item;
-  const _RedeemedItemCard({super.key, required this.item});
+  final RedeemedItem item;
+  final VoidCallback onTap;
+  const _RedeemedItemCard({required this.item, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(
-          color: const Color.fromRGBO(0, 0, 0, 0.2),
-          width: 1.0,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade200),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.02),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.25),
-            blurRadius: 4.0,
-            offset: const Offset(0, 4),
-          ),
-        ],
-        borderRadius: BorderRadius.circular(20.0),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    item.name,
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 60,
+                height: 60,
+                child: item.imageUrl != null
+                    ? Image.network(item.imageUrl!, fit: BoxFit.cover)
+                    : Container(
+                        color: Colors.grey[100],
+                        child: const Icon(Icons.card_giftcard),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.prizeName,
                     style: GoogleFonts.kanit(
-                      fontWeight: FontWeight.w400,
-                      fontSize: 16,
-                      color: Colors.black,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                      color: Colors.black87,
                     ),
                   ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12.0,
-                    vertical: 6.0,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE6F6E7),
-                    borderRadius: BorderRadius.circular(8.0),
-                  ),
-                  child: Text(
-                    '-${item.pointsCost} Points',
-                    style: GoogleFonts.kanit(
-                      color: const Color(0xFF06A710),
-                      fontWeight: FontWeight.bold,
+                  Text(
+                    DateFormat('d MMM y, HH:mm').format(item.redeemDate),
+                    style: GoogleFonts.poppins(
+                      color: Colors.grey,
                       fontSize: 12,
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-            const Divider(color: Colors.grey),
-            const SizedBox(height: 8.0),
-            Row(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                const Icon(
-                  Icons.category_outlined,
-                  color: Colors.black,
-                  size: 20,
-                ),
-                const SizedBox(width: 8.0),
-                Expanded(
-                  child: Text(
-                    item.vendorOrCategory,
-                    style: GoogleFonts.kanit(fontSize: 14, color: Colors.black),
-                    overflow: TextOverflow.ellipsis,
+                Text(
+                  "-${item.pointsCost}",
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.red.shade700,
+                    fontSize: 16,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 8.0),
-            Row(
-              children: [
-                const Icon(
-                  Icons.event_available_outlined,
-                  color: Colors.black,
-                  size: 20,
-                ),
-                const SizedBox(width: 8.0),
-                Expanded(
-                  child: Text(
-                    'Redeemed : ${DateFormat('d MMM y, HH:mm').format(item.redeemedAt)}',
-                    style: GoogleFonts.kanit(fontSize: 14, color: Colors.black),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12.0),
-            Row(
-              children: [
-                _buildTypePill('TYPE: ${item.vendorOrCategory}'),
-                const Spacer(),
-                SizedBox(
-                  height: 40,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.grey[300],
-                      foregroundColor: Colors.grey[600],
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12.0),
-                      ),
-                    ),
-                    onPressed: null,
-                    child: Text(
-                      'Redeemed',
-                      style: GoogleFonts.kanit(fontWeight: FontWeight.bold),
+                  decoration: BoxDecoration(
+                    color: item.status == 'Pending'
+                        ? Colors.orange.shade50
+                        : Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    item.status,
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      color: item.status == 'Pending'
+                          ? Colors.orange.shade800
+                          : Colors.green.shade800,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
               ],
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTypePill(String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 4.0),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20.0),
-        border: Border.all(color: Colors.grey.shade400),
-      ),
-      child: Text(
-        label,
-        style: GoogleFonts.kanit(
-          color: Colors.black54,
-          fontWeight: FontWeight.bold,
-          fontSize: 10,
         ),
       ),
     );
