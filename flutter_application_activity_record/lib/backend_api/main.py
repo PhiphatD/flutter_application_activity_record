@@ -17,7 +17,7 @@ import codecs
 from fastapi import File, UploadFile, Form
 from datetime import timedelta, datetime
 import json
-
+from fastapi import WebSocket, WebSocketDisconnect
 
 # สร้างตารางใน DB อัตโนมัติ (ถ้ายังไม่มี)
 models.Base.metadata.create_all(bind=engine)
@@ -26,6 +26,41 @@ app = FastAPI()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # --- Schemas (ตัวกำหนดรูปแบบข้อมูลที่รับส่ง) ---
+
+class PrizeResponse(BaseModel):
+    id: str
+    name: str
+    pointCost: int
+    description: str
+    image: str | None = None
+    stock: int
+    category: str = "General"  # Default category for now
+    status: str
+    
+    class Config:
+        from_attributes = True
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        # ส่งข้อความหาทุกเครื่องที่ต่ออยู่
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except:
+                pass
+
+manager = ConnectionManager()
+
 class CancelRedeemRequest(BaseModel):
     emp_id: str
     redeem_id: str
@@ -47,7 +82,8 @@ class PrizeResponse(BaseModel):
     stock: int
     category: str = "General" # Default category for now
     status: str
-    
+    prizeType: str = "Physical"
+
     class Config:
         from_attributes = True
 
@@ -55,7 +91,7 @@ class MyRedemptionResponse(BaseModel):
     redeemId: str
     prizeName: str
     pointCost: int
-    redeemDate: date
+    redeemDate: datetime
     status: str
     image: str | None = None
     pickupInstruction: str | None = "Contact HR"
@@ -115,7 +151,7 @@ class ActivityResponse(BaseModel):
     activityDate: date | None = None
     startTime: str | None = "-" 
     endTime: str | None = "-"
-
+    isRegistered: bool = False
     class Config:
         orm_mode = True
 
@@ -152,6 +188,7 @@ class ActivityDetailResponse(BaseModel):
     foodInfo: str         
     travelInfo: str       
     moreDetails: str      
+    targetCriteria: str | None = None
     actImage: str | None = None # [NEW] เพิ่มตัวนี้
     agenda: str | None = None # [NEW]
     isFavorite: bool = False
@@ -178,6 +215,8 @@ class ActivityData(BaseModel):
     ACT_ISCOMPULSORY: int
     ACT_STATUS: str = "Open"
     ACT_TARGET_CRITERIA: str | None = None
+    ACT_IMAGE: str | None = None  # รับ URL ของรูป
+    ACT_AGENDA: str | None = None # รับ JSON String ของ Agenda
 
 class OrganizerData(BaseModel):
     ORG_NAME: str
@@ -586,32 +625,34 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
 # --- API Endpoint ใหม่สำหรับดึงข้อมูล Profile ---
 @app.get("/employees/{emp_id}")
 def get_employee_profile(emp_id: str, db: Session = Depends(get_db)):
-    # 1. ค้นหาพนักงาน
     user = db.query(models.Employee).filter(models.Employee.EMP_ID == emp_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลพนักงาน")
     
-    # 2. หาชื่อแผนก (ถ้ามี relationship แล้วใช้ user.department.DEP_NAME ได้เลย แต่เพื่อความชัวร์ผม query ให้ดู)
     dep_name = "-"
     if user.department:
         dep_name = user.department.DEP_NAME
 
-    # 3. หาชื่อบริษัท
     comp_name = "-"
     if user.company:
         comp_name = user.company.COMPANY_NAME
 
-    # 4. ส่งข้อมูลกลับเป็น JSON
+    # [NEW] ดึงคะแนนจากตาราง Points
+    current_points = 0
+    if user.points:
+        current_points = user.points.TOTAL_POINTS
+
     return {
         "EMP_ID": user.EMP_ID,
-        "EMP_TITLE_EN": user.EMP_TITLE_EN,  # คำนำหน้าชื่อ
-        "EMP_NAME_EN": user.EMP_NAME_EN,    # ชื่ออังกฤษ
-        "EMP_POSITION": user.EMP_POSITION,  # ตำแหน่ง
-        "DEP_NAME": dep_name,               # ชื่อแผนก
-        "COMPANY_NAME": comp_name,          # ชื่อบริษัท
-        "EMP_EMAIL": user.EMP_EMAIL,        # อีเมล
-        "EMP_PHONE": user.EMP_PHONE,        # เบอร์โทร
-        "EMP_STARTDATE": user.EMP_STARTDATE # วันเริ่มงาน (เอาไปคำนวณอายุงาน)
+        "EMP_TITLE_EN": user.EMP_TITLE_EN,
+        "EMP_NAME_EN": user.EMP_NAME_EN,
+        "EMP_POSITION": user.EMP_POSITION,
+        "DEP_NAME": dep_name,
+        "COMPANY_NAME": comp_name,
+        "EMP_EMAIL": user.EMP_EMAIL,
+        "EMP_PHONE": user.EMP_PHONE,
+        "EMP_STARTDATE": user.EMP_STARTDATE,
+        "TOTAL_POINTS": current_points # [ADDED] ส่งคะแนนจริงกลับไป
     }
 
 # --- API สำหรับ Import พนักงานจาก CSV ---
@@ -764,6 +805,17 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
         
     activities = query.distinct().all()
     
+    # [NEW LOGIC] หาว่า User คนนี้ลงทะเบียนอะไรไปแล้วบ้าง
+    registered_act_ids = set()
+    if emp_id:
+        # หาจากตาราง Registration
+        user_regs = db.query(models.Registration).filter(models.Registration.EMP_ID == emp_id).all()
+        for r in user_regs:
+            # ต้อง Join ไปหา Activity ID ผ่าน Session
+            sess = db.query(models.ActivitySession).filter(models.ActivitySession.SESSION_ID == r.SESSION_ID).first()
+            if sess:
+                registered_act_ids.add(sess.ACT_ID)
+    
     results = []
     for act in activities:
         # =================================================================
@@ -853,9 +905,14 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
         if act.organizer and act.organizer.employee:
             org_name = act.organizer.employee.EMP_NAME_EN
         
+        # [NEW] เช็คสถานะ Registered
+        is_reg = False
+        if act.ACT_ID in registered_act_ids:
+            is_reg = True
+        
         results.append({
             "actId": act.ACT_ID,
-            "orgId": act.ACT_ID,
+            "orgId": act.ORG_ID,
             "organizerName": org_name,
             "actType": act.ACT_TYPE,
             "isCompulsory": 1 if act.ACT_ISCOMPULSORY else 0,
@@ -867,7 +924,9 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
             "location": location,
             "activityDate": act_date, 
             "startTime": start_time, 
-            "endTime": end_time,    
+            "endTime": end_time,
+            # [NEW] เพิ่มสถานะการลงทะเบียน
+            "isRegistered": is_reg
         })
         
     return results
@@ -964,6 +1023,7 @@ def get_activity_detail(
         "moreDetails": act.ACT_MORE_DETAILS or "-",
         "actImage": act.ACT_IMAGE, # [NEW] map ค่าจาก DB
         "agenda": act.ACT_AGENDA, # [NEW]
+        "targetCriteria": act.ACT_TARGET_CRITERIA,
         "isFavorite": is_fav,
         "isRegistered": is_registered, # [NEW]
         "sessions": sessions_data
@@ -1011,7 +1071,9 @@ def create_activity(req: ActivityFormRequest, emp_id: str = None, db: Session = 
             ACT_FOOD_INFO=data.ACT_FOOD_INFO,
             ACT_TRAVEL_INFO=data.ACT_TRAVEL_INFO,
             ACT_MORE_DETAILS=data.ACT_MORE_DETAILS,
-            ACT_TARGET_CRITERIA=data.ACT_TARGET_CRITERIA
+            ACT_TARGET_CRITERIA=data.ACT_TARGET_CRITERIA,
+            ACT_IMAGE=data.ACT_IMAGE,
+            ACT_AGENDA=data.ACT_AGENDA
         )
         db.add(new_activity)
 
@@ -1275,7 +1337,7 @@ def get_activity_participants(act_id: str, db: Session = Depends(get_db)):
 
 
 @app.post("/checkin")
-def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
+async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
     # 1. Validate Employee
     employee = db.query(models.Employee).filter(models.Employee.EMP_ID == req.emp_id).first()
     if not employee:
@@ -1386,6 +1448,10 @@ def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
         db.add(new_txn)
         
         db.commit()
+        
+        await manager.broadcast(f"CHECKIN_SUCCESS|{req.emp_id}|{activity.ACT_NAME}|{req.scanned_by}")
+        
+        await manager.broadcast("REFRESH_PARTICIPANTS")
         
         return {
             "status": "success",
@@ -1655,12 +1721,11 @@ def unregister_activity(req: UnregisterRequest, db: Session = Depends(get_db)):
 # 1. ดึงรายการของรางวัล
 @app.get("/rewards", response_model=list[PrizeResponse])
 def get_rewards(db: Session = Depends(get_db)):
-    # ดึงเฉพาะที่ Status Available
     prizes = db.query(models.Prize).filter(models.Prize.STATUS == 'Available').all()
     
     results = []
     for p in prizes:
-        # Map DB fields to Response Model
+        prize_type_str = str(p.PRIZE_TYPE) if p.PRIZE_TYPE else 'Physical'
         results.append({
             "id": p.PRIZE_ID,
             "name": p.PRIZE_NAME,
@@ -1668,10 +1733,13 @@ def get_rewards(db: Session = Depends(get_db)):
             "description": p.PRIZE_DESCRIPTION or "-",
             "image": p.PRIZE_IMAGE,
             "stock": p.STOCK,
-            "category": "General", # ใน DB ยังไม่มี Column Category สมมติไปก่อน หรือจะเพิ่ม Column ใน DB ก็ได้
-            "status": p.STATUS
+            "category": "General",
+            "status": p.STATUS,
+            "prizeType": prize_type_str,   # ส่งออกแล้ว
         })
     return results
+
+
 
 # 2. ดึงประวัติการแลกของฉัน
 @app.get("/my-redemptions/{emp_id}", response_model=list[MyRedemptionResponse])
@@ -1695,47 +1763,59 @@ def get_my_redemptions(emp_id: str, db: Session = Depends(get_db)):
             })
     return results
 
-# 3. ทำรายการแลกของรางวัล (Transaction)
 @app.post("/rewards/redeem")
-def redeem_reward(req: RedeemRequest, db: Session = Depends(get_db)):
-    # 1. เช็คกระเป๋าตังค์พนักงาน
+async def redeem_reward(req: RedeemRequest, db: Session = Depends(get_db)):
+    # ... (Logic เช็คแต้ม/สต็อก เหมือนเดิม) ...
     emp_points = db.query(models.Points).filter(models.Points.EMP_ID == req.emp_id).first()
     if not emp_points:
-        # ถ้าไม่มีกระเป๋า ให้สร้างใหม่ (กัน Error)
         emp_points = models.Points(EMP_ID=req.emp_id, TOTAL_POINTS=0)
         db.add(emp_points)
     
-    # 2. เช็คของรางวัล
     prize = db.query(models.Prize).filter(models.Prize.PRIZE_ID == req.prize_id).first()
     if not prize:
         raise HTTPException(status_code=404, detail="Prize not found")
         
-    # 3. เช็คเงื่อนไข (แต้มพอไหม? ของหมดไหม?)
     if prize.STOCK <= 0:
         raise HTTPException(status_code=400, detail="Out of Stock")
     if emp_points.TOTAL_POINTS < prize.PRIZE_POINTS:
         raise HTTPException(status_code=400, detail="Insufficient Points")
         
     try:
-        # 4. เริ่มการตัดยอด (Transaction)
-        # 4.1 ตัดแต้ม
+        # 4. ตัดยอด
         emp_points.TOTAL_POINTS -= prize.PRIZE_POINTS
-        # 4.2 ตัดสต็อก
         prize.STOCK -= 1
         
-        # 4.3 สร้างใบเสร็จการแลก (Redeem Ticket)
+        # [SIMPLIFIED LOGIC] กำหนดสถานะตามประเภท
+        voucher_code = None
+        usage_expire = None
+        status = "Pending" # Default รอรับของ
+        
+        if prize.PRIZE_TYPE == 'Privilege':
+            # วันลา/สิทธิ์พิเศษ -> อนุมัติเลย (Completed) ใช้ได้ถึงสิ้นปี
+            status = "Completed"
+            this_year = datetime.now().year
+            usage_expire = datetime(this_year, 12, 31, 23, 59, 59)
+            
+        elif prize.PRIZE_TYPE == 'Digital':
+            # คูปอง -> รอ Admin ส่งโค้ดให้ (Pending)
+            status = "Pending"
+            # (อนาคตค่อยมาแก้ตรงนี้ถ้าจะ Auto-Gen)
+            
+        # Physical -> Pending (รอไปรับ)
+        
         new_redeem_id = generate_id("RD", 8)
         new_redeem = models.Redeem(
             REDEEM_ID=new_redeem_id,
             EMP_ID=req.emp_id,
             PRIZE_ID=req.prize_id,
-            REDEEM_DATE=date.today(),
-            STATUS="Pending",
-            APPROVED_BY=None
+            REDEEM_DATE=datetime.now(),
+            STATUS=status,
+            APPROVED_BY=None,
+            VOUCHER_CODE=voucher_code, # เป็น Null ไปก่อน
+            USAGE_EXPIRED_DATE=usage_expire
         )
         db.add(new_redeem)
         
-        # 4.4 บันทึกประวัติการเงิน (Audit Log)
         new_txn_id = generate_id("TXN", 10)
         new_txn = models.PointTransaction(
             TXN_ID=new_txn_id,
@@ -1743,12 +1823,14 @@ def redeem_reward(req: RedeemRequest, db: Session = Depends(get_db)):
             TXN_TYPE="Redeem",
             REF_TYPE="REDEEM",
             REF_ID=new_redeem_id,
-            POINTS=-prize.PRIZE_POINTS, # ติดลบ
+            POINTS=-prize.PRIZE_POINTS,
             TXN_DATE=datetime.now()
         )
         db.add(new_txn)
         
         db.commit()
+        await manager.broadcast("REFRESH_REWARDS")
+        
         return {
             "message": "Redemption successful", 
             "remaining_points": emp_points.TOTAL_POINTS,
@@ -1758,11 +1840,11 @@ def redeem_reward(req: RedeemRequest, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         print(f"Redeem Error: {e}")
-        raise HTTPException(status_code=500, detail="Transaction failed")
+        raise HTTPException(status_code=500, detail=f"Transaction failed: {str(e)}")
 
 
 @app.post("/activities/register")
-def register_activity(req: ActivityRegisterRequest, db: Session = Depends(get_db)):
+async def register_activity(req: ActivityRegisterRequest, db: Session = Depends(get_db)):
     # 1. เช็คว่าเคยลงหรือยัง
     existing = db.query(models.Registration).filter(
         models.Registration.EMP_ID == req.emp_id,
@@ -1784,13 +1866,20 @@ def register_activity(req: ActivityRegisterRequest, db: Session = Depends(get_db
         )
         db.add(new_reg)
         db.commit()
+        
+        # [FIXED] ตะโกนบอกทุกคนว่า "มีคนลงทะเบียนเพิ่มแล้วนะ!"
+        await manager.broadcast("REFRESH_PARTICIPANTS")
+        
         return {"message": "Registration successful", "reg_id": new_reg_id}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/rewards/cancel")
-def cancel_redemption(req: CancelRedeemRequest, db: Session = Depends(get_db)):
+async def cancel_redemption(req: CancelRedeemRequest, db: Session = Depends(get_db)):
     # 1. ดึงข้อมูลการแลก
     redeem = db.query(models.Redeem).filter(
         models.Redeem.REDEEM_ID == req.redeem_id,
@@ -1834,6 +1923,10 @@ def cancel_redemption(req: CancelRedeemRequest, db: Session = Depends(get_db)):
             db.add(new_txn)
             
         db.commit()
+        
+        # [NEW] ตะโกนบอกทุกคนว่า "ของรางวัลมีการเปลี่ยนแปลงนะ" (Stock เพิ่มกลับมา)
+        await manager.broadcast("REFRESH_REWARDS")
+        
         return {
             "message": "Cancelled successfully", 
             "remaining_points": emp_points.TOTAL_POINTS if emp_points else 0
@@ -1842,5 +1935,16 @@ def cancel_redemption(req: CancelRedeemRequest, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Cancel failed: {str(e)}")
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # รอรับข้อความ (Keep Alive)
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        
 # หมายเหตุ: อย่าลืมรัน uvicorn ใหม่ทุกครั้งหลังแก้ไฟล์
 # uvicorn main:app --reload --host 0.0.0.0 --port 8000

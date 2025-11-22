@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 import 'activity_detail_screen.dart';
 import '../profile/profile_screen.dart';
 
@@ -35,6 +36,9 @@ class _TodoScreenState extends State<TodoScreen>
     'Expo',
   ];
 
+  // [NEW] WebSocket for Real-time Updates
+  WebSocketChannel? _channel;
+
   @override
   void initState() {
     super.initState();
@@ -45,17 +49,126 @@ class _TodoScreenState extends State<TodoScreen>
       });
     });
     _fetchMyRegistrations();
+    _connectWebSocket(); // [NEW] Start Real-time Listener
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     _searchController.dispose();
+    _channel?.sink.close(); // [NEW] Close WebSocket
     super.dispose();
   }
 
+  // [NEW] WebSocket Connection for Real-time Updates
+  void _connectWebSocket() async {
+    // ดึง EMP_ID ของตัวเองเตรียมไว้เช็ค
+    final prefs = await SharedPreferences.getInstance();
+    final myEmpId = prefs.getString('empId') ?? '';
+
+    try {
+      final wsUrl = Uri.parse(
+        'ws://numerably-nonevincive-kyong.ngrok-free.dev/ws',
+      );
+      _channel = WebSocketChannel.connect(wsUrl);
+
+      _channel!.stream.listen(
+        (message) {
+          print("⚡ TodoScreen Update: $message");
+
+          // Case 1: ข้อมูลเปลี่ยน ให้รีเฟรชหน้าจอเงียบๆ
+          if (message.toString().startsWith("CHECKIN_SUCCESS|") ||
+              message == "REFRESH_ACTIVITIES" ||
+              message == "REFRESH_PARTICIPANTS") {
+            _fetchMyRegistrations(); // รีเฟรชข้อมูลเงียบๆ
+          }
+
+          // Case 2: [NEW] มีคนเช็คอิน -> เช็คว่าเป็นเราไหม?
+          // Message Format: "CHECKIN_SUCCESS|E0001|Activity Name"
+          if (message.toString().startsWith("CHECKIN_SUCCESS|")) {
+            final parts = message.toString().split('|');
+            if (parts.length >= 3) {
+              final checkInEmpId = parts[1];
+              final activityName = parts[2];
+
+              // ถ้าเป็น ID ของเรา -> แสดงแจ้งเตือน!
+              if (checkInEmpId == myEmpId) {
+                if (mounted) {
+                  _showCheckInSuccessDialog(activityName); // เรียก Dialog
+                  _fetchMyRegistrations(); // รีเฟรชสถานะเป็น Joined ทันที
+                }
+              }
+            }
+          }
+        },
+        onError: (error) => print("WS Error: $error"),
+        onDone: () => print("WS Connection Closed"),
+      );
+    } catch (e) {
+      print("WS Connection Failed: $e");
+    }
+  }
+
+  void _showCheckInSuccessDialog(String activityName) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.check_circle,
+                color: Colors.green,
+                size: 48,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              "Check-in Successful!",
+              style: GoogleFonts.poppins(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "You have joined\n\"$activityName\"",
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pop(context),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text("OK", style: TextStyle(color: Colors.white)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _fetchMyRegistrations() async {
-    setState(() => _isLoading = true);
+    // [Optimization] ไม่ต้อง show loading ถ้าเป็นการ refresh เงียบๆ (Realtime)
+    // แต่ถ้าเป็นครั้งแรก (_allActivities.isEmpty) ให้โชว์
+    if (_allActivities.isEmpty) {
+      setState(() => _isLoading = true);
+    }
     try {
       final prefs = await SharedPreferences.getInstance();
       final String empId = prefs.getString('empId') ?? '';
@@ -845,13 +958,17 @@ class _TodoScreenState extends State<TodoScreen>
     );
   }
 
-  void _goToDetail(_TodoActivity act) {
-    Navigator.push(
+  Future<void> _goToDetail(_TodoActivity act) async {
+    // 2. ใช้ await รอจนกว่าจะกลับมาจากหน้า Detail
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ActivityDetailScreen(activityId: act.actId),
       ),
     );
+
+    // 3. พอกลับมาแล้ว ให้โหลดข้อมูลใหม่ทันที
+    _fetchMyRegistrations();
   }
 
   Widget _buildEmptyState(String status) {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 import 'package:flutter_application_activity_record/widgets/reward_confirmation_bottom_sheet.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class RewardDetailScreen extends StatefulWidget {
   final String rewardName;
@@ -94,10 +95,28 @@ class _RewardDetailScreenState extends State<RewardDetailScreen> {
                         controller: _pageController,
                         itemCount: widget.imageUrls.length,
                         itemBuilder: (context, index) {
-                          return Image.network(
-                            widget.imageUrls[index],
+                          return CachedNetworkImage(
+                            imageUrl: widget.imageUrls[index],
                             fit: BoxFit.cover,
                             width: double.infinity,
+                            placeholder: (context, url) => Container(
+                              color: Colors.grey[100],
+                              child: const Center(
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                            ),
+                            errorWidget: (context, url, error) {
+                              return Container(
+                                color: Colors.grey[100],
+                                child: const Icon(
+                                  Icons.broken_image,
+                                  color: Colors.grey,
+                                  size: 50,
+                                ),
+                              );
+                            },
                           );
                         },
                       ),

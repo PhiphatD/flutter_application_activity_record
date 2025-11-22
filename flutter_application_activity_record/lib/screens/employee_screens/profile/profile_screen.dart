@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
 
+import '../../organizer_screens/main/organizer_main_screen.dart';
+
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({Key? key}) : super(key: key);
 
@@ -31,7 +33,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String empPhone = "-";
   String empStartDateFormatted = "-";
   String serviceDuration = "-";
-
+  String userRole = "employee";
   final String apiUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
 
   @override
@@ -44,8 +46,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _fetchProfileData() async {
     final prefs = await SharedPreferences.getInstance();
     final String? storedEmpId = prefs.getString('empId');
+    final String? storedRole = prefs.getString('role');
 
     if (storedEmpId == null) return;
+
+    if (mounted) {
+      setState(() {
+        userRole = storedRole?.toLowerCase() ?? "employee";
+      });
+    }
 
     try {
       final response = await http.get(
@@ -75,6 +84,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       print("Error fetching profile: $e");
     }
+  }
+
+  void _navigateToOrganizerMode() {
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const OrganizerMainScreen()),
+      (route) => false,
+    );
   }
 
   void _calculateServiceDuration(DateTime startDate) {
@@ -243,6 +260,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ],
                     ),
                     const SizedBox(height: 30),
+
+                    // [NEW] ปุ่มสลับโหมด (แสดงเฉพาะถ้าไม่ใช่ Employee ธรรมดา)
+                    if (userRole == 'organizer' || userRole == 'admin') ...[
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 30),
+                        child: ElevatedButton.icon(
+                          onPressed: _navigateToOrganizerMode,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(
+                              0xFF375987,
+                            ), // สีเข้มเพื่อให้รู้ว่าเป็น Admin Mode
+                            foregroundColor: Colors.white,
+                            elevation: 4,
+                            minimumSize: const Size(double.infinity, 56),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            shadowColor: const Color(
+                              0xFF375987,
+                            ).withOpacity(0.4),
+                          ),
+                          icon: const Icon(Icons.dashboard_customize_outlined),
+                          label: const Text(
+                            "Switch to Organizer Console",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+
                     _buildInfoSection(),
                   ],
                 ),

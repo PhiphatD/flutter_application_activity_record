@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart'; // For Clipboard
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -18,6 +18,11 @@ class RedeemedDetailScreen extends StatefulWidget {
   final String contactInfo;
   final VoidCallback? onCancel;
 
+  // [NEW] Fields for Smart Ticket
+  final String prizeType; // Physical, Digital, Privilege
+  final String? voucherCode;
+  final DateTime? usageExpiredDate;
+
   const RedeemedDetailScreen({
     super.key,
     required this.redeemId,
@@ -31,6 +36,10 @@ class RedeemedDetailScreen extends StatefulWidget {
     this.pickupLocation = 'HR Department, Floor 2',
     this.contactInfo = 'Contact Admin',
     this.onCancel,
+    // [NEW] Default values
+    this.prizeType = 'Physical',
+    this.voucherCode,
+    this.usageExpiredDate,
   });
 
   @override
@@ -49,9 +58,9 @@ class _RedeemedDetailScreenState extends State<RedeemedDetailScreen> {
   void _copyToClipboard(String text) {
     Clipboard.setData(ClipboardData(text: text));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Copied to clipboard"),
-        duration: Duration(seconds: 1),
+      SnackBar(
+        content: Text("Copied '$text'"),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
@@ -59,39 +68,31 @@ class _RedeemedDetailScreenState extends State<RedeemedDetailScreen> {
   void _handleCancel() {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
+      builder: (context) => AlertDialog(
         title: Text(
-          "Cancel Redemption",
+          "Cancel Redemption?",
           style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
         ),
         content: Text(
-          "Are you sure you want to cancel?\nPoints will be refunded to your account.",
+          "Are you sure you want to cancel this redemption? Points will be refunded.",
           style: GoogleFonts.poppins(),
         ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () => Navigator.pop(context),
             child: Text("No", style: GoogleFonts.poppins(color: Colors.grey)),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
+          TextButton(
             onPressed: () {
-              Navigator.pop(ctx);
+              Navigator.pop(context); // Close dialog
               if (widget.onCancel != null) {
                 widget.onCancel!();
-                Navigator.pop(context);
+                Navigator.pop(context); // Close screen
               }
             },
             child: Text(
               "Yes, Cancel",
-              style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+              style: GoogleFonts.poppins(color: Colors.red),
             ),
           ),
         ],
@@ -101,15 +102,11 @@ class _RedeemedDetailScreenState extends State<RedeemedDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isPending = widget.status == 'Pending';
-    final String qrData = "ACTION:PICKUP|ID:${widget.redeemId}";
-    final DateTime deadline = widget.redeemedAt.add(const Duration(days: 7));
-    final String deadlineStr = DateFormat('d MMM y').format(deadline);
-
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       body: CustomScrollView(
         slivers: [
+          // 1. App Bar
           SliverAppBar(
             expandedHeight: 250,
             pinned: true,
@@ -126,53 +123,13 @@ class _RedeemedDetailScreenState extends State<RedeemedDetailScreen> {
               ),
             ),
             flexibleSpace: FlexibleSpaceBar(
-              background: Stack(
-                children: [
-                  PageView.builder(
-                    controller: _pageController,
-                    itemCount: widget.imageUrls.isEmpty
-                        ? 1
-                        : widget.imageUrls.length,
-                    itemBuilder: (context, index) {
-                      if (widget.imageUrls.isEmpty) {
-                        return Container(
-                          color: Colors.grey[200],
-                          child: const Icon(
-                            Icons.image,
-                            size: 50,
-                            color: Colors.grey,
-                          ),
-                        );
-                      }
-                      return Image.network(
-                        widget.imageUrls[index],
-                        fit: BoxFit.cover,
-                      );
-                    },
-                  ),
-                  if (widget.imageUrls.length > 1)
-                    Positioned(
-                      bottom: 16,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: SmoothPageIndicator(
-                          controller: _pageController,
-                          count: widget.imageUrls.length,
-                          effect: const ExpandingDotsEffect(
-                            dotHeight: 8,
-                            dotWidth: 8,
-                            activeDotColor: Colors.white,
-                            dotColor: Colors.white54,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+              background: widget.imageUrls.isNotEmpty
+                  ? Image.network(widget.imageUrls[0], fit: BoxFit.cover)
+                  : Container(color: Colors.grey[200]),
             ),
           ),
 
+          // 2. Smart Ticket Content
           SliverToBoxAdapter(
             child: Transform.translate(
               offset: const Offset(0, -24),
@@ -195,58 +152,13 @@ class _RedeemedDetailScreenState extends State<RedeemedDetailScreen> {
                       ),
                       child: Column(
                         children: [
+                          // --- HEADER INFO ---
                           Padding(
-                            padding: const EdgeInsets.all(24),
+                            padding: const EdgeInsets.fromLTRB(24, 36, 24, 24),
                             child: Column(
                               children: [
-                                // Status Banner
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 8,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isPending
-                                        ? const Color(0xFFFFF8E1)
-                                        : const Color(0xFFE6F6E7),
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(
-                                      color: isPending
-                                          ? Colors.amber.shade200
-                                          : Colors.green.shade200,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        isPending
-                                            ? Icons.inventory_2_outlined
-                                            : Icons.check_circle,
-                                        color: isPending
-                                            ? Colors.amber.shade800
-                                            : Colors.green.shade800,
-                                        size: 20,
-                                      ),
-                                      const SizedBox(
-                                        width: 12,
-                                      ), // [FIXED] Increased spacing in Status Banner
-                                      Text(
-                                        isPending
-                                            ? "Ready to Pickup"
-                                            : "Completed",
-                                        style: GoogleFonts.poppins(
-                                          color: isPending
-                                              ? Colors.amber.shade900
-                                              : Colors.green.shade900,
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: 20),
+                                _buildStatusBadge(), // [NEW] Helper
+                                const SizedBox(height: 24),
                                 Text(
                                   widget.name,
                                   textAlign: TextAlign.center,
@@ -269,8 +181,8 @@ class _RedeemedDetailScreenState extends State<RedeemedDetailScreen> {
                             ),
                           ),
 
-                          if (isPending) _buildTicketDivider(),
-
+                          _buildTicketDivider(), // Dashed Line
+                          // --- ADAPTIVE BODY (เปลี่ยนตาม Type) ---
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.all(24),
@@ -280,157 +192,37 @@ class _RedeemedDetailScreenState extends State<RedeemedDetailScreen> {
                                 bottom: Radius.circular(20),
                               ),
                             ),
-                            child: Column(
-                              children: [
-                                if (isPending) ...[
-                                  Text(
-                                    "Scan to Pickup",
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 12,
-                                      color: Colors.grey[400],
-                                      letterSpacing: 1.5,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Container(
-                                    padding: const EdgeInsets.all(16),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(
-                                        color: Colors.grey.shade200,
-                                      ),
-                                    ),
-                                    child: QrImageView(
-                                      data: qrData,
-                                      version: QrVersions.auto,
-                                      size: 180.0,
-                                      backgroundColor: Colors.white,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  InkWell(
-                                    onTap: () =>
-                                        _copyToClipboard(widget.redeemId),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          "Ticket ID: ${widget.redeemId}",
-                                          style: GoogleFonts.sourceCodePro(
-                                            fontSize: 14,
-                                            color: Colors.grey[700],
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        const Icon(
-                                          Icons.copy,
-                                          size: 16,
-                                          color: Colors.grey,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    "Pick up by: $deadlineStr",
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 12,
-                                      color: Colors.red.shade400,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-
-                                  const SizedBox(height: 24),
-                                  // [FIXED] Info Row Spacing
-                                  _buildInfoRow(
-                                    Icons.store_mall_directory_outlined,
-                                    "Pickup Location",
-                                    widget.pickupLocation,
-                                  ),
-                                  const SizedBox(height: 12),
-                                  _buildInfoRow(
-                                    Icons.support_agent,
-                                    "Contact",
-                                    widget.contactInfo,
-                                  ),
-                                ] else ...[
-                                  // Completed View
-                                  Container(
-                                    padding: const EdgeInsets.all(20),
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.green.shade50,
-                                    ),
-                                    child: Icon(
-                                      Icons.mark_email_read_outlined,
-                                      size: 60,
-                                      color: Colors.green.shade300,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    "Reward Received",
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.green.shade800,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    "on ${DateFormat('d MMMM y, HH:mm').format(widget.redeemedAt)}",
-                                    textAlign: TextAlign.center,
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 14,
-                                      color: Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
+                            child: _buildTicketBody(), // [ADDED] ฟังก์ชันนี้
                           ),
                         ],
                       ),
                     ),
 
-                    // [REMOVED] Description Section removed per requirement
-
-                    // Cancel Button
-                    if (isPending) ...[
+                    // Cancel Button (เฉพาะ Physical/Digital ที่ยังไม่ได้รับของ/โค้ด)
+                    if (widget.status == 'Pending') ...[
                       const SizedBox(height: 30),
                       SizedBox(
                         width: double.infinity,
                         height: 50,
-                        child: TextButton.icon(
+                        child: OutlinedButton.icon(
                           onPressed: _handleCancel,
                           icon: const Icon(
                             Icons.cancel_outlined,
-                            color: Colors.grey,
+                            color: Colors.red,
                           ),
                           label: Text(
                             "Cancel Redemption",
                             style: GoogleFonts.poppins(
-                              color: Colors.grey[600],
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
+                              color: Colors.red,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                          style: TextButton.styleFrom(
-                            backgroundColor: Colors.grey.shade200,
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(color: Colors.red.shade200),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        "Points will be fully refunded.",
-                        style: GoogleFonts.poppins(
-                          fontSize: 11,
-                          color: Colors.grey[400],
                         ),
                       ),
                     ],
@@ -446,101 +238,299 @@ class _RedeemedDetailScreenState extends State<RedeemedDetailScreen> {
     );
   }
 
-  Widget _buildTicketDivider() {
-    return Stack(
+  // [ADDED] ฟังก์ชันสร้างตั๋วตามประเภท (Adaptive Ticket Body)
+  Widget _buildTicketBody() {
+    // 1. Privilege (วันลา/สิทธิพิเศษ)
+    if (widget.prizeType == 'Privilege') {
+      return Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: const Color(0xFFFFF7ED),
+            ), // Orange bg
+            child: const Icon(
+              Icons.workspace_premium,
+              size: 50,
+              color: Colors.orange,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            "Privilege Activated",
+            style: GoogleFonts.poppins(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.orange.shade800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "Show this screen to HR/Admin",
+            style: GoogleFonts.poppins(color: Colors.grey[500], fontSize: 12),
+          ),
+          const SizedBox(height: 24),
+          if (widget.usageExpiredDate != null)
+            _buildInfoRow(
+              Icons.event_busy,
+              "Valid Until",
+              DateFormat('d MMMM y').format(widget.usageExpiredDate!),
+            ),
+          const SizedBox(height: 12),
+          _buildInfoRow(
+            Icons.domain_verification,
+            "Status",
+            "Auto-Applied to System",
+          ),
+        ],
+      );
+    }
+
+    // 2. Digital Voucher (คูปอง)
+    if (widget.prizeType == 'Digital') {
+      // Case A: Pending (ยังไม่ได้โค้ด)
+      if (widget.status == 'Pending') {
+        return Column(
+          children: [
+            const Icon(
+              Icons.hourglass_top_rounded,
+              size: 60,
+              color: Colors.orange,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              "Waiting for Code",
+              style: GoogleFonts.poppins(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.orange.shade800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "Admin will send you the code shortly.",
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 24),
+            _buildInfoRow(Icons.support_agent, "Contact", widget.contactInfo),
+          ],
+        );
+      }
+      // Case B: Completed (ได้โค้ดแล้ว)
+      return Column(
+        children: [
+          Text(
+            "VOUCHER CODE",
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: Colors.grey[400],
+              letterSpacing: 1.5,
+            ),
+          ),
+          const SizedBox(height: 12),
+          GestureDetector(
+            onTap: () => _copyToClipboard(widget.voucherCode ?? ""),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0FDF4), // Light Green bg
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.green.shade200, width: 1.5),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    widget.voucherCode ?? "ERROR-CODE",
+                    style: GoogleFonts.sourceCodePro(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green.shade800,
+                      letterSpacing: 2,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Icon(Icons.copy, color: Colors.green, size: 20),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (widget.usageExpiredDate != null)
+            Text(
+              "Expires on: ${DateFormat('d MMM y').format(widget.usageExpiredDate!)}",
+              style: GoogleFonts.poppins(
+                color: Colors.red.shade400,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          const SizedBox(height: 24),
+          _buildInfoRow(
+            Icons.info_outline,
+            "Instruction",
+            widget.pickupLocation, // ใช้ field นี้เก็บวิธีใช้
+          ),
+        ],
+      );
+    }
+
+    // 3. Physical (ของชิ้น) - Default
+    final bool isPending = widget.status == 'Pending';
+    if (!isPending) {
+      // Completed
+      return Column(
+        children: [
+          Icon(
+            Icons.check_circle_outline,
+            size: 60,
+            color: Colors.green.shade300,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            "Received",
+            style: GoogleFonts.poppins(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.green.shade800,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            "Enjoy your reward!",
+            style: GoogleFonts.poppins(color: Colors.grey[500], fontSize: 12),
+          ),
+        ],
+      );
+    }
+    // Pending
+    return Column(
       children: [
-        Positioned.fill(
-          child: Center(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final boxWidth = constraints.constrainWidth();
-                const dashWidth = 8.0;
-                final dashHeight = 1.0;
-                final dashCount = (boxWidth / (2 * dashWidth)).floor();
-                return Flex(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  direction: Axis.horizontal,
-                  children: List.generate(dashCount, (_) {
-                    return SizedBox(
-                      width: dashWidth,
-                      height: dashHeight,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(color: Colors.grey.shade300),
-                      ),
-                    );
-                  }),
-                );
-              },
-            ),
+        Text(
+          "Scan to Pickup",
+          style: GoogleFonts.poppins(
+            fontSize: 12,
+            color: Colors.grey[400],
+            letterSpacing: 1.5,
           ),
         ),
-        Container(
-          height: 20,
-          width: 10,
-          decoration: const BoxDecoration(
-            color: Color(0xFFF5F7FA),
-            borderRadius: BorderRadius.horizontal(right: Radius.circular(10)),
+        const SizedBox(height: 16),
+        QrImageView(
+          data: "ACTION:PICKUP|ID:${widget.redeemId}",
+          version: QrVersions.auto,
+          size: 180.0,
+          backgroundColor: Colors.white,
+        ),
+        const SizedBox(height: 16),
+        InkWell(
+          onTap: () => _copyToClipboard(widget.redeemId),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                "Ticket ID: ${widget.redeemId}",
+                style: GoogleFonts.sourceCodePro(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.copy, size: 14, color: Colors.grey),
+            ],
           ),
         ),
-        Align(
-          alignment: Alignment.centerRight,
-          child: Container(
-            height: 20,
-            width: 10,
-            decoration: const BoxDecoration(
-              color: Color(0xFFF5F7FA),
-              borderRadius: BorderRadius.horizontal(left: Radius.circular(10)),
-            ),
-          ),
+        const SizedBox(height: 24),
+        _buildInfoRow(
+          Icons.store_mall_directory_outlined,
+          "Pickup Location",
+          widget.pickupLocation,
         ),
       ],
     );
   }
 
-  // [RE-DESIGNED] Enterprise Standard Info Row
+  Widget _buildTicketDivider() {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 0),
+      child: Row(
+        children: List.generate(
+          30,
+          (index) => Expanded(
+            child: Container(
+              color: index % 2 == 0 ? Colors.transparent : Colors.grey[300],
+              height: 2,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusBadge() {
+    Color bg = Colors.grey.shade100;
+    Color text = Colors.grey.shade700;
+
+    if (widget.status == 'Pending') {
+      bg = Colors.orange.shade50;
+      text = Colors.orange.shade800;
+    } else if (widget.status == 'Completed' || widget.status == 'Received') {
+      bg = Colors.green.shade50;
+      text = Colors.green.shade800;
+    } else if (widget.status == 'Cancelled') {
+      bg = Colors.red.shade50;
+      text = Colors.red.shade800;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        widget.status,
+        style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: text),
+      ),
+    );
+  }
+
   Widget _buildInfoRow(IconData icon, String label, String value) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 1. Icon Box
           Container(
-            width: 50,
-            height: 50,
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
               color: const Color(0xFFF3F4F6),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.grey.shade200),
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, color: const Color(0xFF375987), size: 24),
+            child: Icon(icon, color: const Color(0xFF375987), size: 22),
           ),
-
-          const SizedBox(width: 20),
-
-          // 2. Text Info
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Text(
                   label.toUpperCase(),
                   style: GoogleFonts.inter(
-                    fontSize: 11,
+                    fontSize: 10,
                     color: Colors.grey.shade500,
                     fontWeight: FontWeight.w600,
-                    letterSpacing: 0.5,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   value,
                   style: GoogleFonts.kanit(
-                    fontSize: 16,
+                    fontSize: 14,
                     fontWeight: FontWeight.w500,
                     color: const Color(0xFF1F2937),
-                    height: 1.2,
                   ),
                 ),
               ],

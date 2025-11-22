@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_application_activity_record/screens/employee_screens/main/employee_main_screen.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'dart:async';
 import 'package:flip_card/flip_card.dart';
@@ -40,6 +41,14 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
     super.initState();
     _fetchOrganizerProfile();
     _startTimer();
+  }
+
+  void _navigateToEmployeeMode() {
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const EmployeeMainScreen()),
+      (route) => false, // ล้าง Stack เพื่อเริ่มใหม่ในโหมด Employee
+    );
   }
 
   Future<void> _fetchOrganizerProfile() async {
@@ -251,6 +260,34 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
                       ],
                     ),
                     const SizedBox(height: 30),
+
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 30),
+                      child: ElevatedButton.icon(
+                        onPressed: _navigateToEmployeeMode,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFF4A80FF),
+                          elevation: 2,
+                          minimumSize: const Size(double.infinity, 56),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            side: const BorderSide(color: Color(0xFF4A80FF)),
+                          ),
+                        ),
+                        icon: const Icon(Icons.person_outline),
+                        label: const Text(
+                          "Switch to Participant View",
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
                     _buildInfoSection(),
                   ],
                 ),

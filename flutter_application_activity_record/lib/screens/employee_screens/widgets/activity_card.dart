@@ -12,9 +12,11 @@ class ActivityCard extends StatelessWidget {
   final int currentParticipants;
   final int maxParticipants;
   final bool isCompulsory;
-  final String status; // Open, Full, Closed, Joined, Missed, Upcoming
+  final String status;
   final bool isFavorite;
+  final bool isRegistered;
   final VoidCallback? onToggleFavorite;
+  final VoidCallback? onTap; // [NEW] Callback for card tap
 
   const ActivityCard({
     super.key,
@@ -29,7 +31,9 @@ class ActivityCard extends StatelessWidget {
     this.isCompulsory = false,
     this.status = 'Open',
     this.isFavorite = false,
+    this.isRegistered = false,
     this.onToggleFavorite,
+    this.onTap, // [NEW]
   });
 
   Color _getTypeColor(String type) {
@@ -50,42 +54,47 @@ class ActivityCard extends StatelessWidget {
     final typeColor = _getTypeColor(type);
     final bool isFull = currentParticipants >= maxParticipants;
 
-    // [UPDATED] Logic สีป้ายสถานะ (Button Color)
     Color statusColor;
     Color statusBg;
     String statusText;
 
-    switch (status) {
-      case 'Joined':
-        statusColor = Colors.green.shade700;
-        statusBg = Colors.green.shade50;
-        statusText = "Completed";
-        break;
-      case 'Missed':
-        statusColor = Colors.red.shade700;
-        statusBg = Colors.red.shade50;
-        statusText = "Missed";
-        break;
-      case 'Upcoming':
-        statusColor = Colors.orange.shade800;
-        statusBg = Colors.orange.shade50;
-        statusText = "Upcoming";
-        break;
-      case 'Full':
-        statusColor = Colors.red;
-        statusBg = Colors.red.shade50;
-        statusText = "Full";
-        break;
-      default: // Open
-        if (isCompulsory) {
+    if (isRegistered) {
+      statusColor = Colors.green.shade700;
+      statusBg = Colors.green.shade50;
+      statusText = "Registered";
+    } else {
+      switch (status) {
+        case 'Joined':
+          statusColor = Colors.green.shade700;
+          statusBg = Colors.green.shade50;
+          statusText = "Registered";
+          break;
+        case 'Missed':
+          statusColor = Colors.red.shade700;
+          statusBg = Colors.red.shade50;
+          statusText = "Missed";
+          break;
+        case 'Upcoming':
           statusColor = Colors.orange.shade800;
           statusBg = Colors.orange.shade50;
-          statusText = "Mandatory";
-        } else {
-          statusColor = Colors.blue.shade700;
-          statusBg = Colors.blue.shade50;
-          statusText = "Join Now";
-        }
+          statusText = "Upcoming";
+          break;
+        case 'Full':
+          statusColor = Colors.red;
+          statusBg = Colors.red.shade50;
+          statusText = "Full";
+          break;
+        default: // Open
+          if (isCompulsory) {
+            statusColor = Colors.orange.shade900;
+            statusBg = Colors.orange.shade50;
+            statusText = "Mandatory";
+          } else {
+            statusColor = Colors.blue.shade700;
+            statusBg = Colors.blue.shade50;
+            statusText = "Join Now";
+          }
+      }
     }
 
     return Container(
@@ -105,32 +114,29 @@ class ActivityCard extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ActivityDetailScreen(activityId: id),
-              ),
-            );
-          },
+          // Use external onTap if provided, else default navigation
+          onTap:
+              onTap ??
+              () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ActivityDetailScreen(activityId: id),
+                  ),
+                );
+              },
           child: IntrinsicHeight(
             child: Row(
-              crossAxisAlignment:
-                  CrossAxisAlignment.stretch, // ยืดให้เต็มความสูง
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // 1. Color Strip
                 Container(width: 6, color: typeColor),
-
-                // 2. Content Area
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Header Row: Type & Favorite
                         Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Container(
                               padding: const EdgeInsets.symmetric(
@@ -160,35 +166,50 @@ class ActivityCard extends StatelessWidget {
                                 decoration: BoxDecoration(
                                   color: Colors.red.shade50,
                                   borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  "COMPULSORY",
-                                  style: GoogleFonts.inter(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.red,
+                                  border: Border.all(
+                                    color: Colors.red.shade100,
+                                    width: 0.5,
                                   ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.lock_outline,
+                                      size: 10,
+                                      color: Colors.red.shade700,
+                                    ),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      "REQUIRED",
+                                      style: GoogleFonts.inter(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.red.shade700,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             const Spacer(),
+                            // Heart Icon with GestureDetector
                             GestureDetector(
                               onTap: onToggleFavorite,
-                              child: Icon(
-                                isFavorite
-                                    ? Icons.favorite
-                                    : Icons.favorite_border,
-                                size: 20,
-                                color: isFavorite
-                                    ? Colors.red
-                                    : Colors.grey.shade400,
+                              child: Padding(
+                                padding: const EdgeInsets.all(4.0),
+                                child: Icon(
+                                  isFavorite
+                                      ? Icons.favorite
+                                      : Icons.favorite_border,
+                                  size: 22,
+                                  color: isFavorite
+                                      ? Colors.red
+                                      : Colors.grey.shade400,
+                                ),
                               ),
                             ),
                           ],
                         ),
-
                         const SizedBox(height: 6),
-
-                        // Title
                         Text(
                           title,
                           style: GoogleFonts.kanit(
@@ -200,10 +221,7 @@ class ActivityCard extends StatelessWidget {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
-
                         const SizedBox(height: 6),
-
-                        // Meta Data (Location | Host)
                         Row(
                           children: [
                             Icon(
@@ -225,9 +243,7 @@ class ActivityCard extends StatelessWidget {
                             ),
                           ],
                         ),
-
-                        const SizedBox(height: 12), // เว้นระยะห่างก่อน Footer
-                        // Row 4 (Footer)
+                        const SizedBox(height: 12),
                         Row(
                           children: [
                             Expanded(
@@ -238,12 +254,12 @@ class ActivityCard extends StatelessWidget {
                                     children: [
                                       Icon(
                                         Icons.group_outlined,
-                                        size: 18,
+                                        size: 16,
                                         color: Colors.grey[600],
                                       ),
-                                      const SizedBox(width: 6),
+                                      const SizedBox(width: 4),
                                       Text(
-                                        "$currentParticipants/$maxParticipants Registered",
+                                        "$currentParticipants/$maxParticipants",
                                         style: GoogleFonts.poppins(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600,
@@ -252,7 +268,7 @@ class ActivityCard extends StatelessWidget {
                                       ),
                                     ],
                                   ),
-                                  const SizedBox(height: 2),
+                                  const SizedBox(height: 4),
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(2),
                                     child: LinearProgressIndicator(
@@ -271,8 +287,6 @@ class ActivityCard extends StatelessWidget {
                               ),
                             ),
                             const SizedBox(width: 16),
-
-                            // Status Badge/Button
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 12,
@@ -285,27 +299,13 @@ class ActivityCard extends StatelessWidget {
                                   color: statusColor.withOpacity(0.2),
                                 ),
                               ),
-                              child: Row(
-                                children: [
-                                  if (status == 'Joined')
-                                    Padding(
-                                      padding: const EdgeInsets.only(right: 4),
-                                      child: Icon(
-                                        Icons.check_circle,
-                                        size: 14,
-                                        color: statusColor,
-                                      ),
-                                    ),
-
-                                  Text(
-                                    statusText,
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                      color: statusColor,
-                                    ),
-                                  ),
-                                ],
+                              child: Text(
+                                statusText,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: statusColor,
+                                ),
                               ),
                             ),
                           ],

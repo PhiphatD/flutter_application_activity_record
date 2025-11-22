@@ -457,15 +457,13 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
       ),
       body: Stack(
         children: [
-          _buildBackground(),
+          Container(color: const Color.fromARGB(255, 255, 255, 255)),
           SafeArea(
             child: Column(
               children: [
-                _buildCustomAppBar(),
-                _buildSearchBar(),
-                _buildOwnerSegment(),
-                _buildTimeFilter(),
-                const Divider(height: 1, thickness: 1, color: Colors.black12),
+                _buildModernHeader(),
+
+                const SizedBox(height: 10),
                 Expanded(
                   child: _isLoading
                       ? const Center(child: CircularProgressIndicator())
@@ -489,21 +487,61 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
           children: [
             Icon(
               _selectedTimeFilter == 0 ? Icons.event_available : Icons.history,
-              size: 60,
-              color: Colors.grey[300],
+              size: 80, // ขยายใหญ่ขึ้น
+              color: Colors.grey[200],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 16),
             Text(
               _selectedTimeFilter == 0
-                  ? 'No upcoming activities'
+                  ? "You don't have any activities yet."
                   : 'No history found',
-              style: GoogleFonts.poppins(color: Colors.grey),
+              style: GoogleFonts.poppins(
+                color: Colors.grey[600],
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
             ),
-            const SizedBox(height: 10),
-            TextButton(
-              onPressed: _fetchActivities,
-              child: const Text("Refresh"),
-            ),
+            const SizedBox(height: 24),
+
+            // [NEW UX] ปุ่มสร้างกิจกรรมตรงกลาง
+            if (_selectedTimeFilter == 0 && _selectedOwnerSegment == 0)
+              ElevatedButton.icon(
+                onPressed: () async {
+                  await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const CreateActivityScreen(),
+                    ),
+                  );
+                  _fetchActivities();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF4A80FF),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                  elevation: 4,
+                  shadowColor: const Color(0xFF4A80FF).withOpacity(0.4),
+                ),
+                icon: const Icon(Icons.add, color: Colors.white),
+                label: Text(
+                  "Create New Activity",
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              )
+            else
+              TextButton.icon(
+                onPressed: _fetchActivities,
+                icon: const Icon(Icons.refresh),
+                label: const Text("Refresh Data"),
+              ),
           ],
         ),
       );
@@ -538,7 +576,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     bool mine,
   ) {
     final isToday = _isSameDay(date, DateTime.now());
-
+    final bool isHistoryTab = _selectedTimeFilter == 1;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -606,6 +644,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                       0, // แก้ไขได้เฉพาะของฉัน และเป็น Active
               startTime: a.startTime,
               endTime: a.endTime,
+              isHistory: isHistoryTab,
               onEdit: () async {
                 final bool? result = await Navigator.push(
                   context,
@@ -651,6 +690,10 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                     builder: (context) => ActivityDetailScreen(
                       activityId: a.actId,
                       isOrganizerView: true,
+
+                      // [FIX] ส่งสิทธิ์การแก้ไขเข้าไป
+                      // แก้ได้เฉพาะเมื่อ: เป็นของฉัน (mine) AND อยู่ในแท็บ Active (_selectedTimeFilter == 0)
+                      canEdit: mine && _selectedTimeFilter == 0,
                     ),
                   ),
                 );
@@ -860,6 +903,217 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     );
   }
 
+  Widget _buildModernHeader() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Row 1: Profile & Greeting
+          Row(
+            children: [
+              GestureDetector(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const OrganizerProfileScreen(),
+                  ),
+                ),
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: const Color(0xFF4A80FF),
+                      width: 2,
+                    ),
+                  ),
+                  child: const CircleAvatar(
+                    radius: 20,
+                    backgroundImage: NetworkImage(
+                      'https://i.pravatar.cc/150?img=32',
+                    ), // หรือใช้รูปจริง
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Welcome back,",
+                    style: GoogleFonts.poppins(
+                      fontSize: 12,
+                      color: Colors.grey[500],
+                    ),
+                  ),
+                  Text(
+                    "Organizer Team", // หรือใส่ชื่อจริง _currentOrganizerName
+                    style: GoogleFonts.poppins(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF375987),
+                    ),
+                  ),
+                ],
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(
+                  Icons.notifications_outlined,
+                  color: Colors.black54,
+                ),
+                onPressed: () {},
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 20),
+
+          // Row 2: Search Bar & Filter
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF5F7FA),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search activities...',
+                      hintStyle: GoogleFonts.poppins(
+                        color: Colors.grey[400],
+                        fontSize: 14,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.search,
+                        color: Colors.grey[400],
+                        size: 22,
+                      ),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              GestureDetector(
+                onTap: _showFilterModal,
+                child: Container(
+                  height: 48,
+                  width: 48,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF4A80FF), // สีปุ่ม Filter เด่นๆ
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.tune, color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 20),
+
+          // Row 3: Smart Tabs (รวม My/Other และ Active/History)
+          // เราจะใช้ดีไซน์แบบ "Chips" แนวนอนที่เลื่อนได้ เพื่อประหยัดที่
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                // Group 1: Owner (My / Others)
+                _buildChipSelector(
+                  "My Activities",
+                  _selectedOwnerSegment == 0,
+                  () => setState(() => _selectedOwnerSegment = 0),
+                ),
+                const SizedBox(width: 8),
+                _buildChipSelector(
+                  "Others",
+                  _selectedOwnerSegment == 1,
+                  () => setState(() => _selectedOwnerSegment = 1),
+                ),
+
+                Container(
+                  height: 24,
+                  width: 1,
+                  color: Colors.grey.shade300,
+                  margin: const EdgeInsets.symmetric(horizontal: 12),
+                ), // เส้นคั่น
+                // Group 2: Status (Active / History)
+                _buildChipSelector(
+                  "Active",
+                  _selectedTimeFilter == 0,
+                  () => setState(() => _selectedTimeFilter = 0),
+                  isStatus: true,
+                ),
+                const SizedBox(width: 8),
+                _buildChipSelector(
+                  "History",
+                  _selectedTimeFilter == 1,
+                  () => setState(() => _selectedTimeFilter = 1),
+                  isStatus: true,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Helper Widget สำหรับปุ่มเลือกเล็กๆ (Chip)
+  Widget _buildChipSelector(
+    String label,
+    bool isSelected,
+    VoidCallback onTap, {
+    bool isStatus = false,
+  }) {
+    // สี Active: ถ้าเป็นกลุ่ม Owner ใช้สีเหลือง, ถ้าเป็น Status ใช้สีฟ้า
+    final activeColor = isStatus
+        ? const Color(0xFFE6EFFF)
+        : const Color(0xFFFFF8E1);
+    final activeText = isStatus
+        ? const Color(0xFF4A80FF)
+        : Colors.amber.shade900;
+    final border = isStatus ? const Color(0xFF4A80FF) : Colors.amber;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? activeColor : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? border.withOpacity(0.3) : Colors.grey.shade300,
+          ),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 13,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            color: isSelected ? activeText : Colors.grey[600],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildTimeFilter() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
@@ -1014,6 +1268,7 @@ class _OrganizerActivityCard extends StatelessWidget {
   final VoidCallback onTap;
   final String startTime;
   final String endTime;
+  final bool isHistory; // ตัวแปรสำคัญ
 
   const _OrganizerActivityCard({
     super.key,
@@ -1033,320 +1288,352 @@ class _OrganizerActivityCard extends StatelessWidget {
     required this.status,
     this.startTime = "-",
     this.endTime = "-",
+    this.isHistory = false,
   });
 
-  String _calculateDuration() {
-    if (startTime == "-" || endTime == "-") return "";
-    try {
-      final s = DateFormat("HH:mm").parse(startTime);
-      final e = DateFormat("HH:mm").parse(endTime);
-      final diff = e.difference(s);
-      final hours = diff.inHours;
-      final minutes = diff.inMinutes.remainder(60);
-      if (hours > 0 && minutes > 0) return "${hours}h ${minutes}m";
-      if (hours > 0) return "${hours}h";
-      return "${minutes}m";
-    } catch (_) {
-      return "";
-    }
-  }
+  Color _getTypeColor(String type) {
+    // ถ้าเป็น History ให้คืนค่าสีเทาเสมอ เพื่อสื่อว่าเป็นอดีต
+    if (isHistory) return Colors.grey.shade400;
 
-  String _cleanLocation(String loc) {
-    if (loc.contains(" at :")) return loc.split(" at :")[0].trim();
-    return loc;
+    switch (type.toLowerCase()) {
+      case 'training':
+        return const Color(0xFF4A80FF);
+      case 'seminar':
+        return const Color(0xFFFF9F1C);
+      case 'workshop':
+        return const Color(0xFF2EC4B6);
+      case 'expo':
+        return const Color(0xFF9C27B0);
+      default:
+        return const Color(0xFF9E9E9E);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final duration = _calculateDuration();
-    final displayLocation = _cleanLocation(location);
-    final displayTime = (startTime == "-" || endTime == "-")
-        ? "Time TBA"
-        : "$startTime - $endTime";
+    final typeColor = _getTypeColor(type);
+    final bool isFull =
+        maxParticipants > 0 && currentParticipants >= maxParticipants;
 
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
+    // [UX Improvement] ทำให้การ์ด History ดูจางลงเล็กน้อย
+    final displayOpacity = isHistory ? 0.7 : 1.0;
+
+    // --- Status Logic ---
+    Color statusBg;
+    Color statusTextCol;
+    String displayStatus;
+
+    if (isHistory) {
+      // ถ้าเป็น History บังคับโชว์ "Ended" สีเทา
+      displayStatus = "Ended";
+      statusBg = Colors.grey.shade200;
+      statusTextCol = Colors.grey.shade600;
+    } else {
+      // ถ้าเป็น Active โชว์ตามจริง
+      displayStatus = status;
+      switch (status) {
+        case 'Full':
+          statusBg = Colors.red.shade50;
+          statusTextCol = Colors.red;
+          break;
+        case 'Closed':
+          statusBg = Colors.grey.shade100;
+          statusTextCol = Colors.grey.shade700;
+          break;
+        default: // Open
+          statusBg = const Color(0xFFE6EFFF);
+          statusTextCol = const Color(0xFF4A80FF);
+      }
+    }
+
+    return Opacity(
+      opacity: displayOpacity,
       child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          // [FIX 1] ดีไซน์ Enterprise: เส้นขอบชัด + เงาฟุ้ง
-          border: Border.all(color: Colors.grey.shade300, width: 1),
+          color: Colors.white, // ยังคงพื้นหลังขาวเพื่อให้ clean
+          borderRadius: BorderRadius.circular(12),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.1), // เงาเข้มขึ้น
-              blurRadius: 12,
-              offset: const Offset(0, 6),
+              color: Colors.black.withOpacity(
+                isHistory ? 0.02 : 0.05,
+              ), // เงาจางลงถ้าเป็น History
+              blurRadius: 10,
+              offset: const Offset(0, 4),
             ),
           ],
+          border: Border.all(color: Colors.grey.shade200),
         ),
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // [Row 1] Type & Points & Status Tags
-            Row(
-              children: [
-                _tag(type, Colors.blue.shade50, Colors.blue.shade700),
-                const SizedBox(width: 8),
-                if (isCompulsory) ...[
-                  _tag(
-                    "Compulsory",
-                    Colors.orange.shade50,
-                    Colors.orange.shade700,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            onTap: onTap,
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // 1. Side Bar (Grey if history)
+                  Container(
+                    width: 6,
+                    color: typeColor, // ใช้สีที่คำนวณไว้ (เทา หรือ สีตามประเภท)
                   ),
-                  const SizedBox(width: 8),
-                ],
-                const Spacer(),
-                // Status Tag
-                _tag(
-                  status,
-                  status == 'Open'
-                      ? Colors.green.shade50
-                      : Colors.grey.shade100,
-                  status == 'Open'
-                      ? Colors.green.shade700
-                      : Colors.grey.shade600,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
 
-            // [Row 2] Title + Action Buttons
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: GoogleFonts.kanit(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600, // เพิ่มน้ำหนักตัวหนังสือ
-                      color: const Color(0xFF222222),
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (showActions) ...[
-                  const SizedBox(width: 8),
-                  // ปุ่ม Edit (ดีไซน์ใหม่: พื้นหลังเทาอ่อน)
-                  InkWell(
-                    onTap: onEdit,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade300),
-                      ),
-                      child: const Icon(
-                        Icons.edit_outlined,
-                        size: 18,
-                        color: Colors.blueAccent,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // ปุ่ม Delete (ดีไซน์ใหม่: พื้นหลังแดงอ่อน)
-                  InkWell(
-                    onTap: onDelete,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.red.shade200),
-                      ),
-                      child: const Icon(
-                        Icons.delete_outline,
-                        size: 18,
-                        color: Colors.redAccent,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 8),
-
-            // [Row 3] Time + Duration
-            Row(
-              children: [
-                Icon(
-                  Icons.access_time_rounded,
-                  size: 16,
-                  color: Colors.grey[600],
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  displayTime,
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87,
-                  ),
-                ),
-                if (duration.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  Text(
-                    "($duration)",
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: Colors.grey[500],
-                    ),
-                  ),
-                ],
-              ],
-            ),
-
-            const SizedBox(height: 6),
-
-            // [Row 4] Location
-            Row(
-              children: [
-                Icon(
-                  Icons.location_on_outlined,
-                  size: 16,
-                  color: Colors.grey[500],
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    displayLocation,
-                    style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      color: Colors.grey[600],
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 6),
-            // [Row 5] Host Name
-            Row(
-              children: [
-                Icon(Icons.person_outline, size: 16, color: Colors.grey[500]),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    "Host: $organizer",
-                    style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      color: Colors.grey[600],
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-            const Divider(height: 1, color: Color(0xFFF0F0F0)), // เส้นคั่นบางๆ
-            const SizedBox(height: 12),
-
-            // [Row 6] Progress Bar & Points
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+                  // 2. Content
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(
-                            Icons.people_alt,
-                            size: 16,
-                            color: const Color(0xFF424242),
+                          // --- Tags Row ---
+                          Row(
+                            children: [
+                              // Type Tag
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: typeColor.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  type.toUpperCase(),
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: typeColor,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+
+                              // Status Tag (Ended or Open)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: statusBg,
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  displayStatus,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: statusTextCol,
+                                  ),
+                                ),
+                              ),
+
+                              const Spacer(),
+                              // [Hidden Menu for History]
+                              if (showActions && !isHistory)
+                                SizedBox(
+                                  height: 24,
+                                  width: 24,
+                                  child: PopupMenuButton<String>(
+                                    padding: EdgeInsets.zero,
+                                    icon: Icon(
+                                      Icons.more_horiz,
+                                      color: Colors.grey.shade400,
+                                    ),
+                                    onSelected: (v) {
+                                      if (v == 'edit') onEdit();
+                                      if (v == 'delete') onDelete();
+                                    },
+                                    itemBuilder: (context) => [
+                                      const PopupMenuItem(
+                                        value: 'edit',
+                                        child: Text('Edit'),
+                                      ),
+                                      const PopupMenuItem(
+                                        value: 'delete',
+                                        child: Text(
+                                          'Delete',
+                                          style: TextStyle(color: Colors.red),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              else if (isHistory)
+                                // แสดงไอคอน Lock แทนเมนู เพื่อบอกว่าแก้ไขไม่ได้
+                                Icon(
+                                  Icons.lock_outline,
+                                  size: 14,
+                                  color: Colors.grey.shade300,
+                                ),
+                            ],
                           ),
-                          const SizedBox(width: 4),
+
+                          const SizedBox(height: 8),
+
+                          // --- Title ---
                           Text(
-                            "$currentParticipants/$maxParticipants Registered",
-                            style: GoogleFonts.poppins(
-                              fontSize: 13,
+                            title,
+                            style: GoogleFonts.kanit(
+                              fontSize: 16,
                               fontWeight: FontWeight.w600,
-                              color: const Color(0xFF424242),
+                              // ถ้าเป็น History สีชื่อจะดรอปลงนิดนึง
+                              color: isHistory
+                                  ? Colors.grey.shade700
+                                  : const Color(0xFF1F2937),
+                              height: 1.2,
                             ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+
+                          const SizedBox(height: 6),
+
+                          // --- Time & Location ---
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.access_time,
+                                size: 14,
+                                color: Colors.grey.shade400,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                startTime != "-" ? startTime : "TBA",
+                                style: GoogleFonts.kanit(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade500,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Icon(
+                                Icons.location_on_outlined,
+                                size: 14,
+                                color: Colors.grey.shade400,
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  location,
+                                  style: GoogleFonts.kanit(
+                                    fontSize: 12,
+                                    color: Colors.grey.shade500,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 12),
+
+                          // --- Progress & Stats ---
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          Icons.group_outlined,
+                                          size: 16,
+                                          color: Colors.grey.shade500,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          // History: เน้นยอดสรุป, Active: เน้นเป้า
+                                          isHistory
+                                              ? "Total: $currentParticipants"
+                                              : "$currentParticipants/$maxParticipants",
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: Colors.grey.shade600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    // Progress Bar
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(2),
+                                      child: LinearProgressIndicator(
+                                        value: maxParticipants > 0
+                                            ? currentParticipants /
+                                                  maxParticipants
+                                            : 0,
+                                        backgroundColor: Colors.grey.shade100,
+                                        // History: Progress Bar สีเทา
+                                        valueColor:
+                                            AlwaysStoppedAnimation<Color>(
+                                              isHistory
+                                                  ? Colors.grey.shade400
+                                                  : (isFull
+                                                        ? Colors.red
+                                                        : typeColor),
+                                            ),
+                                        minHeight: 3,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+
+                              // Points Badge (Grey if history)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isHistory
+                                      ? Colors.grey.shade100
+                                      : Colors.amber.shade50,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: isHistory
+                                        ? Colors.transparent
+                                        : Colors.amber.shade100,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.star_rounded,
+                                      size: 14,
+                                      color: isHistory
+                                          ? Colors.grey.shade400
+                                          : Colors.amber.shade800,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      "$points",
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: isHistory
+                                            ? Colors.grey.shade500
+                                            : Colors.amber.shade900,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                      const SizedBox(height: 6),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: maxParticipants > 0
-                              ? currentParticipants / maxParticipants
-                              : 0,
-                          backgroundColor: Colors.grey[200],
-                          valueColor: const AlwaysStoppedAnimation<Color>(
-                            Color(0xFF4A80FF),
-                          ),
-                          minHeight: 6,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 16),
-                // Points Badge
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFF8E1), // สีเหลืองอ่อน
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.orange.shade100),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.star_rounded,
-                        size: 16,
-                        color: Colors.orange.shade800,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        "$points Pts",
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.orange.shade900,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _tag(String text, Color bg, Color fg) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 4,
-      ), // เพิ่ม Padding นิดหน่อย
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(6), // ปรับมุมโค้ง
-      ),
-      child: Text(
-        text,
-        style: GoogleFonts.poppins(
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-          color: fg,
+          ),
         ),
       ),
     );

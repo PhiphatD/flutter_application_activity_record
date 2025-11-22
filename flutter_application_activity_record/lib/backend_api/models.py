@@ -148,6 +148,7 @@ class PointTransaction(Base):
     REF_ID = Column(String(20), nullable=False)
     POINTS = Column(Integer, nullable=False)
     TXN_DATE = Column(DateTime, nullable=False)
+    
 
 # --- 11. ตารางของรางวัล ---
 class Prize(Base):
@@ -164,18 +165,20 @@ class Prize(Base):
     MANAGED_BY = Column(String(5), ForeignKey("EMPLOYEE.EMP_ID"), nullable=False)
     PICKUP_INSTRUCTION = Column(String(255), default='Contact HR')
     company = relationship("Company", back_populates="prizes")
-
+    PRIZE_TYPE = Column(String(20), default='Physical') # Physical, Digital, Privilege
+    EXTERNAL_LINK = Column(String(255), nullable=True)
 # --- 12. ตารางแลกของรางวัล ---
 class Redeem(Base):
     __tablename__ = "REDEEM"
     REDEEM_ID = Column(String(20), primary_key=True, index=True)
     EMP_ID = Column(String(5), ForeignKey("EMPLOYEE.EMP_ID"), nullable=False)
     PRIZE_ID = Column(String(5), ForeignKey("PRIZE.PRIZE_ID"), nullable=False)
-    REDEEM_DATE = Column(Date, nullable=False)
+    REDEEM_DATE = Column(DateTime)
     STATUS = Column(String(20), default="Pending")
     APPROVED_BY = Column(String(5), ForeignKey("EMPLOYEE.EMP_ID"))
     RECEIVED_DATE = Column(Date)
-
+    VOUCHER_CODE = Column(String(50), nullable=True)
+    USAGE_EXPIRED_DATE = Column(DateTime, nullable=True)
 # --- 13. ตารางรายการโปรด (NEW) ---
 class Favorite(Base):
     __tablename__ = "FAVORITE"

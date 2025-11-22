@@ -1,3 +1,27 @@
+import 'dart:convert';
+
+class ActivityAttachment {
+  final String url;
+  final String type; // 'IMAGE', 'PDF', 'DOC'
+  final String name;
+
+  ActivityAttachment({
+    required this.url,
+    required this.type,
+    required this.name,
+  });
+
+  factory ActivityAttachment.fromJson(Map<String, dynamic> json) {
+    return ActivityAttachment(
+      url: json['url'] ?? '',
+      type: json['type'] ?? 'IMAGE',
+      name: json['name'] ?? 'Attachment',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {'url': url, 'type': type, 'name': name};
+}
+
 class AgendaItem {
   final String time;
   final String title;
@@ -12,6 +36,12 @@ class AgendaItem {
       detail: json['detail'] ?? '',
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'time': time,
+    'title': title,
+    'detail': detail,
+  };
 }
 
 class Activity {
@@ -30,11 +60,14 @@ class Activity {
   final String endTime;
   final String sessionId;
   final String description;
-  final String? actImage;
-  final bool isFavorite;
+
+  // [UPDATED] เปลี่ยนจาก String? actImage เดี่ยวๆ เป็น List
+  final List<ActivityAttachment> attachments;
+
+  bool isFavorite;
   final bool isRegistered;
 
-  // Detail specific fields (nullable or default empty)
+  // Detail specific fields
   final String guestSpeaker;
   final String eventHost;
   final String organizerContact;
@@ -45,6 +78,9 @@ class Activity {
   final String travelInfo;
   final String moreDetails;
   final List<AgendaItem> agendaList;
+
+  // [NEW] เพิ่ม field นี้
+  final String targetCriteria;
 
   Activity({
     required this.actId,
@@ -62,7 +98,7 @@ class Activity {
     this.endTime = '00:00',
     this.sessionId = '',
     this.description = '',
-    this.actImage,
+    this.attachments = const [], // Default empty list
     this.isFavorite = false,
     this.isRegistered = false,
     this.guestSpeaker = '-',
@@ -75,7 +111,21 @@ class Activity {
     this.travelInfo = '-',
     this.moreDetails = '-',
     this.agendaList = const [],
+    // [NEW] เพิ่มตรงนี้
+    this.targetCriteria = '',
   });
+
+  // [TRICK] Getter นี้ช่วยให้โค้ดเก่า (UI การ์ด) ที่เรียก .actImage ยังทำงานได้ไม่พัง
+  // โดยมันจะไปดึง URL ของรูปภาพแรกใน List มาแสดง
+  String? get actImage {
+    if (attachments.isEmpty) return null;
+    // หาไฟล์ที่เป็น IMAGE ตัวแรก
+    try {
+      return attachments.firstWhere((a) => a.type == 'IMAGE').url;
+    } catch (_) {
+      return null; // ถ้าไม่มีรูปเลย
+    }
+  }
 
   factory Activity.fromJson(Map<String, dynamic> json) {
     DateTime date = DateTime.now();
@@ -85,7 +135,6 @@ class Activity {
       } catch (_) {}
     } else if (json['sessions'] != null &&
         (json['sessions'] as List).isNotEmpty) {
-      // Fallback for Detail API which might nest date in sessions
       try {
         date = DateTime.parse(
           json['sessions'][0]['date'] + ' ' + json['sessions'][0]['startTime'],
@@ -93,7 +142,6 @@ class Activity {
       } catch (_) {}
     }
 
-    // Handle time range if present (Detail API)
     String start = json['startTime'] ?? '00:00';
     String end = json['endTime'] ?? '00:00';
 
@@ -101,14 +149,29 @@ class Activity {
       final session = json['sessions'][0];
       start = session['startTime']?.toString() ?? '00:00';
       end = session['endTime']?.toString() ?? '00:00';
+      if (start.split(':').length > 2) start = start.substring(0, 5);
+      if (end.split(':').length > 2) end = end.substring(0, 5);
+    }
 
-      // Clean up seconds if present (e.g. 09:00:00 -> 09:00)
-      if (start.split(':').length > 2) {
-        start = start.substring(0, 5);
-      }
-      if (end.split(':').length > 2) {
-        end = end.substring(0, 5);
-      }
+    // [UPDATED] Parsing Logic สำหรับ Attachments
+    List<ActivityAttachment> parsedAttachments = [];
+
+    // 1. กรณี Backend ส่งมาเป็น List (New format)
+    if (json['attachments'] != null) {
+      parsedAttachments = (json['attachments'] as List)
+          .map((e) => ActivityAttachment.fromJson(e))
+          .toList();
+    }
+    // 2. กรณี Backend เก่าส่งมาแค่ actImage (Legacy support)
+    else if (json['actImage'] != null &&
+        json['actImage'].toString().isNotEmpty) {
+      parsedAttachments.add(
+        ActivityAttachment(
+          url: json['actImage'],
+          type: 'IMAGE',
+          name: 'Cover Image',
+        ),
+      );
     }
 
     return Activity(
@@ -135,11 +198,12 @@ class Activity {
               ? json['sessions'][0]['sessionId']
               : ''),
       description: json['description'] ?? '',
-      actImage: json['actImage'],
+
+      // [UPDATED] Assign attachments
+      attachments: parsedAttachments,
+
       isFavorite: json['isFavorite'] == true,
       isRegistered: json['isRegistered'] == true,
-
-      // Detail fields
       guestSpeaker: json['guestSpeaker'] ?? '-',
       eventHost: json['eventHost'] ?? '-',
       organizerContact: json['organizerContact'] ?? '-',
@@ -149,11 +213,17 @@ class Activity {
       foodInfo: json['foodInfo'] ?? '-',
       travelInfo: json['travelInfo'] ?? '-',
       moreDetails: json['moreDetails'] ?? '-',
-      agendaList:
-          (json['agendaList'] as List<dynamic>?)
-              ?.map((e) => AgendaItem.fromJson(e))
-              .toList() ??
-          [],
+      agendaList: (json['agenda'] != null && json['agenda'] is String)
+          ? (jsonDecode(json['agenda']) as List)
+                .map((e) => AgendaItem.fromJson(e))
+                .toList()
+          : (json['agendaList'] as List<dynamic>?)
+                    ?.map((e) => AgendaItem.fromJson(e))
+                    .toList() ??
+                [],
+      // [NEW] รับค่าจาก API
+      targetCriteria:
+          json['targetCriteria'] ?? json['ACT_TARGET_CRITERIA'] ?? '',
     );
   }
 }
