@@ -65,6 +65,78 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
     super.dispose();
   }
 
+  Map<String, dynamic> _getStatusInfo(Activity act) {
+    try {
+      final now = DateTime.now();
+      final date = act.activityDate;
+
+      // 1. แปลงเวลา Start/End ให้สมบูรณ์
+      final startParts = act.startTime.split(':');
+      final endParts = act.endTime.split(':');
+
+      final startDt = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        int.parse(startParts[0]),
+        int.parse(startParts[1]),
+      );
+
+      var endDt = DateTime(
+        date.year,
+        date.month,
+        date.day,
+        int.parse(endParts[0]),
+        int.parse(endParts[1]),
+      );
+
+      if (endDt.isBefore(startDt) || endDt.isAtSameMomentAs(startDt)) {
+        endDt = endDt.add(const Duration(days: 1));
+      }
+
+      // --- [UPDATED] Logic การแบ่งสถานะ ---
+
+      // 1. 🔴 LIVE: กำลังดำเนินอยู่ (สำคัญที่สุด)
+      // เช็คว่า ตอนนี้ อยู่ระหว่าง เริ่ม และ จบ หรือไม่
+      if (now.isAfter(startDt) && now.isBefore(endDt)) {
+        return {
+          'label': 'LIVE ',
+          'color': const Color(0xFFFF4757), // สีแดงสด
+        };
+      }
+
+      // เตรียมเทียบวันที่ (ตัดเวลาทิ้ง)
+      final today = DateTime(now.year, now.month, now.day);
+      final activityDay = DateTime(date.year, date.month, date.day);
+      final differenceDays = activityDay.difference(today).inDays;
+
+      // 2. 🟠 TODAY: วันนี้ (แต่ยังไม่เริ่ม)
+      if (differenceDays == 0) {
+        return {
+          'label': 'TODAY',
+          'color': const Color(0xFFFF9F1C), // สีส้ม
+        };
+      }
+      // 3. 🔵 TOMORROW: พรุ่งนี้
+      else if (differenceDays == 1) {
+        return {
+          'label': 'TOMORROW',
+          'color': const Color(0xFF4A80FF), // สีฟ้า
+        };
+      }
+      // 4. ⚪ UPCOMING: วันอื่น ๆ
+      else {
+        return {
+          'label': 'UPCOMING',
+          'color': Colors
+              .orange, // สีส้มมาตรฐาน (หรือจะใช้สีเทาก็ได้ถ้าอยากให้จางลง)
+        };
+      }
+    } catch (e) {
+      return {'label': 'UPCOMING', 'color': Colors.orange}; // Fallback
+    }
+  }
+
   // ฟังก์ชันนี้จะถูกเรียกโดย EmployeeMainScreen ผ่าน GlobalKey
   Future<void> refreshData() async {
     if (_activities.isEmpty) setState(() => _isLoading = true);
@@ -105,9 +177,47 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
         }
 
         if (mounted) {
-          final loaded = dataAll
-              .map((json) => Activity.fromJson(json))
-              .toList();
+          // 1. แปลง JSON เป็น Object
+          var loaded = dataAll.map((json) => Activity.fromJson(json)).toList();
+
+          // [NEW LOGIC] กรองกิจกรรมที่จบไปแล้วทิ้ง (Client-side Filter)
+          final now = DateTime.now();
+
+          bool isActivityActive(Activity act) {
+            try {
+              final startParts = act.startTime.split(':');
+              final endParts = act.endTime.split(':');
+
+              final startDt = DateTime(
+                act.activityDate.year,
+                act.activityDate.month,
+                act.activityDate.day,
+                int.parse(startParts[0]),
+                int.parse(startParts[1]),
+              );
+
+              var endDt = DateTime(
+                act.activityDate.year,
+                act.activityDate.month,
+                act.activityDate.day,
+                int.parse(endParts[0]),
+                int.parse(endParts[1]),
+              );
+
+              // แก้บั๊กข้ามคืน
+              if (endDt.isBefore(startDt) || endDt.isAtSameMomentAs(startDt)) {
+                endDt = endDt.add(const Duration(days: 1));
+              }
+
+              // เงื่อนไข: ยังไม่จบ (End > Now)
+              return endDt.isAfter(now);
+            } catch (e) {
+              return true;
+            }
+          }
+
+          // [FIX 1] กรอง loaded (List ใหญ่)
+          loaded = loaded.where((act) => isActivityActive(act)).toList();
 
           final types = loaded.map((e) => e.actType).toSet().toList();
           types.sort();
@@ -122,12 +232,22 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
           }
 
           setState(() {
-            _activities = loaded;
+            _activities = loaded; // รายการนี้จะไม่มีของเก่าแล้ว
             _availableTypes = types;
             _minPoint = minP;
             _maxPoint = maxP;
             _pointRange = RangeValues(minP, maxP);
-            _myUpcomingActivities = myUpcoming;
+
+            // [FIX 2] กรอง My Upcoming (แนวนอน) ให้แสดงคนที่ Live อยู่ด้วย
+            _myUpcomingActivities = myUpcoming.where((act) {
+              return isActivityActive(act);
+            }).toList();
+
+            // เรียงลำดับ: ให้ Live (เวลาเริ่มน้อยกว่า) ขึ้นก่อน หรือใกล้จบขึ้นก่อน
+            _myUpcomingActivities.sort(
+              (a, b) => a.activityDate.compareTo(b.activityDate),
+            );
+
             _favoriteActivityIds = favs;
             _currentEmpId = empId;
             _isLoading = false;
@@ -350,6 +470,10 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
   }
 
   Widget _buildTicketCard(Activity act) {
+    final statusInfo = _getStatusInfo(act);
+    final String statusLabel = statusInfo['label'];
+    final Color statusColor = statusInfo['color'];
+
     return Container(
       width: 320,
       margin: const EdgeInsets.only(right: 16),
@@ -418,11 +542,11 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
                                 ),
                               ),
                               Text(
-                                "Upcoming",
+                                statusLabel,
                                 style: GoogleFonts.inter(
                                   fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.orange,
+                                  fontWeight: FontWeight.w800,
+                                  color: statusColor,
                                 ),
                               ),
                             ],
@@ -696,6 +820,28 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
     required String relativeDate,
     required List<Activity> cards,
   }) {
+    // [FIX 3] เช็คว่าในกลุ่มนี้ มีกิจกรรมไหน Live อยู่ไหม
+    bool hasLiveEvent = false;
+    for (var act in cards) {
+      final status = _getStatusInfo(act);
+      if (status['label'].toString().contains("LIVE")) {
+        hasLiveEvent = true;
+        break;
+      }
+    }
+
+    // ถ้ามี Live และหัวข้อเดิมเป็น Past Event ให้เปลี่ยนเป็น "Happening Now"
+    String displayRelativeDate = relativeDate;
+    Color relativeDateColor = Colors.grey.shade600;
+
+    if (hasLiveEvent) {
+      displayRelativeDate = "Live"; // ข้อความใหม่ดึงดูดใจ
+      relativeDateColor = const Color(0xFFFF4757); // สีแดง
+    } else if (relativeDate == "Past Event") {
+      // กรณีหลุดมาแต่ไม่ Live (ไม่น่าจะเกิดถ้า Backend กรองดี)
+      displayRelativeDate = "Ended";
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -714,20 +860,24 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
                 ),
               ),
               const SizedBox(width: 12),
-              if (relativeDate.isNotEmpty)
+              if (displayRelativeDate.isNotEmpty)
                 Text(
-                  relativeDate,
+                  displayRelativeDate,
                   style: GoogleFonts.inter(
                     fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.grey.shade600,
+                    fontWeight: FontWeight.bold, // หนาขึ้น
+                    color: relativeDateColor, // สีตามสถานะ
                   ),
                 ),
             ],
           ),
         ),
         ...cards.map((act) {
-          String cardStatus = act.status;
+          // [FIX 4] ดึงสถานะ Live ไปใช้กับการ์ดแนวตั้ง
+          final statusInfo = _getStatusInfo(act);
+          String cardStatus = statusInfo['label']; // "LIVE 🔥", "TODAY", etc.
+
+          // ถ้ามีการลงทะเบียนแล้ว ให้ยึดสถานะ Registered/Joined ก่อน (หรือจะเอา Live ก็ได้แล้วแต่ Design)
           if (act.isRegistered) cardStatus = 'Joined';
 
           return Padding(

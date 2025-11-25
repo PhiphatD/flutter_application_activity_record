@@ -5,10 +5,11 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'participants_details_screen.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
+
 import 'enterprise_scanner_screen.dart';
 import 'activities/activity_qr_display_screen.dart';
 import '../../../widgets/organizer_header.dart';
+import '../../../widgets/auto_close_success_dialog.dart';
 
 class ActivitiesParticipantsListScreen extends StatefulWidget {
   const ActivitiesParticipantsListScreen({super.key});
@@ -22,7 +23,7 @@ class _ActivitiesParticipantsListScreenState
     extends State<ActivitiesParticipantsListScreen>
     with SingleTickerProviderStateMixin {
   final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
-  WebSocketChannel? _channel;
+
   final TextEditingController _search = TextEditingController();
   String _query = '';
 
@@ -36,41 +37,19 @@ class _ActivitiesParticipantsListScreenState
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _fetchActivities();
+    refreshData();
     _search.addListener(() => setState(() => _query = _search.text.trim()));
-    _connectWebSocket();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     _search.dispose();
-    _channel?.sink.close();
+
     super.dispose();
   }
 
-  void _connectWebSocket() {
-    try {
-      final wsUrl = Uri.parse(
-        'ws://numerably-nonevincive-kyong.ngrok-free.dev/ws',
-      );
-      _channel = WebSocketChannel.connect(wsUrl);
-
-      _channel!.stream.listen((message) {
-        // [UPDATED] เพิ่มเงื่อนไข REFRESH_ACTIVITIES
-        if (message == "REFRESH_PARTICIPANTS" ||
-            message == "REFRESH_ACTIVITIES" || // <--- เพิ่มตรงนี้
-            message.toString().contains("CHECKIN_SUCCESS")) {
-          print("⚡ List Update: $message");
-          _fetchActivities(); // โหลดข้อมูลใหม่
-        }
-      });
-    } catch (e) {
-      print("WS Error: $e");
-    }
-  }
-
-  Future<void> _fetchActivities() async {
+  Future<void> refreshData() async {
     setState(() => _isLoading = true);
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -96,15 +75,50 @@ class _ActivitiesParticipantsListScreenState
 
   // --- [NEW LOGIC] Smart Scan Section ---
   List<_Activity> _getMyActivitiesToday() {
-    final today = DateTime.now();
+    final now = DateTime.now();
+
     return _activities.where((a) {
       if (a.organizerName != _currentOrganizerName) return false;
       if (a.status == 'Closed' || a.status == 'Cancelled') return false;
-      final isToday =
-          a.activityDate.year == today.year &&
-          a.activityDate.month == today.month &&
-          a.activityDate.day == today.day;
-      return isToday;
+
+      // [NEW LOGIC] เช็คว่ากิจกรรม "กำลัง Live อยู่" หรือไม่
+      try {
+        final startParts = a.startTime.split(':');
+        final endParts = a.endTime.split(':');
+
+        final startDt = DateTime(
+          a.activityDate.year,
+          a.activityDate.month,
+          a.activityDate.day,
+          int.parse(startParts[0]),
+          int.parse(startParts[1]),
+        );
+
+        var endDt = DateTime(
+          a.activityDate.year,
+          a.activityDate.month,
+          a.activityDate.day,
+          int.parse(endParts[0]),
+          int.parse(endParts[1]),
+        );
+
+        if (endDt.isBefore(startDt)) {
+          endDt = endDt.add(const Duration(days: 1));
+        }
+
+        // Smart Scan จะแสดงกิจกรรมที่:
+        // 1. เริ่มวันนี้ (ยังไม่ถึงเวลาเริ่มก็แสดง เผื่อเตรียมตัว)
+        // 2. หรือ กิจกรรมที่เริ่มไปแล้ว แต่ยังไม่จบ (Ongoing)
+        final isToday =
+            (a.activityDate.year == now.year &&
+            a.activityDate.month == now.month &&
+            a.activityDate.day == now.day);
+        final isLive = now.isAfter(startDt) && now.isBefore(endDt);
+
+        return isToday || isLive;
+      } catch (e) {
+        return false;
+      }
     }).toList();
   }
 
@@ -185,10 +199,12 @@ class _ActivitiesParticipantsListScreenState
   }
 
   Future<void> _processCheckIn(String empId, String actId) async {
+    // 1. แสดง Loading เล็กๆ หรือ Snackbar บอกว่ากำลังประมวลผล (แทน Dialog ใหญ่)
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text("Processing Check-in..."),
-        duration: Duration(seconds: 1),
+        duration: Duration(milliseconds: 800), // สั้นๆ
+        behavior: SnackBarBehavior.floating,
       ),
     );
 
@@ -205,13 +221,30 @@ class _ActivitiesParticipantsListScreenState
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-        _showResultDialog(
-          true,
-          "Check-in Success!",
-          "${data['emp_name']}\nEarned +${data['points_earned']} pts",
-        );
-        _fetchActivities();
+
+        // [NEW - Continuous Flow]
+        // ใช้ AutoCloseSuccessDialog (เด้งขึ้นมาแล้วหายไปเองใน 1.5 วิ)
+        // ทำให้ Organizer ไม่ต้องกด OK และเตรียมสแกนคนต่อไปได้เลย
+
+        if (mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AutoCloseSuccessDialog(
+              title: "Check-in OK!",
+              subtitle: "${data['emp_name']}",
+              icon: Icons.check_circle,
+              color: Colors.green,
+              duration: const Duration(
+                milliseconds: 1500,
+              ), // 1.5 วินาทีหายไปเอง
+            ),
+          );
+        }
+
+        refreshData(); // รีเฟรชข้อมูลเงียบๆ
       } else {
+        // กรณี Error ยังควรต้องกด OK เพื่อรับทราบปัญหา
         final err = jsonDecode(utf8.decode(response.bodyBytes));
         _showResultDialog(
           false,
@@ -291,7 +324,7 @@ class _ActivitiesParticipantsListScreenState
 
   Map<DateTime, List<_Activity>> _getGroupedActivities(bool isHistory) {
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    // final today = DateTime(now.year, now.month, now.day); // [ลบอันเก่า]
 
     final filteredList = _activities.where((a) {
       if (a.organizerName != _currentOrganizerName) return false;
@@ -300,19 +333,49 @@ class _ActivitiesParticipantsListScreenState
           _query.isEmpty || a.name.toLowerCase().contains(_query.toLowerCase());
       if (!matchesSearch) return false;
 
-      final actDate = DateTime(
-        a.activityDate.year,
-        a.activityDate.month,
-        a.activityDate.day,
-      );
+      // [NEW LOGIC] ใช้ End Time เป็นตัวตัดสิน Active/History
+      DateTime endDt;
+      try {
+        final endParts = a.endTime.split(':');
+        final startParts = a.startTime.split(':'); // ต้องใช้เช็คข้ามวัน
+
+        final startDt = DateTime(
+          a.activityDate.year,
+          a.activityDate.month,
+          a.activityDate.day,
+          int.parse(startParts[0]),
+          int.parse(startParts[1]),
+        );
+
+        endDt = DateTime(
+          a.activityDate.year,
+          a.activityDate.month,
+          a.activityDate.day,
+          int.parse(endParts[0]),
+          int.parse(endParts[1]),
+        );
+
+        if (endDt.isBefore(startDt)) {
+          endDt = endDt.add(const Duration(days: 1));
+        }
+      } catch (e) {
+        endDt = DateTime(
+          a.activityDate.year,
+          a.activityDate.month,
+          a.activityDate.day,
+        ).add(const Duration(days: 1));
+      }
 
       if (!isHistory) {
-        return !actDate.isBefore(today);
+        // Active Tab: ยังไม่จบ (EndTime > Now)
+        return endDt.isAfter(now);
       } else {
-        return actDate.isBefore(today);
+        // History Tab: จบไปแล้ว (EndTime < Now)
+        return endDt.isBefore(now);
       }
     }).toList();
 
+    // ... (ส่วนการ sort และ group เหมือนเดิม) ...
     if (!isHistory) {
       filteredList.sort((a, b) => a.activityDate.compareTo(b.activityDate));
     } else {
@@ -376,7 +439,7 @@ class _ActivitiesParticipantsListScreenState
     // [FIX] ต้องครอบ RefreshIndicator แม้ในกรณี Empty State
     if (dateKeys.isEmpty) {
       return RefreshIndicator(
-        onRefresh: _fetchActivities,
+        onRefresh: refreshData,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           child: SizedBox(
@@ -389,7 +452,7 @@ class _ActivitiesParticipantsListScreenState
 
     return RefreshIndicator(
       // [CHECK] ของเดิมมีแล้ว แต่เช็ค parameters
-      onRefresh: _fetchActivities,
+      onRefresh: refreshData,
       color: const Color(0xFF4A80FF),
       child: ListView.builder(
         physics:

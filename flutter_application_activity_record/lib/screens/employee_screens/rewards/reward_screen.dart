@@ -11,6 +11,7 @@ import '../../../widgets/employee_header.dart';
 import 'package:flutter_application_activity_record/theme/app_colors.dart';
 import 'reward_detail_screen.dart';
 import 'redeemed_detail_screen.dart';
+import 'package:flutter_application_activity_record/widgets/auto_close_success_dialog.dart';
 
 // Enums
 enum SortOption { none, pointsLowHigh, pointsHighLow }
@@ -158,6 +159,7 @@ class _RewardScreenState extends State<RewardScreen>
 
   int _userPoints = 0;
   String _userName = "Loading...";
+  String _pointsExpiryDate = "31/12/2025"; // <-- เพิ่มตัวแปรนี้
   bool _isLoading = true;
 
   List<RewardItem> _allRewards = [];
@@ -267,6 +269,20 @@ class _RewardScreenState extends State<RewardScreen>
       if (profileRes.statusCode == 200) {
         final pData = jsonDecode(utf8.decode(profileRes.bodyBytes));
         _userPoints = pData['TOTAL_POINTS'] ?? 0;
+
+        // [NEW LOGIC] ดึง EXPIRY_DATE จาก API
+        final rawExpiry = pData['EXPIRY_DATE'];
+        if (rawExpiry != null) {
+          try {
+            final dateObj = DateTime.parse(rawExpiry);
+            // Format วันที่ให้เป็น 'd/MM/yyyy' หรือตามที่ต้องการ
+            _pointsExpiryDate = DateFormat('d/MM/yyyy').format(dateObj);
+          } catch (_) {
+            _pointsExpiryDate = "N/A"; // กรณี Format ผิดพลาด
+          }
+        } else {
+          _pointsExpiryDate = "N/A"; // ถ้าไม่มีข้อมูลใน DB
+        }
       }
 
       // 2. Rewards
@@ -313,35 +329,80 @@ class _RewardScreenState extends State<RewardScreen>
   void _onRedeem(RewardItem item) async {
     final prefs = await SharedPreferences.getInstance();
     final empId = prefs.getString('empId') ?? '';
+
+    // แสดง Loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/rewards/redeem'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'emp_id': empId, 'prize_id': item.id}),
       );
+
+      if (mounted) Navigator.pop(context); // ปิด Loading
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         setState(() {
           _userPoints = data['remaining_points'];
-          _tabController.animateTo(1);
-        }); // Auto switch tab
+          _tabController.animateTo(1); // สลับไปหน้า History
+        });
         _fetchInitialData();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Redeem Successful!"),
-            backgroundColor: Colors.green,
-          ),
-        );
+
+        // --- [LOGIC ใหม่] เลือกข้อความตามประเภทรางวัล ---
+        String dialogTitle;
+        String dialogSubtitle;
+        IconData dialogIcon;
+        Color dialogColor;
+
+        // เช็คประเภทรางวัล (Case-insensitive trim)
+        final type = item.prizeType.toUpperCase().trim();
+
+        if (type == 'PRIVILEGE') {
+          // สิทธิพิเศษ: ได้เลยทันที
+          dialogTitle = "Privilege Activated!";
+          dialogSubtitle = "Your privilege is now active.";
+          dialogIcon = Icons.workspace_premium_rounded;
+          dialogColor = Colors.green;
+        } else {
+          // ของชิ้น/ดิจิทัล: ต้องรอ Admin
+          dialogTitle = "Request Submitted";
+          dialogSubtitle = "Waiting for Admin confirmation.";
+          dialogIcon = Icons.hourglass_top_rounded; // ไอคอนนาฬิกาทราย
+          dialogColor = Colors.orange; // สีส้มสื่อถึงการรอ
+        }
+
+        if (mounted) {
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AutoCloseSuccessDialog(
+              title: dialogTitle,
+              subtitle: dialogSubtitle,
+              icon: dialogIcon,
+              color: dialogColor,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
       } else {
         final err = jsonDecode(utf8.decode(response.bodyBytes));
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(err['detail'] ?? "Failed"),
-            backgroundColor: Colors.red,
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(err['detail'] ?? "Failed"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     } catch (e) {
+      if (mounted) Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
       );
@@ -349,26 +410,50 @@ class _RewardScreenState extends State<RewardScreen>
   }
 
   void _onCancelRedeem(RedeemedItem item) async {
-    final prefs = await SharedPreferences.getInstance();
-    final empId = prefs.getString('empId') ?? '';
+    // Confirmation Dialog ยืนยันก่อนยกเลิก (ถ้ายังไม่มี)
+    // หรือถ้ามีแล้วในหน้า Detail ก็ข้ามส่วนนี้ไปได้เลย
+
+    // แสดง Loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final empId = prefs.getString('empId') ?? '';
+
       final response = await http.post(
         Uri.parse('$baseUrl/rewards/cancel'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'emp_id': empId, 'redeem_id': item.id}),
       );
+
+      if (mounted) Navigator.pop(context); // ปิด Loading
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         setState(() => _userPoints = data['remaining_points']);
         _fetchInitialData();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Cancelled & Refunded"),
-            backgroundColor: Colors.orange,
-          ),
-        );
+
+        // [NEW CODE] แสดง Popup ยกเลิกสำเร็จ
+        if (mounted) {
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => const AutoCloseSuccessDialog(
+              title: "Refund Successful",
+              subtitle: "Points have been returned to your wallet.",
+              icon: Icons.replay_circle_filled_rounded, // ไอคอนคืนเงิน/แต้ม
+              color: Colors.orange,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
       }
     } catch (e) {
+      if (mounted) Navigator.pop(context);
       print("Error: $e");
     }
   }
@@ -511,7 +596,7 @@ class _RewardScreenState extends State<RewardScreen>
 
   Widget _buildLoyaltyCard() {
     final pointsText = NumberFormat.decimalPattern().format(_userPoints);
-    final expiryText = "31/12/${DateTime.now().year}";
+    final expiryText = _pointsExpiryDate;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 20.0),
       child: Container(

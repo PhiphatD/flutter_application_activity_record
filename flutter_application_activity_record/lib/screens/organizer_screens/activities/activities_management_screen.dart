@@ -5,7 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
+
 import 'activity_create_screen.dart';
 import 'activity_edit_screen.dart';
 import 'activity_detail_screen.dart';
@@ -31,7 +31,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   List<String> _selectedTypes = [];
   String? _selectedStatus;
   List<String> _availableTypes = [];
-  WebSocketChannel? _channel;
+
   int _filterCompulsoryIndex = 0;
   bool _filterOnlyAvailable = false;
   int _selectedOwnerSegment = 0;
@@ -49,28 +49,6 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
         _searchText = _searchController.text.trim();
       });
     });
-    _connectWebSocket();
-  }
-
-  void _connectWebSocket() {
-    try {
-      final wsUrl = Uri.parse(
-        'ws://numerably-nonevincive-kyong.ngrok-free.dev/ws',
-      );
-      _channel = WebSocketChannel.connect(wsUrl);
-
-      _channel!.stream.listen((message) {
-        // [CHECK] ต้องมี REFRESH_ACTIVITIES อยู่ในนี้
-        if (message == "REFRESH_ACTIVITIES" ||
-            message == "REFRESH_PARTICIPANTS" ||
-            message.toString().contains("CHECKIN_SUCCESS")) {
-          print("⚡ Real-time Update: $message");
-          _fetchActivities();
-        }
-      }, onError: (e) => print("WS Error: $e"));
-    } catch (e) {
-      print("WS Connection Failed: $e");
-    }
   }
 
   Future<void> _loadCurrentUser() async {
@@ -78,10 +56,10 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     setState(() {
       _currentOrgId = prefs.getString('orgId') ?? '';
     });
-    _fetchActivities(); // โหลดกิจกรรมหลังจากได้ ID แล้ว
+    refreshData(); // โหลดกิจกรรมหลังจากได้ ID แล้ว
   }
 
-  Future<void> _fetchActivities() async {
+  Future<void> refreshData() async {
     // [REMOVED] ลบการประกาศ local variable ออก
     final url = Uri.parse('$baseUrl/activities');
 
@@ -257,7 +235,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
           "${data['emp_name']}\nEarned +${data['points_earned']} pts",
         );
         // Refresh List เพื่ออัปเดตตัวเลขผู้เข้าร่วม
-        _fetchActivities();
+        refreshData();
       } else {
         final err = jsonDecode(utf8.decode(response.bodyBytes));
         _showResultDialog(
@@ -337,42 +315,69 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   @override
   void dispose() {
     _searchController.dispose();
-    _channel?.sink.close();
+
     super.dispose();
   }
 
   List<Activity> _filteredActivities() {
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
 
     return _activities.where((a) {
       final isMine = a.orgId == _currentOrgId;
       final ownerMatch = (_selectedOwnerSegment == 0) ? isMine : !isMine;
 
-      final actDate = DateTime(
-        a.activityDate.year,
-        a.activityDate.month,
-        a.activityDate.day,
-      );
+      DateTime actStartDt;
+      DateTime actEndDt;
+
+      try {
+        final startParts = a.startTime.split(':');
+        final endParts = a.endTime.split(':');
+
+        actStartDt = DateTime(
+          a.activityDate.year,
+          a.activityDate.month,
+          a.activityDate.day,
+          int.parse(startParts[0]),
+          int.parse(startParts[1]),
+        );
+
+        actEndDt = DateTime(
+          a.activityDate.year,
+          a.activityDate.month,
+          a.activityDate.day,
+          int.parse(endParts[0]),
+          int.parse(endParts[1]),
+        );
+
+        if (actEndDt.isBefore(actStartDt)) {
+          actEndDt = actEndDt.add(const Duration(days: 1));
+        }
+      } catch (e) {
+        // กรณี Parse เวลาไม่ได้ ให้ใช้เที่ยงคืนของวันถัดไป
+        actEndDt = DateTime(
+          a.activityDate.year,
+          a.activityDate.month,
+          a.activityDate.day,
+        ).add(const Duration(days: 1));
+      }
 
       bool timeMatch;
       if (_selectedTimeFilter == 0) {
-        timeMatch = !actDate.isBefore(today);
+        // Tab "Active" = ยังไม่จบ (เวลาจบ ต้องอยู่หลังเวลาปัจจุบัน)
+        timeMatch = actEndDt.isAfter(now);
       } else {
-        timeMatch = actDate.isBefore(today);
+        // Tab "History" = จบไปแล้ว (เวลาจบ ต้องอยู่ก่อนเวลาปัจจุบัน)
+        timeMatch = actEndDt.isBefore(now);
       }
 
       if (_selectedTypes.isNotEmpty && !_selectedTypes.contains(a.actType)) {
         return false;
       }
-
       if (_selectedStatus != null && a.status != _selectedStatus) {
         return false;
       }
-
       if (_filterCompulsoryIndex == 1 && a.isCompulsory == 0) return false;
       if (_filterCompulsoryIndex == 2 && a.isCompulsory == 1) return false;
-
       if (_filterOnlyAvailable) {
         if (a.maxParticipants > 0 &&
             a.currentParticipants >= a.maxParticipants) {
@@ -700,7 +705,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                 context,
                 MaterialPageRoute(builder: (_) => const CreateActivityScreen()),
               );
-              _fetchActivities();
+              refreshData();
             },
             backgroundColor: const Color(0xFF4A80FF),
             child: const Icon(Icons.add, color: Colors.white),
@@ -767,7 +772,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
 
                 Expanded(
                   child: RefreshIndicator(
-                    onRefresh: _fetchActivities,
+                    onRefresh: refreshData,
                     child: _isLoading
                         ? const Center(child: CircularProgressIndicator())
                         : _buildGroupedList(),
@@ -817,7 +822,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                       builder: (_) => const CreateActivityScreen(),
                     ),
                   );
-                  _fetchActivities();
+                  refreshData();
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF4A80FF),
@@ -842,7 +847,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
               )
             else
               TextButton.icon(
-                onPressed: _fetchActivities,
+                onPressed: refreshData,
                 icon: const Icon(Icons.refresh),
                 label: const Text("Refresh Data"),
               ),
@@ -855,7 +860,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     final dateKeys = groupedMap.keys.toList();
 
     return RefreshIndicator(
-      onRefresh: _fetchActivities,
+      onRefresh: refreshData,
       child: ListView.builder(
         padding: const EdgeInsets.only(
           left: 20.0,
@@ -956,7 +961,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
                     builder: (context) => EditActivityScreen(actId: a.actId),
                   ),
                 );
-                if (result == true) _fetchActivities();
+                if (result == true) refreshData();
               },
               onDelete: () async {
                 final ok = await showDialog<bool>(

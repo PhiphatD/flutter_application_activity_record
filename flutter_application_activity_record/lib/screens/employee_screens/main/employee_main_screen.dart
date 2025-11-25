@@ -28,6 +28,82 @@ class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
     _initRealtimeService();
   }
 
+  void _showTopToast(String message) {
+    final overlay = Overlay.of(context);
+    late OverlayEntry overlayEntry;
+
+    overlayEntry = OverlayEntry(
+      builder: (context) => Positioned(
+        top:
+            MediaQuery.of(context).padding.top +
+            10, // อยู่ใต้ Status Bar นิดหน่อย
+        left: 20,
+        right: 20,
+        child: Material(
+          color: Colors.transparent,
+          child: TweenAnimationBuilder<double>(
+            tween: Tween(begin: -100.0, end: 0.0), // Animation เลื่อนลงมา
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeOutBack,
+            builder: (context, value, child) {
+              return Transform.translate(
+                offset: Offset(0, value),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.9),
+                    borderRadius: BorderRadius.circular(30), // ทรงแคปซูล
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.notifications_active,
+                        color: Color(0xFFFFD700),
+                        size: 20,
+                      ), // กระดิ่งสีทอง
+                      const SizedBox(width: 12),
+                      Flexible(
+                        child: Text(
+                          message,
+                          style: GoogleFonts.poppins(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    // ใส่ Overlay เข้าไปในหน้าจอ
+    overlay.insert(overlayEntry);
+
+    // ตั้งเวลาลบออก (3 วินาที)
+    Future.delayed(const Duration(seconds: 3), () {
+      overlayEntry.remove();
+    });
+  }
+
   Future<void> _initRealtimeService() async {
     final prefs = await SharedPreferences.getInstance();
     _myEmpId = prefs.getString('empId') ?? '';
@@ -39,7 +115,7 @@ class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
       final wsService = WebSocketService();
       wsService.connect(_myEmpId);
 
-      wsService.events.listen((event) {
+      wsService.events.listen((event) async {
         final String type = event['event'];
         final dynamic data = event['data'];
 
@@ -48,8 +124,17 @@ class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
         // [LOGIC] อัปเดตแจ้งเตือน
         if (type == "REFRESH_NOTIFICATIONS") {
           print("✨ Triggering Badge Update...");
+
+          // 1. อัปเดตตัวเลขทันที (เงียบๆ)
           NotificationController().fetchUnreadCount(role: "Employee");
-          _showInAppNotification("You have new notifications 🔔");
+
+          // 2. หน่วงเวลา 3.5 วินาที (รอให้ AutoCloseDialog 3 วิ ปิดไปก่อน)
+          await Future.delayed(const Duration(milliseconds: 3500));
+
+          // 3. แสดง Toast ด้านบน
+          if (mounted) {
+            _showTopToast("You have new notifications 🔔");
+          }
         }
 
         // [LOGIC] อัปเดตหน้า Activity
@@ -67,26 +152,6 @@ class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
         }
       });
     }
-  }
-
-  void _showInAppNotification(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.info_outline, color: Colors.white),
-            const SizedBox(width: 12),
-            Text(message, style: GoogleFonts.poppins()),
-          ],
-        ),
-        backgroundColor: Colors.black87,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(20),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        duration: const Duration(seconds: 3),
-      ),
-    );
   }
 
   // ... (ฟังก์ชัน _showCheckInSuccessDialog, _onItemTapped และ build เหมือนเดิม)

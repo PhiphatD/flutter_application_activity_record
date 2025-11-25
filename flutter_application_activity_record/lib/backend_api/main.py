@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from passlib.context import CryptContext
 from datetime import date, datetime, time, timedelta
 import models
-from database import engine, get_db
+from database import engine, get_db, SessionLocal
 import random
 import string
 import smtplib 
@@ -19,6 +19,9 @@ import shutil
 import threading
 import time as time_module
 import schedule
+from contextlib import asynccontextmanager
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 
 # [SETUP] Create static folder if not exists
 if not os.path.exists("static"):
@@ -391,24 +394,21 @@ def count_target_audience(req: TargetCountRequest, db: Session = Depends(get_db)
     
 # --- Helper Functions ---
 
-def check_upcoming_notifications():
+async def check_upcoming_notifications():
     """ รันทุก 1 นาที เพื่อเช็คการแจ้งเตือนระยะสั้น (1 ชม.) """
+    print("⏱️ Running Upcoming Check...")
     db = SessionLocal()
     try:
         now = datetime.now()
-        # ช่วงเวลาเป้าหมาย: อีก 60 นาทีข้างหน้า (บวกลบ 1 นาทีกันพลาด)
         target_time_start = now + timedelta(minutes=59)
         target_time_end = now + timedelta(minutes=61)
 
-        # หา Session ที่จะเริ่มในช่วงเวลานั้น
-        # หมายเหตุ: ต้องเช็ควันที่และเวลาให้ตรงกัน
-        upcoming_sessions = db.query(models.ActivitySession).all() # ดึงมากรอง (หรือเขียน Query กรองวันที่+เวลา)
+        upcoming_sessions = db.query(models.ActivitySession).all()
         
+        count_sent = 0
         for sess in upcoming_sessions:
-            # รวม Date + Time
             sess_start_dt = datetime.combine(sess.SESSION_DATE, sess.START_TIME)
             
-            # ถ้าเวลาเริ่ม อยู่ในช่วง 1 ชั่วโมงข้างหน้า
             if target_time_start <= sess_start_dt <= target_time_end:
                 regs = db.query(models.Registration).filter(
                     models.Registration.SESSION_ID == sess.SESSION_ID
@@ -416,18 +416,24 @@ def check_upcoming_notifications():
                 
                 act = sess.activity
                 for reg in regs:
-                    # เช็คว่าเคยส่งเตือนหรือยัง (ป้องกัน Spam) - ในที่นี้ข้าม Logic เช็คซ้ำไปก่อน
+                    # 1. สร้าง Notif ลง DB
                     create_notification_internal(
                         db,
                         emp_id=reg.EMP_ID,
                         title="⏳ อีก 1 ชั่วโมงกิจกรรมจะเริ่ม",
                         message=f"เตรียมตัวให้พร้อม! '{act.ACT_NAME}' จะเริ่มเวลา {sess.START_TIME.strftime('%H:%M')} น.",
                         notif_type="Activity",
-                        target_role="Employee",
                         ref_id=act.ACT_ID,
                         route_path="/activity_detail"
                     )
+                    # 2. [NEW] ยิง Socket หาพนักงานคนนั้นทันที!
+                    await manager.send_personal_message("REFRESH_NOTIFICATIONS", reg.EMP_ID)
+                    count_sent += 1
+                    
         db.commit()
+        if count_sent > 0:
+            print(f"✅ Sent upcoming reminders to {count_sent} users.")
+            
     except Exception as e:
         print(f"❌ Hourly Check Error: {e}")
         db.rollback()
@@ -493,22 +499,107 @@ def verify_password(plain_password, hashed_password):
 def generate_id(prefix, length=5):
     return prefix + ''.join(random.choices(string.digits, k=length-1))
 
-def check_daily_notifications():
-    """ รันทุก 10 วินาที เพื่อแจ้งเตือนกิจกรรมและแต้มหมดอายุ """
+
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 1. สร้าง Scheduler
+    scheduler = AsyncIOScheduler()
+    
+    # 2. ตั้งเวลา (Cron Job / Interval)
+    # รันทุกๆ 1 นาที (เพื่อเทส) หรือตามต้องการ
+    scheduler.add_job(check_upcoming_notifications, 'interval', minutes=1)
+    
+    # รันทุกวันตอน 8 โมงเช้า
+    scheduler.add_job(check_daily_notifications, 'cron', hour=8, minute=0)
+    
+    # 3. เริ่มทำงาน
+    scheduler.start()
+    print("🚀 Scheduler Started (AsyncIO Mode)")
+    
+    yield # รัน Server ต่อไป...
+    
+    # 4. (Optional) ตอนปิด Server
+    # scheduler.shutdown()
+
+# [APPLY] ผูก Lifespan เข้ากับ App
+app = FastAPI(lifespan=lifespan)
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+async def check_daily_notifications():
+    """ รันทุกวัน 08:00 เพื่อแจ้งเตือนล่วงหน้า 1 วัน และแต้มหมดอายุ """
+    print("⏰ Running Daily Check...")
     db = SessionLocal()
     try:
-        print("⏰ Running Daily Notification Check...")
         today = date.today()
         tomorrow = today + timedelta(days=1)
-        next_month = today + timedelta(days=30)
+        yesterday = today - timedelta(days=1)
 
-        # [LOGIC 4] Upcoming Event Reminder (เตือนล่วงหน้า 1 วัน)
+        # ... (Logic เดิม: เตือน Employee กิจกรรมพรุ่งนี้ / แต้มหมดอายุ) ...
+
+        # --- [NEW] Organizer: Low Registration Alert (เตือนกิจกรรมพรุ่งนี้ที่คนน้อย) ---
+        upcoming_acts = db.query(models.Activity).join(models.ActivitySession).filter(
+            models.ActivitySession.SESSION_DATE == tomorrow,
+            models.Activity.ACT_STATUS == 'Open'
+        ).distinct().all()
+
+        for act in upcoming_acts:
+            # ถ้าคนลงทะเบียนน้อยกว่า 50%
+            current = db.query(models.Registration).join(models.ActivitySession).filter(
+                models.ActivitySession.ACT_ID == act.ACT_ID
+            ).count()
+            
+            max_p = act.ACT_MAX_PARTICIPANTS
+            if max_p > 0 and (current / max_p) < 0.5:
+                org_emp_id = act.organizer.EMP_ID if act.organizer else None
+                if org_emp_id:
+                     create_notification_internal(
+                        db,
+                        emp_id=org_emp_id,
+                        title="⚠️ ยอดลงทะเบียนน้อยกว่าเกณฑ์",
+                        message=f"กิจกรรม '{act.ACT_NAME}' เริ่มพรุ่งนี้ แต่มีคนลงทะเบียนเพียง {current}/{max_p} คน โปรดเร่งประชาสัมพันธ์",
+                        notif_type="Alert",
+                        target_role="Organizer",
+                        ref_id=act.ACT_ID,
+                        route_path="/manage"
+                    )
+                     await manager.send_personal_message("REFRESH_NOTIFICATIONS", org_emp_id)
+
+        # --- [NEW] Organizer: Event Day Summary (สรุปกิจกรรมเมื่อวาน) ---
+        ended_acts = db.query(models.Activity).join(models.ActivitySession).filter(
+            models.ActivitySession.SESSION_DATE == yesterday
+        ).distinct().all()
+
+        for act in ended_acts:
+            # นับยอด Register vs Check-in
+            sessions = db.query(models.ActivitySession).filter(models.ActivitySession.ACT_ID == act.ACT_ID).all()
+            sess_ids = [s.SESSION_ID for s in sessions]
+            
+            reg_count = db.query(models.Registration).filter(models.Registration.SESSION_ID.in_(sess_ids)).count()
+            checkin_count = db.query(models.CheckIn).filter(models.CheckIn.SESSION_ID.in_(sess_ids)).count()
+
+            org_emp_id = act.organizer.EMP_ID if act.organizer else None
+            if org_emp_id:
+                create_notification_internal(
+                    db,
+                    emp_id=org_emp_id,
+                    title="📊 สรุปผลกิจกรรม",
+                    message=f"กิจกรรม '{act.ACT_NAME}' จบแล้ว\nลงทะเบียน: {reg_count} | เช็คอิน: {checkin_count} คน",
+                    notif_type="System",
+                    target_role="Organizer",
+                    ref_id=act.ACT_ID,
+                    route_path="/participants"
+                )
+                await manager.send_personal_message("REFRESH_NOTIFICATIONS", org_emp_id)
+
+        # --- ส่วนที่ 1: เตือนกิจกรรมพรุ่งนี้ ---
         upcoming_sessions = db.query(models.ActivitySession).filter(
             models.ActivitySession.SESSION_DATE == tomorrow
         ).all()
 
         for sess in upcoming_sessions:
-            # หาคนที่ลงทะเบียนไว้
             regs = db.query(models.Registration).filter(
                 models.Registration.SESSION_ID == sess.SESSION_ID
             ).all()
@@ -521,12 +612,13 @@ def check_daily_notifications():
                     title="🔔 กิจกรรมจะเริ่มพรุ่งนี้",
                     message=f"อย่าลืม! กิจกรรม '{act.ACT_NAME}' จะเริ่มเวลา {sess.START_TIME.strftime('%H:%M')}",
                     notif_type="Activity",
-                    target_role="Employee",
                     ref_id=act.ACT_ID,
                     route_path="/activity_detail"
                 )
+                # [NEW] ยิง Socket
+                await manager.send_personal_message("REFRESH_NOTIFICATIONS", reg.EMP_ID)
 
-        # [LOGIC 5] Points Expiry Warning (เตือนก่อนหมดอายุ 30 วัน)
+        # --- ส่วนที่ 2: เตือนแต้มหมดอายุ ---
         # สมมติ Policy ตัดทุกสิ้นปี
         this_year_end = date(today.year, 12, 31)
         days_left = (this_year_end - today).days
@@ -742,6 +834,19 @@ def register_org(req: RegisterRequest, db: Session = Depends(get_db)):
         db.rollback()
         print(f"Error Registering: {e}")
         raise HTTPException(status_code=500, detail=f"เกิดข้อผิดพลาด: {str(e)}")
+    
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+
+@app.post("/debug/fire-test")
+async def fire_test_notification(emp_id: str):
+    print(f"🔫 Pow! Firing test notification to {emp_id}...")
+    # ยิงสัญญาณเข้าเครื่อง Employee คนนั้นทันที
+    await manager.send_personal_message("REFRESH_NOTIFICATIONS", emp_id)
+    return {"status": "Fired!"}
+
 
 @app.post("/forgot-password")
 def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
@@ -799,8 +904,14 @@ def get_employee_profile(emp_id: str, db: Session = Depends(get_db)):
         comp_name = user.company.COMPANY_NAME
 
     current_points = 0
+    # [NEW] เพิ่มตัวแปรสำหรับวันหมดอายุ
+    expiry_date = None
+
     if user.points:
         current_points = user.points.TOTAL_POINTS
+        # [NEW LOGIC] ดึง EXPIRY_DATE และแปลงเป็น ISO String
+        if user.points.EXPIRY_DATE:
+            expiry_date = user.points.EXPIRY_DATE.isoformat() 
 
     return {
         "EMP_ID": user.EMP_ID,
@@ -812,7 +923,8 @@ def get_employee_profile(emp_id: str, db: Session = Depends(get_db)):
         "EMP_EMAIL": user.EMP_EMAIL,
         "EMP_PHONE": user.EMP_PHONE,
         "EMP_STARTDATE": user.EMP_STARTDATE,
-        "TOTAL_POINTS": current_points
+        "TOTAL_POINTS": current_points,
+        "EXPIRY_DATE": expiry_date # <-- ส่งค่านี้ออกไป
     }
 
 @app.post("/admin/import_employees") 
@@ -919,7 +1031,8 @@ async def import_employees(
 @app.get("/activities", response_model=list[ActivityResponse])
 def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = Depends(get_db)):
     today = date.today()
-    
+    now = datetime.now()
+
     requester = None
     req_dept = ""
     req_pos = ""
@@ -940,7 +1053,9 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
 
     query = db.query(models.Activity).join(models.ActivitySession)
     if mode == "future":
-        query = query.filter(models.ActivitySession.SESSION_DATE >= today)
+        # [FIX] ดึงย้อนหลัง 1 วัน เผื่อมีกิจกรรมข้ามคืนที่ยังไม่จบ
+        yesterday = today - timedelta(days=1)
+        query = query.filter(models.ActivitySession.SESSION_DATE >= yesterday)
         
     activities = query.distinct().all()
     
@@ -1010,13 +1125,30 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
         end_time = "-"
 
         if act.sessions and len(act.sessions) > 0:
-            sorted_sessions = sorted(act.sessions, key=lambda x: x.SESSION_DATE)
+            # เรียงตามเวลา
+            sorted_sessions = sorted(act.sessions, key=lambda x: (x.SESSION_DATE, x.START_TIME))
+            
+            target_session = None
+
             if mode == "future":
-                future_sessions = [s for s in sorted_sessions if s.SESSION_DATE >= today]
-                if future_sessions:
-                    target_session = future_sessions[0]
+                # [NEW LOGIC] หา Session ที่ "ยังไม่จบ" (End Time > Now)
+                valid_sessions = []
+                for s in sorted_sessions:
+                    s_start_dt = datetime.combine(s.SESSION_DATE, s.START_TIME)
+                    s_end_dt = datetime.combine(s.SESSION_DATE, s.END_TIME)
+                    
+                    # แก้บั๊กข้ามคืน (ถ้าจบตี 2 ของอีกวัน)
+                    if s.END_TIME <= s.START_TIME:
+                        s_end_dt += timedelta(days=1)
+                    
+                    # เงื่อนไข: กิจกรรมต้องยังไม่จบ (เวลาจบ ต้องอยู่หลังเวลาปัจจุบัน)
+                    if s_end_dt > now:
+                        valid_sessions.append(s)
+                
+                if valid_sessions:
+                    target_session = valid_sessions[0] # เอาอันแรกที่ยังไม่จบ
                 else:
-                    continue 
+                    continue # ถ้าจบหมดแล้ว ก็ข้ามไปเลย (ไม่แสดงใน Feed)
             else:
                 target_session = sorted_sessions[0]
 
@@ -1063,10 +1195,15 @@ def get_activity_detail(
     if not act:
         raise HTTPException(status_code=404, detail="Activity not found")
     
-    current_count = db.query(models.Registration)\
-        .join(models.ActivitySession, models.Registration.SESSION_ID == models.ActivitySession.SESSION_ID)\
-        .filter(models.ActivitySession.ACT_ID == act.ACT_ID)\
-        .count()
+    current_count = 0
+    
+    if act.ACT_ISCOMPULSORY:
+        current_count = count_target_employees(db, act.ACT_TARGET_CRITERIA)
+    else:
+        current_count = db.query(models.Registration)\
+            .join(models.ActivitySession, models.Registration.SESSION_ID == models.ActivitySession.SESSION_ID)\
+            .filter(models.ActivitySession.ACT_ID == act.ACT_ID)\
+            .count()
 
     is_fav = False
     if emp_id:
@@ -1601,16 +1738,19 @@ def get_activity_participants(act_id: str, db: Session = Depends(get_db)):
 
 @app.post("/checkin")
 async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
+    # 1. ดึงข้อมูลพนักงาน
     employee = db.query(models.Employee).filter(models.Employee.EMP_ID == req.emp_id).first()
     if not employee:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลพนักงาน")
 
+    # 2. ดึงข้อมูลกิจกรรม
     activity = db.query(models.Activity).filter(models.Activity.ACT_ID == req.act_id).first()
     if not activity:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลกิจกรรม")
 
     now = datetime.now()
     
+    # 3. ดึง Session ของวันนี้
     sessions = db.query(models.ActivitySession).filter(
         models.ActivitySession.ACT_ID == req.act_id,
         models.ActivitySession.SESSION_DATE == now.date()
@@ -1622,17 +1762,22 @@ async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
     target_session = None
     time_error_message = ""
     
+    # 4. วนลูปหา Session (พร้อมแก้ Midnight Bug)
     for sess in sessions:
         start_dt = datetime.combine(sess.SESSION_DATE, sess.START_TIME)
         end_dt = datetime.combine(sess.SESSION_DATE, sess.END_TIME)
         
+        # แก้บั๊กข้ามคืน
+        if sess.END_TIME <= sess.START_TIME:
+            end_dt += timedelta(days=1)
+
         window_open = start_dt - timedelta(hours=1)
         
         if activity.ACT_ISCOMPULSORY:
             window_close = start_dt + timedelta(minutes=30)
             condition_text = "ภายใน 30 นาทีแรก"
         else:
-            window_close = end_dt
+            window_close = end_dt 
             condition_text = "ก่อนกิจกรรมจบ"
             
         if window_open <= now <= window_close:
@@ -1644,26 +1789,24 @@ async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
     if not target_session:
          raise HTTPException(status_code=400, detail=time_error_message or "ไม่อยู่ในช่วงเวลากิจกรรม")
 
+    # 5. ตรวจสอบการลงทะเบียน
     reg = db.query(models.Registration).filter(
         models.Registration.EMP_ID == req.emp_id,
         models.Registration.SESSION_ID == target_session.SESSION_ID
     ).first()
     
-    # 2. [NEW LOGIC] ตรวจสอบสิทธิ์การเข้าร่วม
+    # 6. ตรวจสอบสิทธิ์
     is_authorized = False
-    
     if reg:
-        # กรณี A: ลงทะเบียนมาแล้ว -> ผ่าน
         is_authorized = True
     elif activity.ACT_ISCOMPULSORY:
-        # กรณี B: ยังไม่ลงทะเบียน แต่เป็นกิจกรรมบังคับ -> เช็ค Target
         if check_is_target(activity, employee):
             is_authorized = True
             
     if not is_authorized:
         raise HTTPException(status_code=400, detail="พนักงานยังไม่ได้ลงทะเบียน หรือไม่อยู่ในกลุ่มเป้าหมาย")
 
-    # 3. ตรวจสอบว่าเช็คอินซ้ำไหม (เหมือนเดิม)
+    # 7. ตรวจสอบเช็คอินซ้ำ
     existing_checkin = db.query(models.CheckIn).filter(
         models.CheckIn.EMP_ID == req.emp_id,
         models.CheckIn.SESSION_ID == target_session.SESSION_ID
@@ -1673,6 +1816,7 @@ async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="พนักงานเช็คอินเรียบร้อยแล้ว")
 
     try:
+        # 8. บันทึกข้อมูล
         new_checkin_id = generate_id("CI", 8)
         points_to_give = activity.ACT_POINT
         
@@ -1705,7 +1849,7 @@ async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
         )
         db.add(new_txn)
         
-        # --- [INJECT NOTIFICATION] ---
+        # 11. สร้าง Notification ลง DB
         create_notification_internal(
             db,
             emp_id=req.emp_id,
@@ -1713,15 +1857,21 @@ async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
             message=f"ยินดีด้วย! คุณได้รับ {points_to_give} คะแนนจากกิจกรรม '{activity.ACT_NAME}'",
             notif_type="System",
             ref_id=req.act_id,
-            route_path="/profile" # กดแล้วไปดูแต้ม
+            route_path="/profile"
         )
-        # -----------------------------
         
         db.commit()
         
-        await manager.broadcast(f"CHECKIN_SUCCESS|{req.emp_id}|{activity.ACT_NAME}|{req.scanned_by}")
+        # 12. ส่งสัญญาณ Real-time
         
+        # [FIXED] เพิ่มบรรทัดนี้: แจ้งเตือน Employee ว่ามี Notification ใหม่ (เพื่อให้เด้ง Toast / Badge)
+        await manager.send_personal_message("REFRESH_NOTIFICATIONS", req.emp_id)
+        
+        # แจ้งเตือน Organizer (เพื่อให้ List อัปเดต)
         await manager.broadcast("REFRESH_PARTICIPANTS")
+        
+        # แจ้งเตือน Employee (สำหรับ Logic หน้า Checkin Success)
+        await manager.broadcast(f"CHECKIN_SUCCESS|{req.emp_id}|{activity.ACT_NAME}|{req.scanned_by}")
         
         return {
             "status": "success",
@@ -1741,14 +1891,15 @@ async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
 
 @app.get("/my-activities/{emp_id}", response_model=list[MyActivityResponse])
 def get_my_upcoming_activities(emp_id: str, db: Session = Depends(get_db)):
+    # [NEW] ใช้เวลาปัจจุบันแบบละเอียด
+    now = datetime.now()
     today = date.today()
-    
+    yesterday = today - timedelta(days=1)
     # 1. ดึงข้อมูลพนักงาน
     employee = db.query(models.Employee).filter(models.Employee.EMP_ID == emp_id).first()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
         
-    # เตรียมข้อมูลพนักงานเพื่อใช้เทียบเงื่อนไข (Trim ช่องว่างเพื่อความชัวร์)
     emp_dept_name = employee.department.DEP_NAME.strip() if employee.department else ""
     emp_position = employee.EMP_POSITION.strip()
     
@@ -1765,16 +1916,24 @@ def get_my_upcoming_activities(emp_id: str, db: Session = Depends(get_db)):
         (models.CheckIn.EMP_ID == models.Registration.EMP_ID)
     ).filter(
         models.Registration.EMP_ID == emp_id,
-        models.ActivitySession.SESSION_DATE >= today,
+        # [FIXED] เปลี่ยนจาก >= today เป็น >= yesterday
+        models.ActivitySession.SESSION_DATE >= yesterday, 
         models.CheckIn.CHECKIN_ID == None  # ยังไม่เช็คอิน
     ).all()
 
-    # เก็บ ID กิจกรรมที่ลงแล้วไว้กันซ้ำ
     registered_act_ids = {act.ACT_ID for _, _, act in registered_acts}
     output = []
 
-    # เพิ่มกิจกรรมที่ลงทะเบียนแล้วเข้า List
     for reg, sess, act in registered_acts:
+        # [NEW LOGIC] เช็คเวลาจบแบบละเอียด (ตัดกิจกรรมที่จบไปแล้วออก)
+        sess_end_dt = datetime.combine(sess.SESSION_DATE, sess.END_TIME)
+        if sess.END_TIME <= sess.START_TIME:
+             sess_end_dt += timedelta(days=1) # แก้บั๊กข้ามคืน
+             
+        # ถ้าเวลาปัจจุบัน เลยเวลาจบไปแล้ว -> ไม่เอามาแสดงใน Upcoming
+        if now > sess_end_dt:
+            continue
+
         output.append({
             "actId": act.ACT_ID,
             "actType": act.ACT_TYPE,
@@ -1789,63 +1948,57 @@ def get_my_upcoming_activities(emp_id: str, db: Session = Depends(get_db)):
             "point": act.ACT_POINT
         })
 
-    # 3. [CORE FIX] ดึงกิจกรรม "บังคับ" (Compulsory) ตาม Target
+    # 3. ดึงกิจกรรม "บังคับ" (Compulsory) ที่ยังไม่จบ
     compulsory_acts = db.query(models.Activity).join(models.ActivitySession).filter(
-        models.Activity.ACT_ISCOMPULSORY == True,        # ต้องเป็นกิจกรรมบังคับ
-        models.Activity.ACT_STATUS == 'Open',            # ต้องสถานะ Open
-        models.ActivitySession.SESSION_DATE >= today     # ต้องยังไม่จบ
+        models.Activity.ACT_ISCOMPULSORY == True,
+        models.Activity.ACT_STATUS == 'Open',
+        # [FIXED] เปลี่ยนจาก >= today เป็น >= yesterday เช่นกัน
+        models.ActivitySession.SESSION_DATE >= yesterday 
     ).distinct().all()
 
     for act in compulsory_acts:
-        # ถ้ากิจกรรมนี้ลงทะเบียนไปแล้ว ข้ามไปเลย (จะได้ไม่โชว์ซ้ำ)
         if act.ACT_ID in registered_act_ids:
             continue 
             
-        # --- LOGIC การเช็ค Target Criteria ---
+        # --- Target Checking ---
         is_target = False
-        
         if not act.ACT_TARGET_CRITERIA:
-            # ถ้าไม่มี Criteria แปลว่า "บังคับทุกคน"
             is_target = True
         else:
             try:
-                # แปลง JSON String เป็น Dictionary
                 criteria = json.loads(act.ACT_TARGET_CRITERIA)
                 target_type = criteria.get('type', 'all')
                 
                 if target_type == 'all':
                     is_target = True
                 elif target_type == 'specific':
-                    # 2. ดึง List ออกมา (ใช้ .get([], []) เพื่อกัน Error กรณีไม่มี key)
                     target_depts = criteria.get('departments', [])
                     target_positions = criteria.get('positions', [])
 
-                    # 3. เทียบเงื่อนไข (เพิ่มการ .strip() เพื่อตัดช่องว่าง)
-                    # เงื่อนไข: ถ้าแผนกตรง หรือ ตำแหน่งตรง อย่างใดอย่างหนึ่ง
-                    
-                    # ตรวจสอบแผนก
-                    if target_depts:
-                        # แปลงเป็น set เพื่อความเร็วในการค้นหา
-                        if emp_dept_name.strip() in [d.strip() for d in target_depts]:
-                            is_target = True
-                    
-                    # ตรวจสอบตำแหน่ง (เช็คต่อถ้ายังไม่ผ่านเงื่อนไขแรก)
+                    if target_depts and emp_dept_name.strip() in [d.strip() for d in target_depts]:
+                        is_target = True
                     if not is_target and target_positions:
                         if emp_position.strip() in [p.strip() for p in target_positions]:
                             is_target = True
-                            
-            except Exception as e:
-                print(f"⚠️ Error parsing criteria for Act {act.ACT_ID}: {e}")
-                # Fallback: ถ้า JSON พัง ให้แสดงไว้ก่อนเพื่อความปลอดภัย (ดีกว่าไม่แสดงงานบังคับ)
+            except:
                 is_target = True
 
-        # ถ้าตรงเงื่อนไข ให้ดึงรอบที่ยังไม่จบมาแสดง
         if is_target:
-            future_sessions = [s for s in act.sessions if s.SESSION_DATE >= today and s.SESSION_STATUS == 'Open']
-            if not future_sessions: continue
+            # หา Session ที่ยังไม่จบ
+            valid_sessions = []
+            for s in act.sessions:
+                 s_end_dt = datetime.combine(s.SESSION_DATE, s.END_TIME)
+                 if s.END_TIME <= s.START_TIME:
+                     s_end_dt += timedelta(days=1)
+                 
+                 # เอาเฉพาะรอบที่ยังไม่หมดเวลา
+                 if s_end_dt >= now and s.SESSION_STATUS == 'Open':
+                     valid_sessions.append(s)
+            
+            if not valid_sessions: continue
             
             # เลือกรอบที่เร็วที่สุด
-            target_session = sorted(future_sessions, key=lambda x: (x.SESSION_DATE, x.START_TIME))[0]
+            target_session = sorted(valid_sessions, key=lambda x: (x.SESSION_DATE, x.START_TIME))[0]
             
             output.append({
                 "actId": act.ACT_ID,
@@ -1855,18 +2008,14 @@ def get_my_upcoming_activities(emp_id: str, db: Session = Depends(get_db)):
                 "activityDate": target_session.SESSION_DATE,
                 "startTime": target_session.START_TIME.strftime("%H:%M"),
                 "endTime": target_session.END_TIME.strftime("%H:%M"),
-                "status": "Auto-Added", # สถานะพิเศษ ให้รู้ว่าระบบดึงมาให้เอง
+                "status": "Auto-Added",
                 "sessionId": target_session.SESSION_ID,
                 "isCompulsory": True,
                 "point": act.ACT_POINT
             })
         
-    # เรียงลำดับตามวันที่และเวลา
     output.sort(key=lambda x: (x['activityDate'], x['startTime']))
-    
-    # ส่งกลับสูงสุด 5-10 รายการ (Pagination แบบง่าย)
     return output[:10]
-
 @app.post("/favorites/toggle")
 def toggle_favorite(req: ToggleFavoriteRequest, db: Session = Depends(get_db)):
     existing_fav = db.query(models.Favorite).filter(
@@ -1894,11 +2043,12 @@ def toggle_favorite(req: ToggleFavoriteRequest, db: Session = Depends(get_db)):
 def get_user_favorites(emp_id: str, db: Session = Depends(get_db)):
     favs = db.query(models.Favorite.ACT_ID).filter(models.Favorite.EMP_ID == emp_id).all()
     return [f[0] for f in favs]
+
 @app.get("/my-registrations/{emp_id}", response_model=list[MyActivityResponse])
 def get_my_registrations(emp_id: str, db: Session = Depends(get_db)):
-    today = date.today()
+    now = datetime.now() # ใช้เวลาปัจจุบันแบบละเอียด
     
-    # 1. ดึงข้อมูลพนักงาน (เพื่อเอาไว้เช็ค Target)
+    # 1. ดึงข้อมูลพนักงาน
     employee = db.query(models.Employee).filter(models.Employee.EMP_ID == emp_id).first()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -1907,20 +2057,28 @@ def get_my_registrations(emp_id: str, db: Session = Depends(get_db)):
     emp_dept_name = employee.department.DEP_NAME.strip() if employee.department else ""
     emp_position = employee.EMP_POSITION.strip()
     
-    # 2. ดึงรายการที่ "ลงทะเบียนแล้ว" (จากตาราง Registration ตามปกติ)
+    # 2. ดึงรายการที่ "ลงทะเบียนแล้ว"
     regs = db.query(models.Registration).filter(models.Registration.EMP_ID == emp_id).all()
     
     output = []
     registered_act_ids = set() # เก็บ ID ไว้กันซ้ำ
 
     for r in regs:
+        # --- [ส่วนที่ต้องมี] ดึงข้อมูล Session และ Activity ก่อน ---
         sess = db.query(models.ActivitySession).filter(models.ActivitySession.SESSION_ID == r.SESSION_ID).first()
         if not sess: continue
         
         act = db.query(models.Activity).filter(models.Activity.ACT_ID == sess.ACT_ID).first()
         if not act: continue
+        # -----------------------------------------------------
         
         registered_act_ids.add(act.ACT_ID)
+
+        # [NEW LOGIC] สร้าง DateTime ของเวลาจบกิจกรรม เพื่อเช็ค Missed
+        # รองรับกรณีเวลาจบข้ามวัน (ถ้า End < Start ให้บวก 1 วัน)
+        sess_end_dt = datetime.combine(sess.SESSION_DATE, sess.END_TIME)
+        if sess.END_TIME <= sess.START_TIME:
+             sess_end_dt += timedelta(days=1)
 
         checkin = db.query(models.CheckIn).filter(
             models.CheckIn.EMP_ID == emp_id, 
@@ -1928,10 +2086,11 @@ def get_my_registrations(emp_id: str, db: Session = Depends(get_db)):
         ).first()
         
         status = "Upcoming"
+        
         if checkin:
             status = "Joined"
-        elif sess.SESSION_DATE < today:
-            status = "Missed"
+        elif now > sess_end_dt: # เช็คเวลาปัจจุบันเทียบกับเวลาจบ
+            status = "Missed"   # ถ้าเลยเวลาจบแล้ว และยังไม่เช็คอิน = Missed
         
         output.append({
             "actId": act.ACT_ID,
@@ -1947,23 +2106,20 @@ def get_my_registrations(emp_id: str, db: Session = Depends(get_db)):
             "point": act.ACT_POINT
         })
 
-    # 3. [NEW LOGIC] ดึงกิจกรรมบังคับ (Compulsory) ที่ "ยังไม่ได้ลงทะเบียน" มาแทรก
-    # ต้องเช็ค Target Criteria ด้วย เพื่อให้ขึ้นเฉพาะคนที่มีสิทธิ์
-    
+    # 3. ดึงกิจกรรมบังคับ (Compulsory) ที่ "ยังไม่ได้ลงทะเบียน"
     compulsory_acts = db.query(models.Activity).filter(
         models.Activity.ACT_ISCOMPULSORY == True,
         models.Activity.ACT_STATUS == 'Open'
     ).all()
 
     for act in compulsory_acts:
-        # ถ้ามีในรายการลงทะเบียนแล้ว ให้ข้าม (จะได้ไม่โชว์ซ้ำ)
         if act.ACT_ID in registered_act_ids:
             continue
 
-        # --- Target Checking Logic (Robust Version) ---
+        # --- Target Checking Logic ---
         is_target = False
         if not act.ACT_TARGET_CRITERIA:
-            is_target = True # ถ้าไม่ระบุ แปลว่าบังคับทุกคน
+            is_target = True
         else:
             try:
                 criteria = json.loads(act.ACT_TARGET_CRITERIA)
@@ -1975,36 +2131,41 @@ def get_my_registrations(emp_id: str, db: Session = Depends(get_db)):
                     target_depts = criteria.get('departments', [])
                     target_positions = criteria.get('positions', [])
                     
-                    # เช็คแผนก (ใช้ strip ตัดช่องว่าง)
                     if target_depts and emp_dept_name in [d.strip() for d in target_depts]:
                         is_target = True
                     
-                    # เช็คตำแหน่ง (ถ้ายังไม่ผ่านแผนก)
                     if not is_target and target_positions:
                         if emp_position in [p.strip() for p in target_positions]:
                             is_target = True
             except:
-                is_target = True # ถ้า JSON พัง ให้แสดงไว้ก่อนเพื่อความปลอดภัย
+                is_target = True
 
-        # ถ้าตรงเงื่อนไข ให้คำนวณสถานะ (Upcoming หรือ Missed)
         if is_target:
-            # หา Session ทั้งหมด
             sessions = sorted(act.sessions, key=lambda x: (x.SESSION_DATE, x.START_TIME))
             if not sessions: continue
 
-            # แบ่งรอบ อดีต/อนาคต
-            future_sessions = [s for s in sessions if s.SESSION_DATE >= today]
-            past_sessions = [s for s in sessions if s.SESSION_DATE < today]
+            # แบ่งรอบ อดีต/อนาคต โดยเทียบกับ now (datetime)
+            future_sessions = []
+            past_sessions = []
+            
+            for s in sessions:
+                s_end_dt = datetime.combine(s.SESSION_DATE, s.END_TIME)
+                # รองรับกรณีข้ามวัน
+                if s.END_TIME <= s.START_TIME:
+                     s_end_dt += timedelta(days=1)
+
+                if s_end_dt >= now:
+                    future_sessions.append(s)
+                else:
+                    past_sessions.append(s)
             
             target_session = None
             derived_status = "Upcoming"
 
             if future_sessions:
-                # มีรอบในอนาคต -> Upcoming (เอารอบเร็วสุด)
                 target_session = future_sessions[0]
                 derived_status = "Upcoming"
             elif past_sessions:
-                # มีแต่รอบในอดีต -> Missed (เอารอบล่าสุด)
                 target_session = past_sessions[-1]
                 derived_status = "Missed"
             
@@ -2017,19 +2178,20 @@ def get_my_registrations(emp_id: str, db: Session = Depends(get_db)):
                     "activityDate": target_session.SESSION_DATE,
                     "startTime": target_session.START_TIME.strftime("%H:%M"),
                     "endTime": target_session.END_TIME.strftime("%H:%M"),
-                    "status": derived_status, # สถานะที่ระบบคำนวณให้
+                    "status": derived_status,
                     "sessionId": target_session.SESSION_ID,
                     "isCompulsory": True,
                     "point": act.ACT_POINT
                 })
     
-    # เรียงลำดับตามวันที่ (ใหม่ไปเก่า ตามสไตล์ Todo List)
     output.sort(key=lambda x: x['activityDate'], reverse=True)
         
     return output
 
+
 @app.post("/activities/register")
 async def register_activity(req: ActivityRegisterRequest, db: Session = Depends(get_db)):
+    # 1. เช็คว่าเคยลงหรือยัง (เหมือนเดิม)
     existing = db.query(models.Registration).filter(
         models.Registration.EMP_ID == req.emp_id,
         models.Registration.SESSION_ID == req.session_id
@@ -2037,8 +2199,27 @@ async def register_activity(req: ActivityRegisterRequest, db: Session = Depends(
     
     if existing:
         raise HTTPException(status_code=400, detail="Already registered")
+
+    # 2. [NEW] ดึงข้อมูล Session และ Activity เพื่อเช็คโควตา
+    session = db.query(models.ActivitySession).filter(models.ActivitySession.SESSION_ID == req.session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
         
+    activity = session.activity # ใช้ Relationship ดึง Activity แม่
+    
+    # 2.1 นับจำนวนคนที่ลงทะเบียนใน Session นี้ไปแล้ว
+    current_count = db.query(models.Registration).filter(
+        models.Registration.SESSION_ID == req.session_id
+    ).count()
+    
+    # 2.2 เทียบกับ Max Participants
+    # ถ้า activity.ACT_MAX_PARTICIPANTS เป็น 0 หรือ น้อยกว่า อาจจะหมายถึงไม่จำกัด? 
+    # แต่ปกติควรระบุค่าเสมอ สมมติว่าถ้า > 0 คือจำกัด
+    if activity.ACT_MAX_PARTICIPANTS > 0 and current_count >= activity.ACT_MAX_PARTICIPANTS:
+         raise HTTPException(status_code=400, detail="Activity is fully booked (ที่นั่งเต็มแล้ว)")
+
     try:
+        # 3. ถ้ายังไม่เต็ม -> สร้างใบลงทะเบียน (เหมือนเดิม)
         new_reg_id = generate_id("R", 8)
         new_reg = models.Registration(
             REG_ID=new_reg_id,
@@ -2048,35 +2229,78 @@ async def register_activity(req: ActivityRegisterRequest, db: Session = Depends(
         )
         db.add(new_reg)
 
-        # ดึงชื่อกิจกรรมมาแสดงในแจ้งเตือน
-        sess = db.query(models.ActivitySession).filter(models.ActivitySession.SESSION_ID == req.session_id).first()
-        act_name = "Activity"
-        if sess and sess.activity:
-            act_name = sess.activity.ACT_NAME
-            
+        # 4. สร้าง Notification (เหมือนเดิม)
         create_notification_internal(
             db, 
             emp_id=req.emp_id,
             title="ลงทะเบียนสำเร็จ ✅",
-            message=f"คุณได้ลงทะเบียนกิจกรรม '{act_name}' เรียบร้อยแล้ว",
+            message=f"คุณได้ลงทะเบียนกิจกรรม '{activity.ACT_NAME}' เรียบร้อยแล้ว",
             notif_type="Activity",
-            ref_id=sess.ACT_ID if sess else None,
+            ref_id=activity.ACT_ID,
             route_path="/activity_detail"
         )
 
         db.commit()
         
-        # --- Broadcast Updates ---
+        organizer_emp_id = None
+        if activity.organizer:
+             organizer_emp_id = activity.organizer.EMP_ID
+        
+        if organizer_emp_id:
+            # 2. คำนวณ %
+            # นับจำนวนล่าสุด
+            current_reg_count = db.query(models.Registration).filter(
+                models.Registration.SESSION_ID == req.session_id
+            ).count()
+            
+            max_p = activity.ACT_MAX_PARTICIPANTS
+            if max_p > 0:
+                percent = (current_reg_count / max_p) * 100
+                
+                milestone_title = ""
+                milestone_msg = ""
+                
+                # เช็ค Milestone (50%, 80%, 100%)
+                # ใช้ logic == หรือ >= ในช่วงแคบๆ เพื่อกันส่งซ้ำ (ในที่นี้เอาแบบง่ายคือเช็คจังหวะข้ามผ่าน)
+                # *หมายเหตุ: ใน Production จริงควรมี Flag เก็บว่าแจ้งไปหรือยัง แต่ใน Demo ใช้แบบนี้พอได้
+                
+                if current_reg_count == max_p:
+                    milestone_title = "🚀 ลงทะเบียนเต็มแล้ว!"
+                    milestone_msg = f"กิจกรรม '{activity.ACT_NAME}' มีผู้ลงทะเบียนครบ {max_p} คนแล้ว"
+                elif current_reg_count == int(max_p * 0.8):
+                     milestone_title = "🔥 ฮอตมาก! ยอดทะลุ 80%"
+                     milestone_msg = f"กิจกรรม '{activity.ACT_NAME}' ใกล้เต็มแล้ว ({current_reg_count}/{max_p})"
+                elif current_reg_count == int(max_p * 0.5):
+                     milestone_title = "📈 ยอดถึง 50% แล้ว"
+                     milestone_msg = f"กิจกรรม '{activity.ACT_NAME}' มาถึงครึ่งทางแล้ว"
+
+                if milestone_title:
+                    create_notification_internal(
+                        db,
+                        emp_id=organizer_emp_id,
+                        title=milestone_title,
+                        message=milestone_msg,
+                        notif_type="System", # หรือประเภทใหม่ Organizer
+                        target_role="Organizer", # [สำคัญ] ระบุว่าส่งให้ Role ไหน
+                        ref_id=activity.ACT_ID,
+                        route_path="/participants" # กดแล้วไปหน้าดูรายชื่อ
+                    )
+                    # ยิง Socket ให้ Organizer
+                    await manager.send_personal_message("REFRESH_NOTIFICATIONS", organizer_emp_id)
+
+        # 5. Broadcast Real-time (เหมือนเดิม)
         await manager.broadcast("REFRESH_PARTICIPANTS")
         await manager.broadcast("REFRESH_ACTIVITIES") 
-        
-        # [FIX] เพิ่มบรรทัดนี้: แจ้งเตือนตัวเลขแดงๆ ทันที
         await manager.send_personal_message("REFRESH_NOTIFICATIONS", req.emp_id)
         
         return {"message": "Registration successful", "reg_id": new_reg_id}
+
+    except HTTPException as he:
+        raise he
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Register Error: {e}")
+        raise HTTPException(status_code=500, detail=f"System Error: {str(e)}")
 
 
 @app.post("/activities/unregister")
@@ -2699,25 +2923,6 @@ async def websocket_endpoint(websocket: WebSocket, emp_id: str = Query(None)):
     except WebSocketDisconnect:
         manager.disconnect(emp_id)
 
-def run_scheduler():
-    print("⏳ Scheduler Started...")
-    # รัน Daily Check (24 ชม. / แต้มหมดอายุ) ทุกวันตอน 8 โมงเช้า (หรือตามความเหมาะสม)
-    schedule.every().day.at("08:00").do(check_daily_notifications)
-    
-    # [NEW] รัน Hourly Check ทุก 1 นาที
-    schedule.every(1).minutes.do(check_upcoming_notifications)
-
-    while True:
-        schedule.run_pending()
-        time_module.sleep(1)
-
-    if __name__ == "__main__":
-        import uvicorn
-        scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-        scheduler_thread.start()
-        uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
 @app.post("/admin/rewards/scan_pickup")
 def process_pickup_scan(req: PrizePickupRequest, db: Session = Depends(get_db)):
     # 1. Check Admin Permission
@@ -2788,8 +2993,6 @@ def update_employee(emp_id: str, req: EmployeeUpdateRequest, db: Session = Depen
 
 
 
-
-
 # [API] ดึงรายการแจ้งเตือน
 @app.get("/notifications/{emp_id}", response_model=list[NotificationResponse])
 def get_my_notifications(
@@ -2848,3 +3051,40 @@ def get_unread_count(
     return {"count": count}
 
 
+@app.put("/notifications/{emp_id}/read-all")
+def mark_all_notifications_read(emp_id: str, db: Session = Depends(get_db)):
+    # อัปเดตทุกรายการของ emp_id นี้ ที่ยังไม่อ่าน (IS_READ = False) -> ให้เป็น True
+    db.query(models.Notification).filter(
+        models.Notification.EMP_ID == emp_id,
+        models.Notification.IS_READ == False
+    ).update({models.Notification.IS_READ: True}, synchronize_session=False)
+    
+    db.commit()
+    return {"message": "All marked as read"}
+
+
+@app.post("/admin/announcement")
+async def create_system_announcement(req: AnnouncementRequest, db: Session = Depends(get_db)):
+    # 1. หาพนักงานเป้าหมาย (ในที่นี้เอาทุกคนที่ Active)
+    targets = db.query(models.Employee).filter(models.Employee.EMP_STATUS == 'Active').all()
+    
+    count = 0
+    for emp in targets:
+        # สร้างแจ้งเตือนลง DB
+        create_notification_internal(
+            db,
+            emp_id=emp.EMP_ID,
+            title=f"📢 {req.title}", # ใส่ไอคอนประกาศ
+            message=req.message,
+            notif_type="System",
+            target_role="Employee",
+            route_path=None # ส่วนใหญ่ประกาศจะไม่มีหน้าให้กดไปต่อ หรืออาจจะไปหน้า Profile
+        )
+        count += 1
+    
+    db.commit()
+    
+    # 2. ยิง Real-time Broadcast หาทุกคนที่ต่อ Socket อยู่
+    await manager.broadcast("REFRESH_NOTIFICATIONS")
+    
+    return {"message": f"Announcement sent to {count} employees"}

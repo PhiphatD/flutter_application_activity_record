@@ -1,9 +1,15 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
+import '../../../widgets/custom_confirm_dialog.dart';
+import '../../../widgets/auto_close_success_dialog.dart';
 
 class RedeemedDetailScreen extends StatefulWidget {
   final String redeemId;
@@ -65,39 +71,85 @@ class _RedeemedDetailScreenState extends State<RedeemedDetailScreen> {
     );
   }
 
-  void _handleCancel() {
-    showDialog(
+  Future<void> _handleCancel() async {
+    // 1. ถามยืนยัน พร้อมรายละเอียด
+    final bool? confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          "Cancel Redemption?",
-          style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
-        ),
-        content: Text(
-          "Are you sure you want to cancel this redemption? Points will be refunded.",
-          style: GoogleFonts.poppins(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text("No", style: GoogleFonts.poppins(color: Colors.grey)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context); // Close dialog
-              if (widget.onCancel != null) {
-                widget.onCancel!();
-                Navigator.pop(context); // Close screen
-              }
-            },
-            child: Text(
-              "Yes, Cancel",
-              style: GoogleFonts.poppins(color: Colors.red),
-            ),
-          ),
-        ],
+      builder: (context) => CustomConfirmDialog.danger(
+        title: "Cancel Redemption?",
+        subtitle:
+            "Return '${widget.name}'?\n\nYou will get ${widget.pointsCost} points back.",
+        confirmText: "Yes, Refund",
+        // [เพิ่มส่วนนี้ครับ]
+        onConfirm: () {
+          Navigator.pop(context, true); // ปิด Dialog และบอกว่า "ตกลง (true)"
+        },
       ),
     );
+
+    // ถ้าไม่ได้กดตกลง (กดนอกกรอบ หรือกด Cancel) ก็จบการทำงาน
+    if (confirm != true) return;
+
+    // 2. Loading
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final empId = prefs.getString('empId') ?? '';
+
+      // ใช้ Config.apiUrl หรือ Hardcode ตามสะดวก
+      const baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/rewards/cancel'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'emp_id': empId, 'redeem_id': widget.redeemId}),
+      );
+
+      // ปิด Loading
+      if (mounted) Navigator.pop(context);
+
+      if (response.statusCode == 200) {
+        // 3. สำเร็จ -> โชว์ Auto Close Dialog
+        if (mounted) {
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => const AutoCloseSuccessDialog(
+              title: "Refund Successful",
+              subtitle: "Points returned.",
+              icon: Icons.replay_circle_filled_rounded,
+              color: Colors.orange,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+
+        // 4. เรียก Callback เพื่อบอกหน้าแม่ให้ Refresh
+        if (widget.onCancel != null) {
+          widget.onCancel!();
+        }
+
+        // 5. ปิดหน้า Detail กลับไป
+        if (mounted) Navigator.pop(context);
+      } else {
+        throw Exception("Failed to cancel");
+      }
+    } catch (e) {
+      // กรณี Error ปิด Loading ก่อน
+      if (mounted && Navigator.canPop(context)) Navigator.pop(context);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   @override

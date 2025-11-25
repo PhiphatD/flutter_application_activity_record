@@ -51,6 +51,68 @@ class _TodoScreenState extends State<TodoScreen>
     _initRealtimeListener(); // [NEW]
   }
 
+  // ไฟล์: lib/screens/employee_screens/activities/todo_screen.dart
+  // (วางภายใน class _TodoScreenState)
+
+  Color _getEventStatusColor(_TodoActivity act) {
+    try {
+      final now = DateTime.now();
+
+      // 1. แยกชั่วโมง:นาที
+      final startTimeParts = act.startTime.split(':');
+      final endTimeParts = act.endTime.split(':');
+
+      // 2. สร้าง DateTime เวลาเริ่ม
+      final startDateTime = DateTime(
+        act.activityDate.year,
+        act.activityDate.month,
+        act.activityDate.day,
+        int.parse(startTimeParts[0]),
+        int.parse(startTimeParts[1]),
+      );
+
+      // 3. สร้าง DateTime เวลาจบ (พร้อมแก้บั๊กข้ามวัน Midnight Bug)
+      var endDateTime = DateTime(
+        act.activityDate.year,
+        act.activityDate.month,
+        act.activityDate.day,
+        int.parse(endTimeParts[0]),
+        int.parse(endTimeParts[1]),
+      );
+
+      // ถ้าเวลาจบน้อยกว่าเวลาเริ่ม (เช่น เริ่ม 22:00 จบ 01:00) ให้บวกวันเพิ่ม
+      if (endDateTime.isBefore(startDateTime) ||
+          endDateTime.isAtSameMomentAs(startDateTime)) {
+        endDateTime = endDateTime.add(const Duration(days: 1));
+      }
+
+      // --- Logic ตรวจสอบสถานะ 4 ระดับ (ตามสีที่ขอ) ---
+
+      // A. LIVE: กำลังดำเนินอยู่ -> สีแดง
+      if (now.isAfter(startDateTime) && now.isBefore(endDateTime)) {
+        return const Color(0xFFFF4757); // สีแดงสด (Live)
+      }
+
+      // คำนวณระยะห่างเวลา
+      final difference = startDateTime.difference(now);
+
+      // B. URGENT: จะเริ่มในอีกไม่เกิน 1 ชั่วโมง -> สีส้ม
+      if (!now.isAfter(startDateTime) && difference.inMinutes <= 60) {
+        return const Color(0xFFFF9F1C); // สีส้ม (Urgent)
+      }
+
+      // C. UPCOMING: จะเริ่มในอีกไม่เกิน 24 ชั่วโมง -> สีเขียว
+      if (!now.isAfter(startDateTime) && difference.inHours <= 24) {
+        return const Color(0xFF2ED573); // สีเขียวสว่าง (Upcoming)
+      }
+
+      // D. FUTURE: ยังอีกนาน -> สีเทา
+      return Colors.grey.shade300; // สีเทา (Future)
+    } catch (e) {
+      return Colors.grey.shade300; // Fallback
+    }
+  }
+
   // [NEW] Listen to global websocket service
   void _initRealtimeListener() {
     WebSocketService().events.listen((event) {
@@ -443,7 +505,7 @@ class _TodoScreenState extends State<TodoScreen>
   Widget _buildTimelineCard(_TodoActivity act) {
     bool isCompulsory = act.isCompulsory;
     Color typeColor = _getTypeColor(act.actType);
-
+    Color statusDotColor = _getEventStatusColor(act);
     return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -452,20 +514,30 @@ class _TodoScreenState extends State<TodoScreen>
             width: 30,
             child: Column(
               children: [
-                Container(width: 2, height: 16, color: Colors.grey[300]),
+                Container(
+                  width: 2,
+                  height: 16,
+                  color: statusDotColor.withOpacity(0.5),
+                ),
                 Container(
                   width: 12,
                   height: 12,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white,
-                    border: Border.all(
-                      color: isCompulsory ? Colors.orange.shade800 : typeColor,
-                      width: 3,
-                    ),
+                    color: statusDotColor, // <-- ใช้สีสถานะ
+                    border: Border.all(color: Colors.white, width: 3),
+                    boxShadow: [
+                      BoxShadow(
+                        color: statusDotColor.withOpacity(0.5),
+                        blurRadius: 4,
+                        spreadRadius: 1,
+                      ),
+                    ],
                   ),
                 ),
-                Expanded(child: Container(width: 2, color: Colors.grey[300])),
+                Expanded(
+                  child: Container(width: 2, color: Colors.grey.shade300),
+                ),
               ],
             ),
           ),
@@ -561,7 +633,7 @@ class _TodoScreenState extends State<TodoScreen>
                                           style: GoogleFonts.inter(
                                             fontSize: 9,
                                             fontWeight: FontWeight.w800,
-                                            color: Colors.orange.shade800,
+                                            color: Colors.red.shade700,
                                           ),
                                         ),
                                       ],

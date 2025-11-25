@@ -1,18 +1,18 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application_activity_record/screens/employee_screens/activities/activity_detail_screen.dart';
 import 'package:google_fonts/google_fonts.dart' hide Config;
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
+// Import Config และ Controller
 import 'package:flutter_application_activity_record/backend_api/config.dart';
 import '../../controllers/notification_controller.dart';
+// Import ปลายทาง
+import 'package:flutter_application_activity_record/screens/employee_screens/activities/activity_detail_screen.dart';
 
-// Import ปลายทางที่จะ Link ไป (ปรับตาม Path จริงของคุณ)
 
 class NotificationScreen extends StatefulWidget {
-  final String currentRole; // 'Employee', 'Organizer', 'Admin'
-
+  final String currentRole;
   const NotificationScreen({super.key, required this.currentRole});
 
   @override
@@ -21,7 +21,7 @@ class NotificationScreen extends StatefulWidget {
 
 class _NotificationScreenState extends State<NotificationScreen> {
   bool _isLoading = true;
-  List<dynamic> _notifications = [];
+  Map<String, List<dynamic>> _groupedNotifications = {};
   final String baseUrl = Config.apiUrl;
 
   @override
@@ -36,7 +36,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
       final prefs = await SharedPreferences.getInstance();
       final empId = prefs.getString('empId') ?? '';
 
-      // ยิง API พร้อมส่ง role ไปกรอง
       final url = Uri.parse(
         '$baseUrl/notifications/$empId?role=${widget.currentRole}',
       );
@@ -44,61 +43,91 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(utf8.decode(response.bodyBytes));
-        setState(() {
-          _notifications = data;
-          _isLoading = false;
-        });
+
+        // [LOGIC ใหม่] พอได้ข้อมูลมาปุ๊บ สั่ง Mark All Read หลังบ้านทันที
+        _markAllAsRead(empId);
+
+        // ส่วนหน้าจอ UI เราก็แสดงผลไปตามปกติ (แต่ในใจเรารู้ว่ามันถูกอ่านแล้ว)
+        _groupData(data);
       } else {
         setState(() => _isLoading = false);
       }
     } catch (e) {
-      print("Error fetching notifications: $e");
+      print("Error: $e");
       setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _markAsRead(String notifId, int index) async {
-    // Optimistic Update (เปลี่ยนสีทันทีไม่ต้องรอ)
-    if (!_notifications[index]['isRead']) {
-      setState(() {
-        _notifications[index]['isRead'] = true;
-      });
+  // [FUNCTION ใหม่] สั่ง Server ว่าอ่านหมดแล้ว และเคลียร์ Badge
+  Future<void> _markAllAsRead(String empId) async {
+    try {
+      // 1. ยิง API เส้นใหม่ที่เพิ่งสร้าง
+      await http.put(Uri.parse('$baseUrl/notifications/$empId/read-all'));
 
-      // [NEW] ลดจำนวน Badge ลงทันที
-      NotificationController().decreaseCount();
-
-      try {
-        await http.put(Uri.parse('$baseUrl/notifications/$notifId/read'));
-      } catch (e) {
-        print("Error marking read: $e");
-        // ถ้า Error ให้ดึงใหม่เพื่อความชัวร์
-        NotificationController().fetchUnreadCount(role: widget.currentRole);
-      }
+      // 2. สั่ง Controller ให้เคลียร์เลขเป็น 0 ทันที
+      NotificationController().clear();
+    } catch (e) {
+      print("Error marking all read: $e");
     }
   }
 
-  // ฟังก์ชัน Deep Link: กดแล้วไปไหน?
-  void _handleNotificationTap(Map<String, dynamic> notif, int index) {
-    _markAsRead(notif['notifId'], index);
+  void _groupData(List<dynamic> data) {
+    // ... (โค้ดเดิม ไม่ต้องแก้)
+    Map<String, List<dynamic>> grouped = {};
+    for (var notif in data) {
+      String dateKey = _formatDateHeader(notif['createdAt']);
+      if (grouped[dateKey] == null) grouped[dateKey] = [];
+      grouped[dateKey]!.add(notif);
+    }
+    setState(() {
+      _groupedNotifications = grouped;
+      _isLoading = false;
+    });
+  }
 
+  // ... (Helpers _formatDateHeader, _formatTime คงเดิม) ...
+  String _formatDateHeader(String? dateString) {
+    // ... (เหมือนเดิม)
+    if (dateString == null) return "Unknown";
+    try {
+      final date = DateTime.parse(dateString);
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final yesterday = DateTime(now.year, now.month, now.day - 1);
+      final checkDate = DateTime(date.year, date.month, date.day);
+
+      if (checkDate == today) return "วันนี้";
+      if (checkDate == yesterday) return "เมื่อวานนี้";
+
+      return DateFormat('d MMM yy', 'th').format(date);
+    } catch (e) {
+      return "Unknown";
+    }
+  }
+
+  String _formatTime(String? dateString) {
+    // ... (เหมือนเดิม)
+    if (dateString == null) return "";
+    try {
+      final date = DateTime.parse(dateString);
+      return DateFormat('HH:mm น.').format(date);
+    } catch (_) {
+      return "";
+    }
+  }
+
+  // [LOGIC แก้ไข] กดแล้วไปหน้า Detail อย่างเดียว (ไม่ต้อง Mark Read ซ้ำ เพราะทำไปแล้วตอนโหลด)
+  void _handleNotificationTap(Map<String, dynamic> notif) {
     final String path = notif['routePath'] ?? '';
     final String refId = notif['refId'] ?? '';
 
     if (path.isEmpty) return;
 
     Widget? destination;
-
-    // --- Routing Logic ---
     if (path == '/activity_detail' && refId.isNotEmpty) {
       destination = ActivityDetailScreen(activityId: refId);
     } else if (path == '/reward_history') {
-      // สมมติว่าไปหน้ารายการแลก (อาจต้องสร้าง RedeemedDetail แบบรับ ID ได้)
-      // destination = RedeemedDetailScreen(redeemId: refId);
-      // เบื้องต้นพาไปหน้า Detail ถ้ามี ID
-    } else if (path == '/participants' && refId.isNotEmpty) {
-      // ฝั่ง Organizer: ไปหน้าดูคนเข้าร่วม
-      // ต้องหาข้อมูลกิจกรรมเพิ่มเติมก่อน หรือส่งแค่ ID ไปถ้าหน้าปลายทางรองรับ
-      // destination = ParticipantsDetailsScreen(activityId: refId, ...);
+      // destination = ...
     }
 
     if (destination != null) {
@@ -111,186 +140,244 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ... (UI Build เหมือนเดิมทุกประการ) ...
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
+      backgroundColor: const Color(0xFFECEFF1),
       appBar: AppBar(
         title: Text(
-          "Notifications",
-          style: GoogleFonts.poppins(
-            color: Colors.black,
-            fontWeight: FontWeight.bold,
+          "การแจ้งเตือน",
+          style: GoogleFonts.kanit(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.w500,
           ),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: const Color(0xFF2C3E50),
         elevation: 0,
-        leading: const BackButton(color: Colors.black),
+        centerTitle: true,
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.black),
+            icon: const Icon(Icons.refresh),
             onPressed: _fetchNotifications,
           ),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : _notifications.isEmpty
+          : _groupedNotifications.isEmpty
           ? _buildEmptyState()
           : RefreshIndicator(
               onRefresh: _fetchNotifications,
               child: ListView.builder(
-                itemCount: _notifications.length,
+                padding: const EdgeInsets.all(16),
+                itemCount: _groupedNotifications.keys.length,
                 itemBuilder: (context, index) {
-                  return _buildNotificationItem(_notifications[index], index);
+                  String dateKey = _groupedNotifications.keys.elementAt(index);
+                  List<dynamic> items = _groupedNotifications[dateKey]!;
+                  return _buildDayGroup(dateKey, items);
                 },
               ),
             ),
     );
   }
 
-  Widget _buildNotificationItem(Map<String, dynamic> notif, int index) {
-    final bool isRead = notif['isRead'] ?? false;
-    final String type = notif['type'] ?? 'System';
-    final String dateStr = _formatDate(notif['createdAt']);
-
-    IconData icon;
-    Color color;
-
-    switch (type) {
-      case 'Reward':
-        icon = Icons.card_giftcard;
-        color = Colors.orange;
-        break;
-      case 'Activity':
-        icon = Icons.event_available;
-        color = Colors.blue;
-        break;
-      case 'Alert':
-        icon = Icons.warning_amber_rounded;
-        color = Colors.red;
-        break;
-      default:
-        icon = Icons.notifications;
-        color = Colors.purple;
-    }
-
-    return Container(
-      color: isRead ? Colors.white : Colors.blue.withOpacity(0.05),
-      child: Column(
-        children: [
-          ListTile(
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 20,
-              vertical: 8,
+  // ... (Widgets: _buildDayGroup, _buildEmptyState เหมือนเดิม) ...
+  Widget _buildDayGroup(String dateHeader, List<dynamic> items) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 8, bottom: 8, top: 8),
+          child: Text(
+            dateHeader,
+            style: GoogleFonts.kanit(
+              fontSize: 16,
+              color: Colors.grey[600],
+              fontWeight: FontWeight.w500,
             ),
-            leading: Stack(
-              children: [
-                CircleAvatar(
-                  backgroundColor: color.withOpacity(0.1),
-                  child: Icon(icon, color: color, size: 22),
-                ),
-                if (!isRead)
-                  Positioned(
-                    right: 0,
-                    top: 0,
-                    child: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 1.5),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            title: Text(
-              notif['title'] ?? '',
-              style: GoogleFonts.poppins(
-                fontSize: 15,
-                fontWeight: isRead ? FontWeight.w500 : FontWeight.bold,
-                color: Colors.black87,
-              ),
-            ),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SizedBox(height: 4),
-                Text(
-                  notif['message'] ?? '',
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    color: Colors.grey[700],
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  dateStr,
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    color: Colors.grey[400],
-                  ),
-                ),
-              ],
-            ),
-            onTap: () => _handleNotificationTap(notif, index),
           ),
-          const Divider(height: 1, indent: 70),
-        ],
-      ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 5,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            children: List.generate(items.length, (i) {
+              bool isLast = i == items.length - 1;
+              return Column(
+                children: [
+                  _buildNotificationItem(items[i]), // เรียกใช้ Widget รายการ
+                  if (!isLast)
+                    const Divider(
+                      height: 1,
+                      indent: 70,
+                      endIndent: 20,
+                      color: Color(0xFFEEEEEE),
+                    ),
+                ],
+              );
+            }),
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
     );
   }
 
   Widget _buildEmptyState() {
+    // ... (เหมือนเดิม)
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.shade200,
-                  blurRadius: 20,
-                  offset: const Offset(0, 5),
-                ),
-              ],
-            ),
-            child: const Icon(
-              Icons.notifications_off_outlined,
-              size: 50,
-              color: Colors.grey,
-            ),
-          ),
-          const SizedBox(height: 20),
+          Icon(Icons.notifications_none, size: 80, color: Colors.grey[300]),
+          const SizedBox(height: 16),
           Text(
-            "No notifications yet",
-            style: GoogleFonts.poppins(color: Colors.grey[500], fontSize: 16),
+            "ไม่มีการแจ้งเตือน",
+            style: GoogleFonts.kanit(fontSize: 18, color: Colors.grey[500]),
           ),
         ],
       ),
     );
   }
 
-  String _formatDate(String? dateString) {
-    if (dateString == null) return "";
-    try {
-      final date = DateTime.parse(dateString);
-      final now = DateTime.now();
-      final diff = now.difference(date);
+  // [UI] แก้ไขเล็กน้อย: เอาจุดแดงออกถาวร หรือจะโชว์แค่ตอนเข้ามาครั้งแรกก็ได้
+  // แต่ตามโจทย์คือ "เข้ามาหน้านี้ก็ถือว่าอ่านแล้ว" ดังนั้นเราไม่ต้องโชว์จุดแดงในการ์ดแล้วก็ได้ เพื่อความสะอาด
+  Widget _buildNotificationItem(Map<String, dynamic> notif) {
+    // *Tip: ถ้าอยากให้ user เห็นว่าอันไหน "เคย" ใหม่ (เป็น Bold) ก่อนหน้านี้
+    // ให้ใช้ค่า isRead จาก Database ที่ดึงมา (ซึ่งเป็น False) มาแสดงผล
+    // แต่ไม่ต้องสนใจ Logic การกดแล้วเปลี่ยนสถานะ เพราะเราสั่ง Read All ไปแล้วที่หลังบ้าน
+    final bool isRead = notif['isRead'] ?? false;
+    final String type = notif['type'] ?? 'System';
 
-      if (diff.inMinutes < 1) return "Just now";
-      if (diff.inMinutes < 60) return "${diff.inMinutes} mins ago";
-      if (diff.inHours < 24) return "${diff.inHours} hours ago";
-      if (diff.inDays < 2) return "Yesterday";
-      return DateFormat('dd MMM yyyy').format(date);
-    } catch (e) {
-      return "";
+    IconData iconData;
+    Color iconColor;
+    Color iconBgColor;
+
+    switch (type) {
+      case 'Reward':
+        iconData = Icons.card_giftcard;
+        iconColor = Colors.green;
+        iconBgColor = Colors.green.shade50;
+        break;
+      case 'Activity':
+        iconData = Icons.calendar_today;
+        iconColor = Colors.blue;
+        iconBgColor = Colors.blue.shade50;
+        break;
+      case 'Alert':
+        iconData = Icons.priority_high_rounded;
+        iconColor = Colors.red;
+        iconBgColor = Colors.red.shade50;
+        break;
+      default:
+        iconData = Icons.notifications;
+        iconColor = Colors.grey;
+        iconBgColor = Colors.grey.shade100;
     }
+
+    return InkWell(
+      onTap: () => _handleNotificationTap(notif), // กดเพื่อไปดูดีเทล
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 45,
+              height: 45,
+              decoration: BoxDecoration(
+                color: iconBgColor,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(iconData, color: iconColor, size: 24),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          notif['title'] ?? 'แจ้งเตือน',
+                          style: GoogleFonts.kanit(
+                            fontSize: 16,
+                            // ถ้าอยากให้เห็นว่าเป็นอันใหม่ (ตัวหนา) ในขณะที่อยู่ในหน้านี้ ก็ใช้ isRead เดิมได้
+                            fontWeight: isRead
+                                ? FontWeight.w500
+                                : FontWeight.bold,
+                            color: Colors.black87,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text(
+                        _formatTime(notif['createdAt']),
+                        style: GoogleFonts.kanit(
+                          fontSize: 12,
+                          color: Colors.grey[500],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    notif['message'] ?? '',
+                    style: GoogleFonts.kanit(
+                      fontSize: 14,
+                      color: Colors.grey[600],
+                      height: 1.4,
+                    ),
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+
+                  // [LINK] แสดงเฉพาะถ้านำทางได้
+                  if (notif['routePath'] != null &&
+                      (notif['routePath'] as String).isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      "ดูรายละเอียด",
+                      style: GoogleFonts.kanit(
+                        fontSize: 14,
+                        color: const Color(0xFF00A950),
+                        fontWeight: FontWeight.w500,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            // จุดแดง (Optional: จะเอาออกเลยก็ได้ เพราะเราถือว่าอ่านแล้วเมื่อเข้าหน้า)
+            // แต่ถ้าอยากให้เห็นว่าอันไหนเพิ่งมาใหม่ใน Session นี้ ก็เก็บไว้ได้ครับ
+            if (!isRead)
+              Container(
+                margin: const EdgeInsets.only(left: 8, top: 4),
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }

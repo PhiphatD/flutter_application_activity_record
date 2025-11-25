@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import 'enterprise_scanner_screen.dart';
 import 'activities/activity_qr_display_screen.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import '../../../widgets/auto_close_success_dialog.dart';
 
 class ParticipantsDetailsScreen extends StatefulWidget {
   final String activityId;
@@ -486,11 +487,22 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-        _showResultDialog(
-          isSuccess: true,
-          title: "Check-in Success!",
-          message: "${data['emp_name']}\nEarned +${data['points_earned']} pts",
-        );
+
+        // [NEW] ใช้ Auto Close แทน _showResultDialog เดิม
+        if (mounted) {
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AutoCloseSuccessDialog(
+              title: "Checked In!",
+              subtitle: "${data['emp_name']}",
+              icon: Icons.check_circle,
+              color: Colors.green,
+              duration: const Duration(milliseconds: 1500),
+            ),
+          );
+        }
+
         _fetchParticipants();
       } else {
         final errorData = jsonDecode(utf8.decode(response.bodyBytes));
