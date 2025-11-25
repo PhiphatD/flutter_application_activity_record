@@ -3,7 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:salomon_bottom_bar/salomon_bottom_bar.dart';
 import 'package:flutter_application_activity_record/theme/app_colors.dart';
 
-// Import organizer screens
+// Import Screens
 import '../activities/activities_management_screen.dart';
 import '../participants/participants_screen.dart';
 
@@ -35,6 +35,8 @@ class _OrganizerMainScreenState extends State<OrganizerMainScreen> {
     return Scaffold(
       backgroundColor: organizerBg,
       body: IndexedStack(index: _selectedIndex, children: _widgetOptions),
+
+      // [REMOVED] ลบ Floating Action Button ออกตาม Requirement
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -46,11 +48,10 @@ class _OrganizerMainScreenState extends State<OrganizerMainScreen> {
             ),
           ],
         ),
-        // [UPDATED] ใช้ SafeArea เพื่อกัน Home Indicator ทับปุ่ม
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(
-              horizontal: 20.0,
+              horizontal: 40.0, // เพิ่ม Padding เพื่อความสวยงามเมื่อไม่มี FAB
               vertical: 10.0,
             ),
             child: SalomonBottomBar(
@@ -59,10 +60,10 @@ class _OrganizerMainScreenState extends State<OrganizerMainScreen> {
               duration: const Duration(milliseconds: 400),
               items: [
                 SalomonBottomBarItem(
-                  icon: const Icon(Icons.manage_accounts),
+                  icon: const Icon(Icons.manage_accounts_outlined),
                   activeIcon: const Icon(Icons.manage_accounts),
                   title: Text(
-                    "Management",
+                    "Manage",
                     style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
                   ),
                   selectedColor: primaryColor,

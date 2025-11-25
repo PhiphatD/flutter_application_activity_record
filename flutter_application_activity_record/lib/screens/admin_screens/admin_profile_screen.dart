@@ -1,8 +1,7 @@
-// lib/screens/organizer_screens/profile/organizer_profile_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_application_activity_record/screens/employee_screens/main/employee_main_screen.dart';
+import 'package:flutter_application_activity_record/screens/organizer_screens/main/organizer_main_screen.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'dart:async';
 import 'package:flip_card/flip_card.dart';
@@ -11,17 +10,15 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-// [NEW IMPORT]
-import '../../admin_screens/admin_main_screen.dart';
 
-class OrganizerProfileScreen extends StatefulWidget {
-  const OrganizerProfileScreen({Key? key}) : super(key: key);
+class AdminProfileScreen extends StatefulWidget {
+  const AdminProfileScreen({Key? key}) : super(key: key);
 
   @override
-  State<OrganizerProfileScreen> createState() => _OrganizerProfileScreenState();
+  State<AdminProfileScreen> createState() => _AdminProfileScreenState();
 }
 
-class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
+class _AdminProfileScreenState extends State<AdminProfileScreen> {
   late Timer _timer;
   Duration _duration = const Duration(minutes: 10);
 
@@ -33,8 +30,6 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
   String companyName = "...";
   String avatarUrl = "";
   String qrData = "";
-  // [NEW] เพิ่มตัวแปรสถานะ Role
-  String userRole = "organizer";
 
   String empEmail = "-";
   String empPhone = "-";
@@ -50,54 +45,64 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
     _startTimer();
   }
 
-  void _navigateToEmployeeMode() {
+  void _navigateToEmployeeView() {
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (context) => const EmployeeMainScreen()),
-      (route) => false, // ล้าง Stack เพื่อเริ่มใหม่ในโหมด Employee
-    );
-  }
-
-  // [NEW FUNCTION] สำหรับนำทางกลับไป Admin Console
-  void _navigateToAdminMode() {
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (context) => const AdminMainScreen()),
       (route) => false,
     );
   }
 
+  void _navigateToOrganizerView() {
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const OrganizerMainScreen()),
+      (route) => false,
+    );
+  }
+
+  Widget _buildSwitchButton({
+    required String title,
+    required IconData icon,
+    required VoidCallback onTap,
+    required Color color,
+  }) {
+    return ElevatedButton.icon(
+      onPressed: onTap,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.white,
+        foregroundColor: color,
+        elevation: 2,
+        minimumSize: const Size(double.infinity, 56),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: color),
+        ),
+      ),
+      icon: Icon(icon),
+      label: Text(
+        title,
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
   Future<void> _fetchOrganizerProfile() async {
+    // ใช้ชื่อเดิมเพื่อไม่ให้กระทบ code อื่น
     final prefs = await SharedPreferences.getInstance();
     final String? storedEmpId = prefs.getString('empId');
-    // [NEW] ดึง Role หลักมาใช้
-    final String? storedRole = prefs.getString('role');
 
-    // [FIX 1] สร้าง Key Cache สำหรับ Organizer โดยเฉพาะ
-    const String defaultRole = 'organizer';
-    // [MODIFIED] อัปเดต Role หลัก
-    if (mounted) {
-      setState(() {
-        userRole = storedRole?.toLowerCase() ?? defaultRole;
-      });
-    }
+    // [FIXED 1] Role นี้คือ Admin เสมอ
+    const String userRole = 'admin';
+    final String avatarCacheKey = 'avatar_cache_${storedEmpId}_$userRole';
 
-    final String avatarCacheKey =
-        'avatar_cache_${storedEmpId}_$defaultRole'; // ใช้ default role ในการแคช
-
-    // [FIX 2] เช็ค ID ว่างก่อนยิง API เพื่อป้องกัน 404
+    // [FIXED 2] เช็ค ID ว่างก่อนยิง API และแสดง Error
     if (storedEmpId == null || storedEmpId.isEmpty) {
-      print("Error: EMP_ID is null or empty for Organizer profile.");
-      if (mounted) {
-        setState(() {
-          empName = "Error: No ID";
-          empId = "Please Login again";
-        });
-      }
+      // ... (Error handling) ...
       return;
     }
 
-    // [FIX 3] ลองดึง Cache มาแสดงก่อน (Fast Load)
+    // [FIXED 3] ลองดึง Cache มาแสดงก่อน (Fast Load)
     final String? cachedAvatar = prefs.getString(avatarCacheKey);
     if (mounted && cachedAvatar != null && cachedAvatar.isNotEmpty) {
       setState(() {
@@ -135,6 +140,7 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
             // --- Avatar Logic (Organizer: Astronomer Style) ---
             bool isFemale = false;
             final lowerTitle = empTitle.toLowerCase();
+            // ... (gender check remains the same) ...
             if (lowerTitle.contains("ms") ||
                 lowerTitle.contains("mrs") ||
                 lowerTitle.contains("miss") ||
@@ -143,14 +149,14 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
               isFemale = true;
             }
 
-            // Organizer Style
+            // Admin Style
             String newAvatarUrl = isFemale
-                ? "https://avatar.iran.liara.run/public/job/astronomer/female"
-                : "https://avatar.iran.liara.run/public/job/astronomer/male";
+                ? "https://avatar.iran.liara.run/public/job/operator/female"
+                : "https://avatar.iran.liara.run/public/job/operator/male";
 
             avatarUrl = newAvatarUrl;
 
-            // บันทึก Cache รูป Organizer
+            // [FIXED] 4. บันทึก Cache รูป Admin
             prefs.setString(avatarCacheKey, newAvatarUrl);
             // -----------------------------------------------
           });
@@ -175,33 +181,6 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
         });
       }
     }
-  }
-
-  // [NEW HELPER] สร้างปุ่มสลับโหมด
-  Widget _buildSwitchButton({
-    required String title,
-    required IconData icon,
-    required VoidCallback onTap,
-    required Color color,
-  }) {
-    return ElevatedButton.icon(
-      onPressed: onTap,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: Colors.white,
-        foregroundColor: color,
-        elevation: 2,
-        minimumSize: const Size(double.infinity, 56),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: color),
-        ),
-      ),
-      icon: Icon(icon),
-      label: Text(
-        title,
-        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-      ),
-    );
   }
 
   void _calculateServiceDuration(DateTime startDate) {
@@ -270,12 +249,11 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
     return Scaffold(
       extendBodyBehindAppBar: false,
       appBar: AppBar(
-        // ... (AppBar content remains the same)
-        backgroundColor: topGradientColor,
+        backgroundColor: const Color.fromARGB(255, 255, 204, 204),
         elevation: 0,
         foregroundColor: const Color(0xFF375987),
         title: const Text(
-          'Organizer Profile',
+          'Admin Profile',
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 22,
@@ -288,7 +266,7 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
           child: Column(
             children: [
               const Text(
-                'Organizer ID',
+                'Admin ID',
                 style: TextStyle(fontSize: 16, color: Color(0xFF375987)),
               ),
               Text(
@@ -334,7 +312,7 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            _buildBackground(topGradientColor),
+            _buildBackground(const Color.fromARGB(255, 255, 204, 204)),
             SingleChildScrollView(
               padding: const EdgeInsets.only(bottom: 20),
               child: Center(
@@ -383,25 +361,19 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 30),
                       child: Column(
-                        // [NEW] ใช้ Column เพื่อวางปุ่มเรียงกัน
                         children: [
-                          // [NEW CONDITIONAL BUTTON] ปุ่มกลับไป Admin Console (แสดงเฉพาะถ้าเป็น Admin)
-                          if (userRole == 'admin') ...[
-                            _buildSwitchButton(
-                              title: "Switch to Admin Console",
-                              icon: Icons.admin_panel_settings_outlined,
-                              onTap: _navigateToAdminMode,
-                              color: const Color(0xFF375987), // Dark Blue
-                            ),
-                            const SizedBox(height: 12),
-                          ],
-
-                          // Existing button (Switch to Participant View)
                           _buildSwitchButton(
                             title: "Switch to Participant View",
                             icon: Icons.person_outline,
-                            onTap: _navigateToEmployeeMode,
+                            onTap: _navigateToEmployeeView,
                             color: const Color(0xFF4A80FF), // Blue
+                          ),
+                          const SizedBox(height: 12),
+                          _buildSwitchButton(
+                            title: "Switch to Organizer Console",
+                            icon: Icons.dashboard_customize_outlined,
+                            onTap: _navigateToOrganizerView,
+                            color: const Color(0xFFFF9F1C), // Orange
                           ),
                         ],
                       ),
@@ -419,8 +391,6 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
       ),
     );
   }
-
-  // ... (ส่วนที่เหลือของ Class _OrganizerProfileScreenState ไม่มีการเปลี่ยนแปลง)
 
   Widget _buildBackground(Color topColor) {
     return Container(
@@ -441,7 +411,7 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
         image: const DecorationImage(
-          image: AssetImage('assets/images/card_background_oganize.png'),
+          image: AssetImage('assets/images/card_background_admin.png'),
           fit: BoxFit.cover,
         ),
         boxShadow: [
@@ -476,8 +446,13 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
               children: [
                 CircleAvatar(
                   radius: 60,
-                  backgroundImage: NetworkImage(avatarUrl),
-                  backgroundColor: Colors.grey.shade200,
+                  backgroundImage: avatarUrl.isNotEmpty
+                      ? CachedNetworkImageProvider(avatarUrl)
+                      // Fallback: ใช้ NetworkImage ธรรมดาเป็น Placeholder
+                      : NetworkImage(
+                              'https://avatar.iran.liara.run/username?username=$empName',
+                            )
+                            as ImageProvider,
                 ),
                 const SizedBox(height: 15),
 
@@ -543,7 +518,7 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
         image: const DecorationImage(
-          image: AssetImage('assets/images/card_background_oganize.png'),
+          image: AssetImage('assets/images/card_background_admin.png'),
           fit: BoxFit.cover,
         ),
         boxShadow: [
@@ -582,7 +557,7 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
           ),
           const SizedBox(height: 15),
           const Text(
-            'Show this to Employee to check-in',
+            'Show this to check-in',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 13, color: Color(0xFF375987)),
           ),
@@ -667,7 +642,7 @@ class _OrganizerProfileScreenState extends State<OrganizerProfileScreen> {
       leading: Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: const Color(0xFFFFF6CC),
+          color: const Color.fromARGB(255, 255, 204, 204),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Icon(icon, color: const Color(0xFF375987), size: 22),

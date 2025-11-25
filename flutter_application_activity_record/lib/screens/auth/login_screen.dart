@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_activity_record/screens/admin_screens/admin_main_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -8,6 +9,7 @@ import 'register/organization_register_screen.dart';
 import 'password/forgot_password_screen.dart';
 import '../employee_screens/main/employee_main_screen.dart';
 import '../organizer_screens/main/organizer_main_screen.dart';
+import '../admin_screens/admin_main_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -92,16 +94,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _navigateToUserMainScreen(String role) {
     Widget destinationScreen;
-    switch (role.toLowerCase()) {
-      case 'admin':
-      case 'organizer':
-        destinationScreen = const OrganizerMainScreen();
-        break;
-      case 'employee':
-      default:
-        destinationScreen = const EmployeeMainScreen();
-        break;
+    final cleanRole = role.toLowerCase();
+
+    if (cleanRole == 'admin') {
+      destinationScreen = const AdminMainScreen();
+    } else if (cleanRole == 'organizer') {
+      destinationScreen = const OrganizerMainScreen();
+    } else {
+      // Employee หรือ Default
+      destinationScreen = const EmployeeMainScreen();
     }
+
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (context) => destinationScreen),

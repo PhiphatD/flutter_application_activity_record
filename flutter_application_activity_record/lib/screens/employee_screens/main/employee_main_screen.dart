@@ -2,14 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:salomon_bottom_bar/salomon_bottom_bar.dart';
 import 'package:flutter_application_activity_record/theme/app_colors.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../activities/activity_feed_screen.dart';
 import '../rewards/reward_screen.dart';
 import '../activities/todo_screen.dart';
-import '../activities/activity_feed_screen.dart';
-import '../scan/employee_scanner_screen.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../../../controllers/notification_controller.dart';
+import '../../../services/websocket_service.dart';
 
 class EmployeeMainScreen extends StatefulWidget {
   const EmployeeMainScreen({super.key});
@@ -20,61 +19,81 @@ class EmployeeMainScreen extends StatefulWidget {
 
 class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
   int _selectedIndex = 0;
-
-  // [NEW] สร้าง GlobalKey เพื่อสั่งงานหน้า ActivityFeed
   final GlobalKey<ActivityFeedScreenState> _feedKey = GlobalKey();
-  WebSocketChannel? _channel;
+  String _myEmpId = "";
 
   @override
   void initState() {
     super.initState();
-    _connectWebSocket();
+    _initRealtimeService();
   }
 
-  @override
-  void dispose() {
-    _channel?.sink.close();
-    super.dispose();
-  }
-
-  void _connectWebSocket() async {
+  Future<void> _initRealtimeService() async {
     final prefs = await SharedPreferences.getInstance();
-    final myEmpId = prefs.getString('empId') ?? '';
+    _myEmpId = prefs.getString('empId') ?? '';
 
-    try {
-      // ใช้ IP เครื่องคุณ หรือ ngrok url
-      final wsUrl = Uri.parse(
-        'ws://numerably-nonevincive-kyong.ngrok-free.dev/ws',
-      );
-      _channel = WebSocketChannel.connect(wsUrl);
+    // [FIXED] เรียก Fetch ครั้งแรกเสมอเพื่อให้เลขตรงตั้งเเต่เปิดแอป
+    NotificationController().fetchUnreadCount(role: "Employee");
 
-      _channel!.stream.listen((message) {
-        // Message Format: "CHECKIN_SUCCESS|EMP_ID|ACT_NAME|SCANNED_BY"
-        if (message.toString().startsWith("CHECKIN_SUCCESS|")) {
-          final parts = message.toString().split('|');
-          if (parts.length >= 4) {
-            final empId = parts[1];
-            final actName = parts[2];
-            final scannedBy = parts[3];
+    if (_myEmpId.isNotEmpty) {
+      final wsService = WebSocketService();
+      wsService.connect(_myEmpId);
 
-            // เงื่อนไข: เป็น ID เรา และ เราไม่ได้สแกนเอง (Organizer สแกนให้)
-            if (empId == myEmpId && scannedBy != 'self') {
-              if (mounted) {
-                _showCheckInSuccessDialog(actName);
-                // สั่ง Refresh ข้อมูลในหน้า Feed (ถ้าทำได้) หรือปล่อยให้ Socket ในหน้าลูกทำงาน
-              }
-            }
+      wsService.events.listen((event) {
+        final String type = event['event'];
+        final dynamic data = event['data'];
+
+        print("🔔 MainScreen Received Event: $type"); // Debug Log
+
+        // [LOGIC] อัปเดตแจ้งเตือน
+        if (type == "REFRESH_NOTIFICATIONS") {
+          print("✨ Triggering Badge Update...");
+          NotificationController().fetchUnreadCount(role: "Employee");
+          _showInAppNotification("You have new notifications 🔔");
+        }
+
+        // [LOGIC] อัปเดตหน้า Activity
+        if (type == "REFRESH_ACTIVITIES") {
+          _feedKey.currentState?.refreshData();
+        }
+
+        // [LOGIC] เช็คอินสำเร็จ
+        if (type == "CHECKIN_SUCCESS" && data is List) {
+          if (data[0] == _myEmpId && data[2] != 'self') {
+            _showCheckInSuccessDialog(data[1]);
+            _feedKey.currentState?.refreshData();
+            NotificationController().fetchUnreadCount(role: "Employee");
           }
         }
       });
-    } catch (e) {
-      print("WS Error: $e");
     }
   }
 
+  void _showInAppNotification(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.info_outline, color: Colors.white),
+            const SizedBox(width: 12),
+            Text(message, style: GoogleFonts.poppins()),
+          ],
+        ),
+        backgroundColor: Colors.black87,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(20),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  // ... (ฟังก์ชัน _showCheckInSuccessDialog, _onItemTapped และ build เหมือนเดิม)
   void _showCheckInSuccessDialog(String activityName) {
     showDialog(
       context: context,
+      barrierDismissible: true,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         content: Column(
@@ -104,7 +123,7 @@ class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
             Text(
               "You have been checked in to\n\"$activityName\"",
               textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
+              style: GoogleFonts.poppins(color: Colors.grey[600]),
             ),
             const SizedBox(height: 20),
             SizedBox(
@@ -127,26 +146,15 @@ class _EmployeeMainScreenState extends State<EmployeeMainScreen> {
   }
 
   void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
-
-    // [NEW] ถ้ากดกลับมาหน้าแรก (index 0) ให้สั่งรีเฟรชข้อมูล
-    if (index == 0) {
-      _feedKey.currentState?.refreshData();
-    }
+    setState(() => _selectedIndex = index);
+    if (index == 0) _feedKey.currentState?.refreshData();
   }
 
   @override
   Widget build(BuildContext context) {
     const Color primaryColor = Color(0xFF4A80FF);
-
-    // ใช้ List ใน build เพื่อส่ง key และ callback
     final List<Widget> widgetOptions = <Widget>[
-      ActivityFeedScreen(
-        key: _feedKey, // [NEW] ผูก Key ไว้ที่นี่
-        onGoToTodo: () => _onItemTapped(1),
-      ),
+      ActivityFeedScreen(key: _feedKey, onGoToTodo: () => _onItemTapped(1)),
       const TodoScreen(),
       const RewardScreen(),
     ];

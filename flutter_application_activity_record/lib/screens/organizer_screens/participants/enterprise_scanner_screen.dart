@@ -3,7 +3,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 class EnterpriseScannerScreen extends StatefulWidget {
-  const EnterpriseScannerScreen({super.key});
+  final bool showBottomAction;
+
+  const EnterpriseScannerScreen({super.key, this.showBottomAction = true});
 
   @override
   State<EnterpriseScannerScreen> createState() =>
@@ -120,37 +122,38 @@ class _EnterpriseScannerScreenState extends State<EnterpriseScannerScreen> {
 
                 const SizedBox(height: 40),
 
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  color: Colors.black.withOpacity(0.5),
-                  child: Column(
-                    children: [
-                      InkWell(
-                        onTap: () {
-                          Navigator.pop(context, "SHOW_MY_QR");
-                        },
-                        child: Column(
-                          children: [
-                            const Icon(
-                              Icons.qr_code_2,
-                              color: Colors.white,
-                              size: 32,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              "Activity Check-in QR Code",
-                              style: GoogleFonts.kanit(
+                if (widget.showBottomAction)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    color: Colors.black.withOpacity(0.5),
+                    child: Column(
+                      children: [
+                        InkWell(
+                          onTap: () {
+                            Navigator.pop(context, "SHOW_MY_QR");
+                          },
+                          child: Column(
+                            children: [
+                              const Icon(
+                                Icons.qr_code_2,
                                 color: Colors.white,
-                                fontSize: 14,
+                                size: 32,
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 4),
+                              Text(
+                                "Activity Check-in QR Code",
+                                style: GoogleFonts.kanit(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
               ],
             ),
           ),

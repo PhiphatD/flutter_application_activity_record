@@ -156,13 +156,24 @@ class Activity {
     // [UPDATED] Parsing Logic สำหรับ Attachments
     List<ActivityAttachment> parsedAttachments = [];
 
-    // 1. กรณี Backend ส่งมาเป็น List (New format)
-    if (json['attachments'] != null) {
+    // 1. กรณี Backend ส่งมาเป็น JSON String (actAttachments)
+    if (json['actAttachments'] != null && json['actAttachments'] is String) {
+      try {
+        final List<dynamic> list = jsonDecode(json['actAttachments']);
+        parsedAttachments = list
+            .map((e) => ActivityAttachment.fromJson(e))
+            .toList();
+      } catch (e) {
+        print("Error parsing actAttachments: $e");
+      }
+    }
+    // 2. กรณี Backend ส่งมาเป็น List โดยตรง (เผื่อไว้)
+    else if (json['attachments'] != null && json['attachments'] is List) {
       parsedAttachments = (json['attachments'] as List)
           .map((e) => ActivityAttachment.fromJson(e))
           .toList();
     }
-    // 2. กรณี Backend เก่าส่งมาแค่ actImage (Legacy support)
+    // 3. กรณี Backend เก่าส่งมาแค่ actImage (Legacy support)
     else if (json['actImage'] != null &&
         json['actImage'].toString().isNotEmpty) {
       parsedAttachments.add(

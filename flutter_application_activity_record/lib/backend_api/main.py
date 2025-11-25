@@ -1,8 +1,9 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, File, UploadFile, Form, WebSocket, WebSocketDisconnect, Query
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from passlib.context import CryptContext
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 import models
 from database import engine, get_db
 import random
@@ -10,56 +11,99 @@ import string
 import smtplib 
 from email.mime.text import MIMEText 
 from email.mime.multipart import MIMEMultipart 
-from datetime import time
-# --- CSV Upload ---
 import csv
 import codecs
-from fastapi import File, UploadFile, Form
-from datetime import timedelta, datetime
 import json
-from fastapi import WebSocket, WebSocketDisconnect
+import os
+import shutil
+import threading
+import time as time_module
+import schedule
+
+# [SETUP] Create static folder if not exists
+if not os.path.exists("static"):
+    os.makedirs("static")
 
 # สร้างตารางใน DB อัตโนมัติ (ถ้ายังไม่มี)
 models.Base.metadata.create_all(bind=engine)
 
+# Mount static files
 app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # --- Schemas (ตัวกำหนดรูปแบบข้อมูลที่รับส่ง) ---
 
+class AnnouncementRequest(BaseModel):
+    title: str
+    message: str
+    target_role: str = "All"
+
+class UpdateRedeemStatusRequest(BaseModel):
+    status: str
+    voucher_code: str | None = None # [NEW] รับโค้ดมาด้วย
+
+class EmployeeUpdateRequest(BaseModel):
+    title: str
+    name: str
+    phone: str
+    email: str
+    department_id: str # รับเป็น ID หรือ Name ก็ได้ (ในที่นี้ใช้ Logic resolve_department)
+    position: str
+    role: str
+    status: str
+    start_date: str # YYYY-MM-DD
+
+class PointPolicyRequest(BaseModel):
+    policy_name: str = "Annual Expiry Policy"
+    start_date: date
+    end_date: date
+    description: str | None = None
+
+# [UPDATED] รองรับรูปภาพหลายรูป (List)
+class PrizeCreateRequest(BaseModel):
+    name: str
+    point_cost: int
+    description: str | None = None
+    images: list[str] = [] 
+    stock: int
+    prize_type: str = "Physical"
+    pickup_instruction: str | None = "Contact HR"
+
+class PrizePickupRequest(BaseModel):
+    redeem_id: str
+    admin_id: str
+
+# [UPDATED] รองรับรูปภาพหลายรูป (List)
 class PrizeResponse(BaseModel):
     id: str
     name: str
     pointCost: int
     description: str
-    image: str | None = None
+    images: list[str] = [] # ใช้ List แทน String
     stock: int
-    category: str = "General"  # Default category for now
+    category: str = "General"
     status: str
+    prizeType: str = "Physical"
     
     class Config:
         from_attributes = True
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
+# [UPDATED] รองรับรูปภาพหลายรูป (List)
+class MyRedemptionResponse(BaseModel):
+    redeemId: str
+    prizeName: str
+    pointCost: int
+    redeemDate: datetime
+    status: str
+    images: list[str] = [] # ใช้ List แทน String
+    pickupInstruction: str | None = "Contact HR"
+    
+    class Config:
+        from_attributes = True
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
 
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: str):
-        # ส่งข้อความหาทุกเครื่องที่ต่ออยู่
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message)
-            except:
-                pass
-
-manager = ConnectionManager()
 
 class CancelRedeemRequest(BaseModel):
     emp_id: str
@@ -72,31 +116,6 @@ class RedeemRequest(BaseModel):
 class ActivityRegisterRequest(BaseModel):
     emp_id: str
     session_id: str
-
-class PrizeResponse(BaseModel):
-    id: str
-    name: str
-    pointCost: int
-    description: str
-    image: str | None = None
-    stock: int
-    category: str = "General" # Default category for now
-    status: str
-    prizeType: str = "Physical"
-
-    class Config:
-        from_attributes = True
-
-class MyRedemptionResponse(BaseModel):
-    redeemId: str
-    prizeName: str
-    pointCost: int
-    redeemDate: datetime
-    status: str
-    image: str | None = None
-    pickupInstruction: str | None = "Contact HR"
-    class Config:
-        from_attributes = True
 
 class UnregisterRequest(BaseModel):
     emp_id: str
@@ -124,12 +143,12 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     # Company Info
     companyName: str
-    taxId: str          # New
-    address: str        # New
+    taxId: str
+    address: str
     businessType: str
     
     # Admin Info
-    adminTitle: str     # New
+    adminTitle: str
     adminFullName: str
     adminEmail: str
     adminPhone: str
@@ -137,8 +156,8 @@ class RegisterRequest(BaseModel):
     adminStartDate: str
 
 class ActivityResponse(BaseModel):
-    actId: str          # แก้เป็น String ให้ตรงกับ DB
-    orgId: str          # แก้เป็น String
+    actId: str
+    orgId: str
     organizerName: str
     actType: str
     isCompulsory: int
@@ -147,7 +166,7 @@ class ActivityResponse(BaseModel):
     currentParticipants: int
     maxParticipants: int
     status: str
-    location: str = "-" # เพิ่ม location
+    location: str = "-"
     activityDate: date | None = None
     startTime: str | None = "-" 
     endTime: str | None = "-"
@@ -155,7 +174,6 @@ class ActivityResponse(BaseModel):
     class Config:
         orm_mode = True
 
-# [NEW] Schema สำหรับ Session ในหน้า Detail
 class ActivitySessionResponse(BaseModel):
     sessionId: str
     date: date
@@ -166,7 +184,6 @@ class ActivitySessionResponse(BaseModel):
     class Config:
         orm_mode = True
 
-# [NEW] Schema สำหรับหน้า Detail (ข้อมูลครบ)
 class ActivityDetailResponse(BaseModel):
     actId: str
     orgId: str
@@ -189,14 +206,19 @@ class ActivityDetailResponse(BaseModel):
     travelInfo: str       
     moreDetails: str      
     targetCriteria: str | None = None
-    actImage: str | None = None # [NEW] เพิ่มตัวนี้
-    agenda: str | None = None # [NEW]
+    actAttachments: str | None = "[]"
+    agenda: str | None = None
     isFavorite: bool = False
-    isRegistered: bool = False # [NEW]
+    isRegistered: bool = False
     sessions: list[ActivitySessionResponse]
 
     class Config:
         orm_mode = True
+
+class ActivityAttachmentRequest(BaseModel):
+    url: str
+    type: str = "IMAGE"
+    name: str = "image.jpg"
 
 class ActivityData(BaseModel):
     ACT_NAME: str
@@ -215,17 +237,19 @@ class ActivityData(BaseModel):
     ACT_ISCOMPULSORY: int
     ACT_STATUS: str = "Open"
     ACT_TARGET_CRITERIA: str | None = None
-    ACT_IMAGE: str | None = None  # รับ URL ของรูป
-    ACT_AGENDA: str | None = None # รับ JSON String ของ Agenda
+    # [NEW] รับเป็น List แทน
+    ACT_ATTACHMENTS: list[ActivityAttachmentRequest] = [] 
+    # ACT_IMAGE: str | None = None <-- (เลิกใช้)
+    ACT_AGENDA: str | None = None
 
 class OrganizerData(BaseModel):
     ORG_NAME: str
     ORG_CONTACT_INFO: str
 
 class SessionData(BaseModel):
-    SESSION_DATE: str # รับเป็น String ISO Format
-    START_TIME: str   # HH:MM
-    END_TIME: str     # HH:MM
+    SESSION_DATE: str
+    START_TIME: str
+    END_TIME: str
     LOCATION: str
 
 class ActivityFormRequest(BaseModel):
@@ -249,131 +273,213 @@ class MyActivityResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# [NEW] Schema สำหรับตอบกลับ My Activities (Upcoming)
-@app.get("/my-registrations/{emp_id}", response_model=list[MyActivityResponse])
-def get_my_registrations(emp_id: str, db: Session = Depends(get_db)):
-    today = date.today()
-    
-    employee = db.query(models.Employee).filter(models.Employee.EMP_ID == emp_id).first()
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    
-    emp_dept_name = employee.department.DEP_NAME if employee.department else ""
-    emp_position = employee.EMP_POSITION
+class NotificationResponse(BaseModel):
+    notifId: str
+    title: str
+    message: str
+    type: str        # Activity, Reward, Alert
+    isRead: bool
+    createdAt: datetime
+    routePath: str | None = None
+    refId: str | None = None
 
-    output = []
-    
-    # --- Part A: กิจกรรมที่ลงทะเบียนจริง ---
-    regs = db.query(models.Registration).filter(models.Registration.EMP_ID == emp_id).all()
-    registered_session_ids = set()
+    class Config:
+        from_attributes = True
 
-    for r in regs:
-        registered_session_ids.add(r.SESSION_ID)
-        
-        sess = db.query(models.ActivitySession).filter(models.ActivitySession.SESSION_ID == r.SESSION_ID).first()
-        if not sess: continue
-        
-        act = db.query(models.Activity).filter(models.Activity.ACT_ID == sess.ACT_ID).first()
-        if not act: continue
-        
-        checkin = db.query(models.CheckIn).filter(
-            models.CheckIn.EMP_ID == emp_id, 
-            models.CheckIn.SESSION_ID == sess.SESSION_ID
-        ).first()
-        
-        status = "Upcoming"
-        if checkin:
-            status = "Joined"
-        elif sess.SESSION_DATE < today:
-            status = "Missed"
-        
-        output.append({
-            "actId": act.ACT_ID,
-            "actType": act.ACT_TYPE,
-            "name": act.ACT_NAME,
-            "location": sess.LOCATION,
-            "activityDate": sess.SESSION_DATE,
-            "startTime": sess.START_TIME.strftime("%H:%M"),
-            "endTime": sess.END_TIME.strftime("%H:%M"),
-            "status": status,
-            "sessionId": sess.SESSION_ID,
-            # [NEW] เพิ่ม 2 ค่านี้
-            "isCompulsory": act.ACT_ISCOMPULSORY == 1, 
-            "point": act.ACT_POINT
-        })
+class CreateNotificationRequest(BaseModel):
+    emp_id: str
+    title: str
+    message: str
+    type: str
+    ref_id: str | None = None
+    route_path: str | None = None
 
-    # --- Part B: กิจกรรมบังคับ (Auto-Inject) ---
-    compulsory_acts = db.query(models.Activity).join(models.ActivitySession).filter(
-        models.Activity.ACT_ISCOMPULSORY == True
-    ).distinct().all()
+class ConnectionManager:
+    def __init__(self):
+        # เปลี่ยนจาก list เป็น dict เพื่อเก็บ emp_id -> websocket
+        self.active_connections: dict[str, WebSocket] = {} 
 
-    for act in compulsory_acts:
-        is_target = False
-        if not act.ACT_TARGET_CRITERIA:
-            is_target = True 
-        else:
-            try:
-                criteria = json.loads(act.ACT_TARGET_CRITERIA)
-                target_type = criteria.get('type', 'all')
-                if target_type == 'all':
-                    is_target = True
-                elif target_type == 'specific':
-                    if emp_dept_name in criteria.get('departments', []):
-                        is_target = True
-                    if not is_target and emp_position in criteria.get('positions', []):
-                        is_target = True
-            except:
-                is_target = False
+    async def connect(self, websocket: WebSocket, emp_id: str):
+        await websocket.accept()
+        self.active_connections[emp_id] = websocket
 
-        if is_target:
-            target_sessions = [s for s in act.sessions if s.SESSION_DATE >= today]
-            if not target_sessions: continue 
+    def disconnect(self, emp_id: str):
+        if emp_id in self.active_connections:
+            del self.active_connections[emp_id]
 
-            target_session = sorted(target_sessions, key=lambda x: (x.SESSION_DATE, x.START_TIME))[0]
+    async def send_personal_message(self, message: str, emp_id: str):
+        # ส่งหาเฉพาะคน
+        if emp_id in self.active_connections:
+            await self.active_connections[emp_id].send_text(message)
+            
+    async def broadcast(self, message: str):
+        # ส่งหาทุกคน (สำหรับ Admin ประกาศ)
+        for connection in self.active_connections.values():
+            await connection.send_text(message)
 
-            if target_session.SESSION_ID in registered_session_ids:
-                continue
+manager = ConnectionManager()
 
-            output.append({
-                "actId": act.ACT_ID,
-                "actType": act.ACT_TYPE,
-                "name": act.ACT_NAME,
-                "location": target_session.LOCATION,
-                "activityDate": target_session.SESSION_DATE,
-                "startTime": target_session.START_TIME.strftime("%H:%M"),
-                "endTime": target_session.END_TIME.strftime("%H:%M"),
-                "status": "Upcoming", 
-                "sessionId": target_session.SESSION_ID,
-                # [NEW] เพิ่ม 2 ค่านี้ (บังคับต้องเป็น True)
-                "isCompulsory": True,
-                "point": act.ACT_POINT
-            })
-    
-    output.sort(key=lambda x: x['activityDate'], reverse=True)
-    return output
-
-# [NEW] Schema สำหรับข้อมูลผู้เข้าร่วม (Participant)
 class ParticipantResponse(BaseModel):
     empId: str
     title: str | None = None 
     name: str
     department: str
-    status: str         # "Registered" หรือ "Joined"
-    checkInTime: str    # เวลาที่เช็คอิน (ถ้ามี)
+    status: str
+    checkInTime: str
     
     class Config:
         orm_mode = True
 
 class CheckInRequest(BaseModel):
     emp_id: str
-    act_id: str        # หรือ session_id ก็ได้ แต่เพื่อความง่ายใช้ act_id ก่อน แล้วระบบหา session ที่ใกล้สุดเอง
-    scanned_by: str    # ระบุว่าใครเป็นคนสแกน ('organizer' หรือ 'self')
-    location_lat: float | None = None # เผื่ออนาคตเช็คพิกัด
+    act_id: str
+    scanned_by: str
+    location_lat: float | None = None
     location_long: float | None = None
+
+class TargetCountRequest(BaseModel):
+    type: str = "all"
+    departments: list[str] = []
+    positions: list[str] = []
+    admin_id: str | None = None
+
+@app.post("/activities/count-target")
+def count_target_audience(req: TargetCountRequest, db: Session = Depends(get_db)):
+    try:
+        # 1. Find Company ID
+        company_id = None
+        if req.admin_id:
+             admin = db.query(models.Employee).filter(models.Employee.EMP_ID == req.admin_id).first()
+             if admin: company_id = admin.COMPANY_ID
+        
+        # 2. Query all active employees in company
+        query = db.query(models.Employee).filter(models.Employee.EMP_STATUS == 'Active')
+        if company_id:
+            query = query.filter(models.Employee.COMPANY_ID == company_id)
+            
+        all_employees = query.all()
+        
+        # 3. Count based on criteria
+        if req.type == 'all':
+            return {"count": len(all_employees)}
+            
+        # Specific Group Logic
+        count = 0
+        target_depts = [d.strip() for d in req.departments]
+        target_positions = [p.strip() for p in req.positions]
+        
+        for emp in all_employees:
+            emp_dept = emp.department.DEP_NAME.strip() if emp.department else ""
+            emp_pos = emp.EMP_POSITION.strip()
+            
+            is_match = False
+            # Dept Match
+            if target_depts and emp_dept in target_depts:
+                is_match = True
+            # Position Match
+            elif target_positions and emp_pos in target_positions:
+                is_match = True
+                
+            if is_match:
+                count += 1
+                
+        return {"count": count}
+        
+    except Exception as e:
+        print(f"Count Error: {e}")
+        return {"count": 0}
     
 # --- Helper Functions ---
+
+def check_upcoming_notifications():
+    """ รันทุก 1 นาที เพื่อเช็คการแจ้งเตือนระยะสั้น (1 ชม.) """
+    db = SessionLocal()
+    try:
+        now = datetime.now()
+        # ช่วงเวลาเป้าหมาย: อีก 60 นาทีข้างหน้า (บวกลบ 1 นาทีกันพลาด)
+        target_time_start = now + timedelta(minutes=59)
+        target_time_end = now + timedelta(minutes=61)
+
+        # หา Session ที่จะเริ่มในช่วงเวลานั้น
+        # หมายเหตุ: ต้องเช็ควันที่และเวลาให้ตรงกัน
+        upcoming_sessions = db.query(models.ActivitySession).all() # ดึงมากรอง (หรือเขียน Query กรองวันที่+เวลา)
+        
+        for sess in upcoming_sessions:
+            # รวม Date + Time
+            sess_start_dt = datetime.combine(sess.SESSION_DATE, sess.START_TIME)
+            
+            # ถ้าเวลาเริ่ม อยู่ในช่วง 1 ชั่วโมงข้างหน้า
+            if target_time_start <= sess_start_dt <= target_time_end:
+                regs = db.query(models.Registration).filter(
+                    models.Registration.SESSION_ID == sess.SESSION_ID
+                ).all()
+                
+                act = sess.activity
+                for reg in regs:
+                    # เช็คว่าเคยส่งเตือนหรือยัง (ป้องกัน Spam) - ในที่นี้ข้าม Logic เช็คซ้ำไปก่อน
+                    create_notification_internal(
+                        db,
+                        emp_id=reg.EMP_ID,
+                        title="⏳ อีก 1 ชั่วโมงกิจกรรมจะเริ่ม",
+                        message=f"เตรียมตัวให้พร้อม! '{act.ACT_NAME}' จะเริ่มเวลา {sess.START_TIME.strftime('%H:%M')} น.",
+                        notif_type="Activity",
+                        target_role="Employee",
+                        ref_id=act.ACT_ID,
+                        route_path="/activity_detail"
+                    )
+        db.commit()
+    except Exception as e:
+        print(f"❌ Hourly Check Error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+def check_is_target(activity, employee):
+    """
+    ฟังก์ชันตรวจสอบว่าพนักงานตรงกับ Target Criteria ของกิจกรรมหรือไม่
+    """
+    # 1. ถ้าไม่มี Criteria หรือเป็น NULL -> ถือว่าบังคับทุกคน
+    if not activity.ACT_TARGET_CRITERIA:
+        return True
+        
+    try:
+        criteria = json.loads(activity.ACT_TARGET_CRITERIA)
+        target_type = criteria.get('type', 'all')
+        
+        if target_type == 'all':
+            return True
+            
+        if target_type == 'specific':
+            # เตรียมข้อมูลพนักงาน (ตัดช่องว่าง)
+            emp_dept = employee.department.DEP_NAME.strip() if employee.department else ""
+            emp_pos = employee.EMP_POSITION.strip()
+            
+            # เตรียมข้อมูล Target (ตัดช่องว่าง)
+            target_depts = [d.strip() for d in criteria.get('departments', [])]
+            target_positions = [p.strip() for p in criteria.get('positions', [])]
+            
+            # เทียบเงื่อนไข (แผนกตรง หรือ ตำแหน่งตรง)
+            if target_depts and emp_dept in target_depts:
+                return True
+            if target_positions and emp_pos in target_positions:
+                return True
+                
+            return False # เป็นแบบ Specific แต่ไม่ตรงเงื่อนไขใดเลย
+            
+        return True # Type อื่นๆ ให้ผ่านไว้ก่อน (Fail-safe)
+        
+    except Exception as e:
+        print(f"Target check error: {e}")
+        return True # ถ้า JSON พัง ให้ยอมรับไว้ก่อน (Fail-safe)
+def get_admin_company_id_and_check(admin_id: str, db: Session):
+    admin = db.query(models.Employee).filter(models.Employee.EMP_ID == admin_id).first()
+    
+    if not admin or admin.EMP_ROLE.lower() != 'admin':
+        raise HTTPException(status_code=403, detail="Permission denied. Must be Admin.")
+        
+    return admin.COMPANY_ID
+
 def _bcrypt_safe(password: str) -> str:
-    # ตัดรหัสผ่านให้ไม่เกิน 72 bytes เพื่อป้องกัน bcrypt error
     pw_bytes = password.encode('utf-8') if isinstance(password, str) else password
     pw_bytes = pw_bytes[:72]
     return pw_bytes.decode('utf-8', errors='ignore')
@@ -385,15 +491,114 @@ def verify_password(plain_password, hashed_password):
     return pwd_context.verify(_bcrypt_safe(plain_password), hashed_password)
 
 def generate_id(prefix, length=5):
-    # สร้าง ID สุ่ม เช่น C1234, E5678
     return prefix + ''.join(random.choices(string.digits, k=length-1))
 
-def send_otp_email(to_email: str, otp_code: str):
-    # --- ตั้งค่าอีเมลคนส่ง ---
-    sender_email = "nut98765431@gmail.com"      # <--- ใส่ Gmail ของคุณที่นี่
-    sender_password = "vamo wowf mbzm lkkz"    # <--- ใส่ App Password 16 หลักที่ได้มา (ไม่ใช่รหัสผ่านเข้าเมล!)
+def check_daily_notifications():
+    """ รันทุก 10 วินาที เพื่อแจ้งเตือนกิจกรรมและแต้มหมดอายุ """
+    db = SessionLocal()
+    try:
+        print("⏰ Running Daily Notification Check...")
+        today = date.today()
+        tomorrow = today + timedelta(days=1)
+        next_month = today + timedelta(days=30)
 
-    # ตั้งค่าเนื้อหาอีเมล
+        # [LOGIC 4] Upcoming Event Reminder (เตือนล่วงหน้า 1 วัน)
+        upcoming_sessions = db.query(models.ActivitySession).filter(
+            models.ActivitySession.SESSION_DATE == tomorrow
+        ).all()
+
+        for sess in upcoming_sessions:
+            # หาคนที่ลงทะเบียนไว้
+            regs = db.query(models.Registration).filter(
+                models.Registration.SESSION_ID == sess.SESSION_ID
+            ).all()
+            
+            act = sess.activity
+            for reg in regs:
+                create_notification_internal(
+                    db,
+                    emp_id=reg.EMP_ID,
+                    title="🔔 กิจกรรมจะเริ่มพรุ่งนี้",
+                    message=f"อย่าลืม! กิจกรรม '{act.ACT_NAME}' จะเริ่มเวลา {sess.START_TIME.strftime('%H:%M')}",
+                    notif_type="Activity",
+                    target_role="Employee",
+                    ref_id=act.ACT_ID,
+                    route_path="/activity_detail"
+                )
+
+        # [LOGIC 5] Points Expiry Warning (เตือนก่อนหมดอายุ 30 วัน)
+        # สมมติ Policy ตัดทุกสิ้นปี
+        this_year_end = date(today.year, 12, 31)
+        days_left = (this_year_end - today).days
+        
+        if days_left == 30 or days_left == 7: # เตือนเมื่อเหลือ 30 วัน และ 7 วัน
+            users_with_points = db.query(models.Points).filter(models.Points.TOTAL_POINTS > 0).all()
+            for user_p in users_with_points:
+                create_notification_internal(
+                    db,
+                    emp_id=user_p.EMP_ID,
+                    title="⚠️ คะแนนใกล้หมดอายุ",
+                    message=f"คุณมี {user_p.TOTAL_POINTS} คะแนนที่จะหมดอายุในอีก {days_left} วัน รีบใช้เลย!",
+                    notif_type="Alert",
+                    target_role="Employee",
+                    route_path="/rewards"
+                )
+
+        db.commit()
+        print("✅ Daily Check Complete")
+        
+    except Exception as e:
+        print(f"❌ Daily Check Error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+def create_notification_internal(
+    db: Session, 
+    emp_id: str, 
+    title: str, 
+    message: str, 
+    notif_type: str, 
+    target_role: str = "Employee",
+    ref_id: str = None, 
+    route_path: str = None
+    
+):
+    """
+    ฟังก์ชันกลางสำหรับสร้าง Notification ลง DB และส่ง WebSocket (ถ้าทำได้)
+    """
+    try:
+        # 1. สร้าง ID ใหม่ (เช่น NT + timestamp + random)
+        new_id = generate_id("NT", 12) 
+        
+        # 2. สร้าง Object
+        new_notif = models.Notification(
+            NOTIF_ID=new_id,
+            EMP_ID=emp_id,
+            TITLE=title,
+            MESSAGE=message,
+            NOTIF_TYPE=notif_type,
+            TARGET_ROLE=target_role,
+            REF_ID=ref_id,
+            ROUTE_PATH=route_path,
+            IS_READ=False,
+            CREATED_AT=datetime.now()
+        )
+        db.add(new_notif)
+        # หมายเหตุ: เราจะไม่ db.commit() ที่นี่ เพื่อให้มัน commit พร้อม transaction หลักได้
+        # แต่ถ้าต้องการให้แจ้งเตือนแยกส่วน ก็ db.commit() ได้เลย
+        # ในที่นี้ขอให้ Caller เป็นคน Commit เพื่อความปลอดภัยของ Transaction
+        
+        print(f"🔔 Notification created for {emp_id}: {title}")
+        return new_notif
+        
+    except Exception as e:
+        print(f"Error creating notification: {e}")
+
+def send_otp_email(to_email: str, otp_code: str):
+    sender_email = "nut98765431@gmail.com"
+    sender_password = "vamo wowf mbzm lkkz"
+
     subject = "รหัส OTP สำหรับรีเซ็ตรหัสผ่าน - Activity App"
     body = f"""
     สวัสดี,
@@ -404,7 +609,6 @@ def send_otp_email(to_email: str, otp_code: str):
     หากคุณไม่ได้ทำรายการนี้ โปรดเพิกเฉยต่ออีเมลฉบับนี้
     """
 
-    # สร้าง Object อีเมล
     msg = MIMEMultipart()
     msg['From'] = sender_email
     msg['To'] = to_email
@@ -412,9 +616,8 @@ def send_otp_email(to_email: str, otp_code: str):
     msg.attach(MIMEText(body, 'plain'))
 
     try:
-        # เชื่อมต่อกับ Gmail SMTP Server
         server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls() # เข้ารหัสการเชื่อมต่อ
+        server.starttls()
         server.login(sender_email, sender_password)
         text = msg.as_string()
         server.sendmail(sender_email, to_email, text)
@@ -424,48 +627,32 @@ def send_otp_email(to_email: str, otp_code: str):
         print(f"❌ Failed to send email: {e}")
         raise Exception("ไม่สามารถส่งอีเมลได้ กรุณาตรวจสอบระบบ")
 
-# [NEW] ฟังก์ชันช่วยแปลงวันที่ให้รองรับหลายรูปแบบ  
 def parse_date_str(date_str: str) -> date:
     if not date_str or not date_str.strip():
         return date.today()
     
-    # ลบช่องว่างหัวท้าย
     d = date_str.strip()
-    
-    # รูปแบบวันที่ที่รองรับ
-    formats = [
-        '%Y-%m-%d', # 2025-11-19 (Standard Database)
-        '%d/%m/%Y', # 19/11/2025 (Thai/UK format)
-        '%d-%m-%Y', # 19-11-2025
-        '%Y/%m/%d'  # 2025/11/19
-    ]
-    
+    formats = ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d']
     for fmt in formats:
         try:
             return datetime.strptime(d, fmt).date()
         except ValueError:
             continue
-            
-    # ถ้าแปลงไม่ได้เลย ให้ใช้วันปัจจุบันแทน (หรือจะ raise Error ก็ได้)
     return date.today()
 
 def parse_time_safe(t_str: str) -> time:
     if not t_str:
         return time(9, 0)
     t_str = t_str.strip()
-    # รูปแบบเวลาที่รองรับ: 24 ชม., มีวินาที, หรือ AM/PM
     formats = ["%H:%M", "%H:%M:%S", "%I:%M %p"] 
     for fmt in formats:
         try:
             return datetime.strptime(t_str, fmt).time()
         except ValueError:
             continue
-    # Default fallback ถ้าแปลงไม่ได้
     return time(9, 0)
 
 # --- API Endpoints ---
-
-# ในไฟล์ main.py ส่วน Endpoint /login
 
 @app.post("/login")
 def login(req: LoginRequest, db: Session = Depends(get_db)):
@@ -474,7 +661,6 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     if not user or not verify_password(req.password, user.EMP_PASSWORD):
         raise HTTPException(status_code=400, detail="อีเมลหรือรหัสผ่านไม่ถูกต้อง")
     
-    # [NEW] หา org_id ถ้ามี
     org_id = None
     if user.organizer_profile:
         org_id = user.organizer_profile.ORG_ID
@@ -485,22 +671,17 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         "emp_id": user.EMP_ID,
         "company_id": user.COMPANY_ID,
         "name": user.EMP_NAME_EN,
-        "org_id": org_id # [ADDED] ส่งค่านี้กลับไป
+        "org_id": org_id
     }
 
 @app.post("/register_organization")
 def register_org(req: RegisterRequest, db: Session = Depends(get_db)):
-    # 1. เช็คก่อนว่า Email ซ้ำไหม
     existing_user = db.query(models.Employee).filter(models.Employee.EMP_EMAIL == req.adminEmail).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="อีเมลนี้ถูกใช้งานแล้ว")
 
     try:
-        # --- เริ่ม Transaction ---
-        
-        # 2. สร้าง Company
         new_company_id = generate_id("C")
-        # loop เช็ค ID ซ้ำ
         while db.query(models.Company).filter(models.Company.COMPANY_ID == new_company_id).first():
              new_company_id = generate_id("C")
 
@@ -513,36 +694,32 @@ def register_org(req: RegisterRequest, db: Session = Depends(get_db)):
         )
         db.add(new_company)
 
-        # 3. สร้าง Department แรก (Headquarters)
         new_dep_id = generate_id("D")
         while db.query(models.Department).filter(models.Department.DEP_ID == new_dep_id).first():
              new_dep_id = generate_id("D")
 
         new_department = models.Department(
             DEP_ID=new_dep_id,
-            COMPANY_ID=new_company_id, # ผูกกับบริษัทที่เพิ่งสร้าง
-            DEP_NAME="Headquarters"    # แผนกเริ่มต้น
+            COMPANY_ID=new_company_id,
+            DEP_NAME="Headquarters"
         )
         db.add(new_department)
 
-        # 4. สร้าง Employee (Admin)
         new_emp_id = generate_id("E")
         while db.query(models.Employee).filter(models.Employee.EMP_ID == new_emp_id).first():
             new_emp_id = generate_id("E")
 
         hashed_pw = get_password_hash(req.adminPassword)
         try:
-            # แปลงจาก YYYY-MM-DD
             start_date_obj = date.fromisoformat(req.adminStartDate)
         except (ValueError, TypeError):
-            # ถ้าแปลงไม่ได้ หรือส่งมาผิด ให้ใช้วันปัจจุบัน
             start_date_obj = date.today()
-        # ------------------------------------------------------
+
         new_admin = models.Employee(
             EMP_ID=new_emp_id,
-            COMPANY_ID=new_company_id, # ผูกกับบริษัท
-            EMP_TITLE_EN=req.adminTitle, # คำนำหน้า
-            EMP_NAME_EN=req.adminFullName, # เบื้องต้นใช้ชื่อเดียวกันไปก่อน
+            COMPANY_ID=new_company_id,
+            EMP_TITLE_EN=req.adminTitle,
+            EMP_NAME_EN=req.adminFullName,
             EMP_POSITION="Administrator",
             DEP_ID=new_dep_id,
             EMP_PHONE=req.adminPhone,
@@ -553,8 +730,6 @@ def register_org(req: RegisterRequest, db: Session = Depends(get_db)):
             EMP_ROLE="admin"
         )
         db.add(new_admin)
-
-        # 5. ✅ Commit ทีเดียวตอนจบ
         db.commit()
         
         return {
@@ -564,36 +739,27 @@ def register_org(req: RegisterRequest, db: Session = Depends(get_db)):
         }
 
     except Exception as e:
-        # 6. 🛑 ถ้ามีอะไรพัง ให้ยกเลิกทั้งหมด (Rollback)
         db.rollback()
         print(f"Error Registering: {e}")
         raise HTTPException(status_code=500, detail=f"เกิดข้อผิดพลาด: {str(e)}")
 
-# --- API Endpoints Reset Password  ---
-
-# 1. ขอ OTP
 @app.post("/forgot-password")
 def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(models.Employee).filter(models.Employee.EMP_EMAIL == req.email).first()
     if not user:
         raise HTTPException(status_code=404, detail="ไม่พบอีเมลนี้ในระบบ")
     
-    # สร้าง OTP 6 หลัก
     otp = ''.join(random.choices(string.digits, k=6))
-    
-    # บันทึกลง DB
     user.OTP_CODE = otp
     db.commit()
     
-    # *** เปลี่ยนจาก Print เป็นส่งอีเมลจริง ***
     try:
-        send_otp_email(req.email, otp) # เรียกฟังก์ชันส่งอีเมล
+        send_otp_email(req.email, otp)
     except Exception as e:
         raise HTTPException(status_code=500, detail="เกิดข้อผิดพลาดในการส่งอีเมล")
     
     return {"message": "ส่งรหัส OTP ไปยังอีเมลเรียบร้อยแล้ว"}
 
-# 2. ตรวจสอบ OTP
 @app.post("/verify-otp")
 def verify_otp(req: VerifyOtpRequest, db: Session = Depends(get_db)):
     user = db.query(models.Employee).filter(models.Employee.EMP_EMAIL == req.email).first()
@@ -605,24 +771,19 @@ def verify_otp(req: VerifyOtpRequest, db: Session = Depends(get_db)):
         
     return {"message": "OTP ถูกต้อง"}
 
-# 3. เปลี่ยนรหัสผ่านใหม่
 @app.post("/reset-password")
 def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
     user = db.query(models.Employee).filter(models.Employee.EMP_EMAIL == req.email).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # Hash รหัสผ่านใหม่
     hashed_pw = get_password_hash(req.newPassword)
-    
-    # อัปเดตข้อมูล
     user.EMP_PASSWORD = hashed_pw
-    user.OTP_CODE = None # เคลียร์ OTP ทิ้งเมื่อใช้แล้ว
+    user.OTP_CODE = None
     db.commit()
     
     return {"message": "เปลี่ยนรหัสผ่านสำเร็จ"}
 
-# --- API Endpoint ใหม่สำหรับดึงข้อมูล Profile ---
 @app.get("/employees/{emp_id}")
 def get_employee_profile(emp_id: str, db: Session = Depends(get_db)):
     user = db.query(models.Employee).filter(models.Employee.EMP_ID == emp_id).first()
@@ -637,7 +798,6 @@ def get_employee_profile(emp_id: str, db: Session = Depends(get_db)):
     if user.company:
         comp_name = user.company.COMPANY_NAME
 
-    # [NEW] ดึงคะแนนจากตาราง Points
     current_points = 0
     if user.points:
         current_points = user.points.TOTAL_POINTS
@@ -652,18 +812,15 @@ def get_employee_profile(emp_id: str, db: Session = Depends(get_db)):
         "EMP_EMAIL": user.EMP_EMAIL,
         "EMP_PHONE": user.EMP_PHONE,
         "EMP_STARTDATE": user.EMP_STARTDATE,
-        "TOTAL_POINTS": current_points # [ADDED] ส่งคะแนนจริงกลับไป
+        "TOTAL_POINTS": current_points
     }
 
-# --- API สำหรับ Import พนักงานจาก CSV ---
-
-@app.post("/import_employees")
+@app.post("/admin/import_employees") 
 async def import_employees(
     admin_id: str = Form(...),      
     file: UploadFile = File(...),   
     db: Session = Depends(get_db)
 ):
-    # 1. หา Company ของ Admin คนนี้
     admin_user = db.query(models.Employee).filter(models.Employee.EMP_ID == admin_id).first()
     if not admin_user:
         raise HTTPException(status_code=404, detail="Admin not found")
@@ -672,16 +829,12 @@ async def import_employees(
     print(f"📥 Importing for Company ID: {current_company_id}")
 
     try:
-        # 2. อ่านไฟล์ CSV
-        # ใช้ codecs.iterdecode เพื่อรองรับภาษาไทย (utf-8-sig เผื่อมี BOM จาก Excel)
         csvReader = csv.DictReader(codecs.iterdecode(file.file, 'utf-8-sig'))
-        
         success_count = 0
         errors = []
 
         for row in csvReader:
             try:
-                # --- A. จัดการแผนก (Department) ---
                 dep_name = row.get('Department', 'General').strip()
                 department = db.query(models.Department).filter(
                     models.Department.DEP_NAME == dep_name,
@@ -702,20 +855,16 @@ async def import_employees(
                     db.commit() 
                     db.refresh(department)
 
-                # --- B. ตรวจสอบ Email ซ้ำ ---
                 email = row.get('Email', '').strip()
                 if db.query(models.Employee).filter(models.Employee.EMP_EMAIL == email).first():
                     errors.append(f"Email {email} already exists.")
                     continue
 
-                # --- C. เตรียมข้อมูล ---
-                # [UPDATED] แปลง Role ให้ยืดหยุ่นขึ้น
                 raw_role = row.get('Role', 'employee').strip().lower()
                 final_role = 'employee'
-                if raw_role in ['organizer', 'organiser', 'admin']: # รองรับทั้ง z และ s
+                if raw_role in ['organizer', 'organiser', 'admin']:
                     final_role = 'organizer' if raw_role != 'admin' else 'admin'
 
-                # [UPDATED] แปลงวันที่ด้วยฟังก์ชันใหม่
                 start_date_val = parse_date_str(row.get('StartDate', ''))
 
                 new_emp_id = generate_id("E")
@@ -726,25 +875,21 @@ async def import_employees(
                     EMP_ID=new_emp_id,
                     COMPANY_ID=current_company_id, 
                     EMP_TITLE_EN=row.get('Title', ''),
-                    EMP_TITLE_TH=row.get('Title', ''), 
-                    EMP_NAME_EN=row.get('Name', ''),
-                    EMP_NAME_TH=row.get('Name', ''),   
+                    EMP_NAME_EN=row.get('Name', ''), 
                     EMP_POSITION=row.get('Position', 'Staff'),
                     DEP_ID=department.DEP_ID,          
                     EMP_PHONE=row.get('Phone', ''),
                     EMP_EMAIL=email,
                     EMP_PASSWORD=get_password_hash(row.get('Password', '123456')),
-                    EMP_STARTDATE=start_date_val, # ใช้วันที่ที่แปลงแล้ว
+                    EMP_STARTDATE=start_date_val,
                     EMP_STATUS='Active',
-                    EMP_ROLE=final_role, # ใช้ Role ที่ผ่านการจัดรูปแบบแล้ว
+                    EMP_ROLE=final_role,
                     OTP_CODE=None
                 )
                 db.add(new_emp)
 
-                # --- D. ถ้าเป็น Organizer ให้เพิ่มลงตาราง Organizer ด้วย ---
                 if final_role == 'organizer':
-                    new_org_id = generate_id("ORG") 
-                    
+                    new_org_id = generate_id("O") 
                     new_org = models.Organizer(
                         ORG_ID=new_org_id,
                         EMP_ID=new_emp_id,
@@ -771,14 +916,10 @@ async def import_employees(
     except Exception as e:
         return {"message": "Failed to read CSV file", "error": str(e)}
 
-# [UPDATED] API ดึงข้อมูลกิจกรรม (เพิ่ม mode การกรอง)
-# mode: 'all' (Organizer - ดูทั้งหมด), 'future' (Employee - ดูเฉพาะที่ยังไม่จบ)
-# [UPDATED] API ดึงกิจกรรม (เพิ่ม Logic กรองกิจกรรมบังคับที่ไม่เกี่ยวข้องออก)
 @app.get("/activities", response_model=list[ActivityResponse])
 def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = Depends(get_db)):
     today = date.today()
     
-    # 1. ดึงข้อมูลผู้เรียก API (ถ้าส่ง emp_id มา)
     requester = None
     req_dept = ""
     req_pos = ""
@@ -789,7 +930,6 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
             req_dept = requester.department.DEP_NAME if requester.department else ""
             req_pos = requester.EMP_POSITION
 
-    # 2. เตรียมข้อมูลเพื่อนับจำนวนคน (Logic เดิม)
     all_employees = db.query(models.Employee).filter(models.Employee.EMP_STATUS == 'Active').all()
     emp_data_list = []
     for emp in all_employees:
@@ -797,58 +937,42 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
             "dept_name": emp.department.DEP_NAME if emp.department else "",
             "position": emp.EMP_POSITION
         })
-    
-    # 3. Query Activities
+
     query = db.query(models.Activity).join(models.ActivitySession)
     if mode == "future":
         query = query.filter(models.ActivitySession.SESSION_DATE >= today)
         
     activities = query.distinct().all()
     
-    # [NEW LOGIC] หาว่า User คนนี้ลงทะเบียนอะไรไปแล้วบ้าง
     registered_act_ids = set()
     if emp_id:
-        # หาจากตาราง Registration
         user_regs = db.query(models.Registration).filter(models.Registration.EMP_ID == emp_id).all()
         for r in user_regs:
-            # ต้อง Join ไปหา Activity ID ผ่าน Session
             sess = db.query(models.ActivitySession).filter(models.ActivitySession.SESSION_ID == r.SESSION_ID).first()
             if sess:
                 registered_act_ids.add(sess.ACT_ID)
     
     results = []
     for act in activities:
-        # =================================================================
-        # [NEW LOGIC] Personalization Filter (คัดกรองกิจกรรม)
-        # =================================================================
         if act.ACT_ISCOMPULSORY and requester:
-            # ถ้าเป็นกิจกรรมบังคับ และเรารู้ตัวตนคนเรียก -> ต้องเช็คสิทธิ์การมองเห็น
             if act.ACT_TARGET_CRITERIA:
                 try:
                     criteria = json.loads(act.ACT_TARGET_CRITERIA)
                     target_type = criteria.get('type', 'all')
                     
                     if target_type == 'specific':
-                        # เช็คว่าคนเรียก ตรงเงื่อนไขไหม?
                         target_depts = criteria.get('departments', [])
                         target_positions = criteria.get('positions', [])
-                        
                         is_match = False
-                        # Rule 1: แผนกตรงไหม?
                         if req_dept in target_depts:
                             is_match = True
-                        # Rule 2: ตำแหน่งตรงไหม?
                         if not is_match and req_pos in target_positions:
                             is_match = True
-                            
-                        # *** ถ้าไม่ตรงเงื่อนไขเลย -> ข้าม (ไม่ส่งกิจกรรมนี้กลับไป) ***
                         if not is_match:
                             continue 
                 except:
-                    pass # ถ้า JSON ผิดพลาด ให้แสดงไปก่อน (Fail-safe)
-        # =================================================================
+                    pass
 
-        # ... (Logic การนับจำนวน และส่วนอื่นๆ เหมือนเดิมเป๊ะ) ...
         current_count = 0
         if act.ACT_ISCOMPULSORY:
             if not act.ACT_TARGET_CRITERIA:
@@ -905,7 +1029,6 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
         if act.organizer and act.organizer.employee:
             org_name = act.organizer.employee.EMP_NAME_EN
         
-        # [NEW] เช็คสถานะ Registered
         is_reg = False
         if act.ACT_ID in registered_act_ids:
             is_reg = True
@@ -925,25 +1048,21 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
             "activityDate": act_date, 
             "startTime": start_time, 
             "endTime": end_time,
-            # [NEW] เพิ่มสถานะการลงทะเบียน
             "isRegistered": is_reg
         })
         
     return results
 
-
-# [NEW] API ดึงรายละเอียดกิจกรรมตาม ID
 @app.get("/activities/{act_id}", response_model=ActivityDetailResponse)
 def get_activity_detail(
     act_id: str, 
-    emp_id: str | None = None, # [FIX] ต้องเพิ่มตรงนี้ครับ!
+    emp_id: str | None = None, 
     db: Session = Depends(get_db)
 ):
     act = db.query(models.Activity).filter(models.Activity.ACT_ID == act_id).first()
     if not act:
         raise HTTPException(status_code=404, detail="Activity not found")
     
-    # นับจำนวนผู้เข้าร่วม
     current_count = db.query(models.Registration)\
         .join(models.ActivitySession, models.Registration.SESSION_ID == models.ActivitySession.SESSION_ID)\
         .filter(models.ActivitySession.ACT_ID == act.ACT_ID)\
@@ -957,12 +1076,10 @@ def get_activity_detail(
         ).first()
         if fav: is_fav = True
 
-    # [NEW] Check User Registration
     is_registered = False
     registered_session_id = None
     
     if emp_id:
-        # หาว่า User ลงทะเบียน Session ไหนของกิจกรรมนี้บ้าง
         user_reg = db.query(models.Registration)\
             .join(models.ActivitySession)\
             .filter(
@@ -974,7 +1091,6 @@ def get_activity_detail(
             is_registered = True
             registered_session_id = user_reg.SESSION_ID
 
-    # ข้อมูลผู้จัด
     org_name = "-"
     org_contact = "-"
     if act.organizer:
@@ -982,13 +1098,11 @@ def get_activity_detail(
         if act.organizer.employee:
             org_name = act.organizer.employee.EMP_NAME_EN
 
-    # ข้อมูลแผนก (Query แยกเพราะใน Model Activity อาจยังไม่ได้ผูก relationship department ไว้แบบสมบูรณ์)
     dep_name = "-"
     dep = db.query(models.Department).filter(models.Department.DEP_ID == act.DEP_ID).first()
     if dep:
         dep_name = dep.DEP_NAME
 
-    # เตรียมข้อมูล Sessions
     sessions_data = []
     for s in act.sessions:
         sessions_data.append({
@@ -1021,13 +1135,54 @@ def get_activity_detail(
         "foodInfo": act.ACT_FOOD_INFO or "-",
         "travelInfo": act.ACT_TRAVEL_INFO or "-",
         "moreDetails": act.ACT_MORE_DETAILS or "-",
-        "actImage": act.ACT_IMAGE, # [NEW] map ค่าจาก DB
-        "agenda": act.ACT_AGENDA, # [NEW]
+        "actAttachments": act.ACT_ATTACHMENTS,
+        "agenda": act.ACT_AGENDA,
         "targetCriteria": act.ACT_TARGET_CRITERIA,
         "isFavorite": is_fav,
-        "isRegistered": is_registered, # [NEW]
+        "isRegistered": is_registered,
         "sessions": sessions_data
     }
+
+def count_target_employees(db: Session, target_criteria_json: str | None) -> int:
+    """
+    ฟังก์ชันนับจำนวนพนักงานที่ตรงตามเงื่อนไข (สำหรับคำนวณ Max Participants อัตโนมัติ)
+    """
+    # ดึงพนักงาน Active ทั้งหมดมาก่อน (หรือจะเขียน Query ซับซ้อนก็ได้ แต่วิธีนี้ชัวร์สุดเรื่อง Logic ภาษาไทย/Space)
+    all_employees = db.query(models.Employee).filter(models.Employee.EMP_STATUS == 'Active').all()
+    
+    if not target_criteria_json:
+        return len(all_employees) # ไม่ระบุ = ทั้งบริษัท
+
+    try:
+        criteria = json.loads(target_criteria_json)
+        target_type = criteria.get('type', 'all')
+        
+        if target_type == 'all':
+            return len(all_employees)
+            
+        if target_type == 'specific':
+            target_depts = [d.strip() for d in criteria.get('departments', [])]
+            target_positions = [p.strip() for p in criteria.get('positions', [])]
+            
+            count = 0
+            for emp in all_employees:
+                emp_dept = emp.department.DEP_NAME.strip() if emp.department else ""
+                emp_pos = emp.EMP_POSITION.strip()
+                
+                # Logic เดิม: แผนกตรง OR ตำแหน่งตรง
+                is_match = False
+                if target_depts and emp_dept in target_depts:
+                    is_match = True
+                elif target_positions and emp_pos in target_positions:
+                    is_match = True
+                
+                if is_match:
+                    count += 1
+            return count
+            
+        return len(all_employees) # Fallback
+    except:
+        return len(all_employees) # Error Fallback
 
 @app.post("/activities")
 def create_activity(req: ActivityFormRequest, emp_id: str = None, db: Session = Depends(get_db)):
@@ -1046,11 +1201,21 @@ def create_activity(req: ActivityFormRequest, emp_id: str = None, db: Session = 
         org_record = db.query(models.Organizer).filter(models.Organizer.ORG_ID == organizer_id).first()
         current_company_id = org_record.employee.COMPANY_ID
 
+        if len(data.ACT_ATTACHMENTS) > 10:
+            raise HTTPException(status_code=400, detail="Maximum 10 attachments allowed")
+
         final_dep_id = resolve_department_id(db, data.DEP_ID, current_company_id)
 
         new_act_id = generate_id("A")
         while db.query(models.Activity).filter(models.Activity.ACT_ID == new_act_id).first():
             new_act_id = generate_id("A")
+
+        # [NEW LOGIC] คำนวณ Max Participants อัตโนมัติ ถ้าเป็นกิจกรรมบังคับ
+        final_max_participants = data.ACT_MAX_PARTICIPANTS
+        if data.ACT_ISCOMPULSORY == 1:
+            # คำนวณจาก Target Criteria ที่ส่งมา
+            final_max_participants = count_target_employees(db, data.ACT_TARGET_CRITERIA)
+            print(f"Auto-calculated Max Participants: {final_max_participants}")
 
         new_activity = models.Activity(
             ACT_ID=new_act_id,
@@ -1065,14 +1230,15 @@ def create_activity(req: ActivityFormRequest, emp_id: str = None, db: Session = 
             ACT_COST=data.ACT_COST,
             ACT_PARTICIPATION_CONDITION=data.ACT_PARTICIPATION_CONDITION,
             ACT_STATUS=data.ACT_STATUS,
-            ACT_MAX_PARTICIPANTS=data.ACT_MAX_PARTICIPANTS,
+            ACT_MAX_PARTICIPANTS=final_max_participants, # ใช้ค่าที่คำนวณใหม่
             ACT_EVENT_HOST=data.ACT_EVENT_HOST,
             ACT_GUEST_SPEAKER=data.ACT_GUEST_SPEAKER,
             ACT_FOOD_INFO=data.ACT_FOOD_INFO,
             ACT_TRAVEL_INFO=data.ACT_TRAVEL_INFO,
             ACT_MORE_DETAILS=data.ACT_MORE_DETAILS,
             ACT_TARGET_CRITERIA=data.ACT_TARGET_CRITERIA,
-            ACT_IMAGE=data.ACT_IMAGE,
+            # [NEW] แปลง List เป็น JSON String ก่อนลง DB
+            ACT_ATTACHMENTS=json.dumps([a.dict() for a in data.ACT_ATTACHMENTS]),
             ACT_AGENDA=data.ACT_AGENDA
         )
         db.add(new_activity)
@@ -1083,7 +1249,7 @@ def create_activity(req: ActivityFormRequest, emp_id: str = None, db: Session = 
                  new_sess_id = generate_id("S", 6)
             
             sess_date = datetime.strptime(s.SESSION_DATE.split('T')[0], "%Y-%m-%d").date()
-            t_start = parse_time_safe(s.START_TIME) # ใช้ Function ใหม่ที่ปลอดภัย
+            t_start = parse_time_safe(s.START_TIME)
             t_end = parse_time_safe(s.END_TIME)
 
             new_session = models.ActivitySession(
@@ -1096,7 +1262,57 @@ def create_activity(req: ActivityFormRequest, emp_id: str = None, db: Session = 
                 SESSION_STATUS="Open"
             )
             db.add(new_session)
+            
+        # [LOGIC 3] แจ้งเตือน Employee: กิจกรรมบังคับ (Compulsory Activity Assigned)
+        if data.ACT_ISCOMPULSORY == 1:
+            # 1. หาพนักงานทั้งหมดที่ Active
+            all_active_emps = db.query(models.Employee).filter(models.Employee.EMP_STATUS == 'Active').all()
+            
+            # 2. วนลูปเช็ค Target (ใช้ฟังก์ชัน check_is_target ที่มีอยู่แล้ว)
+            # *หมายเหตุ: เพื่อประสิทธิภาพ ควรใช้ Background Tasks ในการส่งถ้าคนเยอะ*
+            count_notified = 0
+            for emp in all_active_emps:
+                # เราต้อง Mock Object activity ชั่วคราวเพื่อส่งให้ฟังก์ชัน check
+                # หรือเขียน Logic check ใหม่ตรงนี้
+                # ในที่นี้สมมติว่าใช้ Logic เดียวกัน
+                is_target = check_is_target(new_activity, emp)
+            
+            if is_target:
+                create_notification_internal(
+                    db,
+                    emp_id=emp.EMP_ID,
+                    title="📌 กิจกรรมบังคับใหม่",
+                    message=f"คุณได้รับมอบหมายให้เข้าร่วม '{data.ACT_NAME}'",
+                    notif_type="Activity",
+                    target_role="Employee",
+                    ref_id=new_act_id,
+                    route_path="/activity_detail"
+                )
+                count_notified += 1
+            
+            print(f"Notify Compulsory: Sent to {count_notified} employees")
         
+        if data.ACT_ISCOMPULSORY == 0 and data.ACT_TARGET_CRITERIA:
+            all_active_emps = db.query(models.Employee).filter(models.Employee.EMP_STATUS == 'Active').all()
+            
+            count_targeted = 0
+            for emp in all_active_emps:
+                # ใช้ฟังก์ชัน check_is_target ตัวเดิม
+                if check_is_target(new_activity, emp):
+                    create_notification_internal(
+                        db,
+                        emp_id=emp.EMP_ID,
+                        title="✨ กิจกรรมใหม่ที่คุณอาจสนใจ",
+                        message=f"กิจกรรม '{data.ACT_NAME}' เปิดรับสมัครแล้ว! (ตรงกับสายงานคุณ)",
+                        notif_type="Activity",
+                        target_role="Employee",
+                        ref_id=new_act_id,
+                        route_path="/activity_detail"
+                    )
+                    count_targeted += 1
+        
+            print(f"Notify Targeted: Sent to {count_targeted} employees")
+
         db.commit()
         return {"message": "Activity created successfully", "actId": new_act_id}
 
@@ -1105,17 +1321,17 @@ def create_activity(req: ActivityFormRequest, emp_id: str = None, db: Session = 
         print(f"Create Error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create: {str(e)}")
 
-
-# [UPDATED] API แก้ไขกิจกรรม (Update แบบปลอดภัย + Reset Status)
 @app.put("/activities/{act_id}")
-def update_activity(act_id: str, req: ActivityFormRequest, db: Session = Depends(get_db)):
-    # 1. ดึงข้อมูลกิจกรรม
+async def update_activity(act_id: str, req: ActivityFormRequest, db: Session = Depends(get_db)):
     act = db.query(models.Activity).filter(models.Activity.ACT_ID == act_id).first()
     if not act:
         raise HTTPException(status_code=404, detail="Activity not found")
 
-    # 2. อัปเดตข้อมูลหลัก (Activity Info)
     data = req.ACTIVITY
+    
+    if len(data.ACT_ATTACHMENTS) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 attachments allowed")
+
     current_company_id = act.COMPANY_ID 
     final_dep_id = resolve_department_id(db, data.DEP_ID, current_company_id)
 
@@ -1125,7 +1341,7 @@ def update_activity(act_id: str, req: ActivityFormRequest, db: Session = Depends
     act.ACT_POINT = data.ACT_POINT
     act.ACT_GUEST_SPEAKER = data.ACT_GUEST_SPEAKER
     act.ACT_EVENT_HOST = data.ACT_EVENT_HOST
-    act.ACT_MAX_PARTICIPANTS = data.ACT_MAX_PARTICIPANTS
+    # act.ACT_MAX_PARTICIPANTS = data.ACT_MAX_PARTICIPANTS # [MOVED]
     act.DEP_ID = final_dep_id 
     act.ACT_COST = data.ACT_COST
     act.ACT_TRAVEL_INFO = data.ACT_TRAVEL_INFO
@@ -1138,10 +1354,19 @@ def update_activity(act_id: str, req: ActivityFormRequest, db: Session = Depends
     if hasattr(data, 'ACT_TARGET_CRITERIA'):
         act.ACT_TARGET_CRITERIA = data.ACT_TARGET_CRITERIA
 
+    # [NEW LOGIC]
+    if data.ACT_ISCOMPULSORY == 1:
+        if hasattr(data, 'ACT_TARGET_CRITERIA'):
+             act.ACT_MAX_PARTICIPANTS = count_target_employees(db, data.ACT_TARGET_CRITERIA)
+    else:
+        act.ACT_MAX_PARTICIPANTS = data.ACT_MAX_PARTICIPANTS
+
+    # [NEW] อัปเดตเป็น JSON
+    act.ACT_ATTACHMENTS = json.dumps([a.dict() for a in data.ACT_ATTACHMENTS])
+
     if act.organizer:
         act.organizer.ORG_CONTACT_INFO = req.ORGANIZER.ORG_CONTACT_INFO
     
-    # 3. [FIXED] จัดการ Session แบบฉลาด (Smart Update & Status Reset)
     existing_sessions = db.query(models.ActivitySession).filter(
         models.ActivitySession.ACT_ID == act_id
     ).order_by(models.ActivitySession.SESSION_DATE).all()
@@ -1155,19 +1380,16 @@ def update_activity(act_id: str, req: ActivityFormRequest, db: Session = Depends
              continue 
 
         if i < len(existing_sessions):
-            # Update Existing
             session = existing_sessions[i]
             session.SESSION_DATE = sess_date
             session.START_TIME = t_start
             session.END_TIME = t_end
             session.LOCATION = s_data.LOCATION
             
-            # [FIXED] ถ้าเลื่อนวันมาเป็นปัจจุบันหรืออนาคต ให้เปิดสถานะ Open อัตโนมัติ
             if sess_date >= date.today():
                 session.SESSION_STATUS = "Open"
                 
         else:
-            # Create New
             new_sess_id = generate_id("S", 6)
             while db.query(models.ActivitySession).filter(models.ActivitySession.SESSION_ID == new_sess_id).first():
                  new_sess_id = generate_id("S", 6)
@@ -1183,7 +1405,6 @@ def update_activity(act_id: str, req: ActivityFormRequest, db: Session = Depends
             )
             db.add(new_session)
     
-    # ลบ Session ส่วนเกิน (ถ้าไม่มีคนลงทะเบียน)
     if len(req.SESSIONS) < len(existing_sessions):
         for i in range(len(req.SESSIONS), len(existing_sessions)):
             sess_to_delete = existing_sessions[i]
@@ -1198,34 +1419,28 @@ def update_activity(act_id: str, req: ActivityFormRequest, db: Session = Depends
 
     try:
         db.commit()
+        await manager.broadcast("REFRESH_ACTIVITIES")
         return {"message": "Activity updated successfully"}
     except Exception as e:
         db.rollback()
         print(f"Update Error: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update: {str(e)}")
 
-# [NEW] API ดึงรายชื่อแผนกทั้งหมด (สำหรับใส่ Dropdown)
 @app.get("/departments")
 def get_departments(db: Session = Depends(get_db)):
     deps = db.query(models.Department).all()
     return [{"id": d.DEP_ID, "name": d.DEP_NAME} for d in deps]
 
-# [NEW] API ดึงรายชื่อตำแหน่งทั้งหมด (Distinct จากตารางพนักงาน)
 @app.get("/positions")
 def get_positions(db: Session = Depends(get_db)):
-    # ดึงตำแหน่งที่ไม่ซ้ำกัน
     positions = db.query(models.Employee.EMP_POSITION).distinct().all()
-    # positions จะเป็น list of tuples [('Dev',), ('HR',)] ต้องแปลงเป็น list of strings
     return [p[0] for p in positions if p[0]]
 
-# --- Helper Function สำหรับจัดการแผนก (ใช้ใน Create/Update Activity) ---
 def resolve_department_id(db: Session, dep_input: str, company_id: str):
-    # 1. ลองหาจาก ID ก่อน
     dep = db.query(models.Department).filter(models.Department.DEP_ID == dep_input).first()
     if dep:
         return dep.DEP_ID
     
-    # 2. ถ้าไม่เจอ ID ลองหาจาก ชื่อ (เผื่อส่งมาเป็นชื่อที่มีอยู่แล้ว)
     dep = db.query(models.Department).filter(
         models.Department.DEP_NAME == dep_input,
         models.Department.COMPANY_ID == company_id
@@ -1233,7 +1448,6 @@ def resolve_department_id(db: Session, dep_input: str, company_id: str):
     if dep:
         return dep.DEP_ID
     
-    # 3. ถ้าไม่เจอเลย แสดงว่าเป็น "Other" (แผนกใหม่) -> สร้างใหม่เลย
     new_dep_id = generate_id("D")
     while db.query(models.Department).filter(models.Department.DEP_ID == new_dep_id).first():
             new_dep_id = generate_id("D")
@@ -1241,44 +1455,32 @@ def resolve_department_id(db: Session, dep_input: str, company_id: str):
     new_dep = models.Department(
         DEP_ID=new_dep_id,
         COMPANY_ID=company_id,
-        DEP_NAME=dep_input # ใช้ชื่อที่ส่งมาตั้งเป็นชื่อแผนก
+        DEP_NAME=dep_input
     )
     db.add(new_dep)
-    db.commit() # บันทึกทันทีเพื่อให้ใช้ ID ได้
+    db.commit() 
     db.refresh(new_dep)
     
     return new_dep.DEP_ID
 
 @app.delete("/activities/{act_id}")
 def delete_activity(act_id: str, db: Session = Depends(get_db)):
-    # 1. หา Activity ก่อน
     act = db.query(models.Activity).filter(models.Activity.ACT_ID == act_id).first()
     if not act:
         raise HTTPException(status_code=404, detail="Activity not found")
 
     try:
-        # 2. ลบข้อมูลที่เกี่ยวข้อง (Child Records) ตามลำดับ FK
-        
-        # 2.1 ลบ Favorites
         db.query(models.Favorite).filter(models.Favorite.ACT_ID == act_id).delete()
-        
-        # 2.2 ลบ Notifications
         db.query(models.Notification).filter(models.Notification.ACT_ID == act_id).delete()
 
-        # 2.3 ลบ Registration & CheckIn (ต้องหา Session ก่อน)
         sessions = db.query(models.ActivitySession).filter(models.ActivitySession.ACT_ID == act_id).all()
         for s in sessions:
-            # ลบ Registration ของ Session นี้
             db.query(models.Registration).filter(models.Registration.SESSION_ID == s.SESSION_ID).delete()
-            # ลบ CheckIn ของ Session นี้
             db.query(models.CheckIn).filter(models.CheckIn.SESSION_ID == s.SESSION_ID).delete()
 
-        # 2.4 ลบ ActivitySession ทั้งหมด
         db.query(models.ActivitySession).filter(models.ActivitySession.ACT_ID == act_id).delete()
 
-        # 3. ลบตัว Activity หลัก
         db.delete(act)
-        
         db.commit()
         return {"message": "Activity deleted successfully"}
 
@@ -1289,69 +1491,126 @@ def delete_activity(act_id: str, db: Session = Depends(get_db)):
 
 @app.get("/activities/{act_id}/participants", response_model=list[ParticipantResponse])
 def get_activity_participants(act_id: str, db: Session = Depends(get_db)):
-    # 1. หา Session ทั้งหมดของกิจกรรมนี้
-    sessions = db.query(models.ActivitySession).filter(models.ActivitySession.ACT_ID == act_id).all()
-    session_ids = [s.SESSION_ID for s in sessions]
-
-    if not session_ids:
+    # 1. ดึงข้อมูลกิจกรรม เพื่อเช็คว่าเป็น Compulsory หรือไม่
+    activity = db.query(models.Activity).filter(models.Activity.ACT_ID == act_id).first()
+    if not activity:
         return []
 
-    # 2. ดึงคนลงทะเบียน (Registration)
-    regs = db.query(models.Registration).filter(models.Registration.SESSION_ID.in_(session_ids)).all()
-
-    # 3. ดึงคนเช็คอิน (CheckIn) เอามาทำ Map เพื่อให้ค้นหาเร็ว O(1)
+    sessions = db.query(models.ActivitySession).filter(models.ActivitySession.ACT_ID == act_id).all()
+    session_ids = [s.SESSION_ID for s in sessions]
+    
+    # ดึงข้อมูลการเช็คอิน (เพื่อดูว่าใครมาแล้วบ้าง)
     checkins = db.query(models.CheckIn).filter(models.CheckIn.SESSION_ID.in_(session_ids)).all()
     checked_in_map = {c.EMP_ID: c.CHECKIN_TIME for c in checkins}
 
     results = []
-    # ใช้ Set เพื่อป้องกันชื่อซ้ำ (กรณีลงหลายรอบ)
-    processed_emp_ids = set()
-
-    for r in regs:
-        emp = r.employee
-        if emp.EMP_ID in processed_emp_ids:
-            continue
-            
-        processed_emp_ids.add(emp.EMP_ID)
+    
+    # --- LOGIC ใหม่: แยกตามประเภทกิจกรรม ---
+    
+    if activity.ACT_ISCOMPULSORY:
+        # === กรณี กิจกรรมบังคับ (ดึงทุกคนที่เข้าข่าย Target) ===
         
-        status = "Registered"
-        check_in_time = "-"
+        # 1. ดึงพนักงานทั้งหมดที่ Active
+        all_employees = db.query(models.Employee).filter(models.Employee.EMP_STATUS == 'Active').all()
+        
+        # 2. Parse Target Criteria
+        target_depts = []
+        target_positions = []
+        is_target_all = False
+        
+        if not activity.ACT_TARGET_CRITERIA:
+            is_target_all = True
+        else:
+            try:
+                criteria = json.loads(activity.ACT_TARGET_CRITERIA)
+                if criteria.get('type') == 'all':
+                    is_target_all = True
+                else:
+                    # เตรียมข้อมูล Target (ตัดช่องว่าง)
+                    target_depts = [d.strip() for d in criteria.get('departments', [])]
+                    target_positions = [p.strip() for p in criteria.get('positions', [])]
+            except:
+                is_target_all = True # Fail-safe
 
-        # ตรวจสอบว่าเช็คอินหรือยัง
-        if emp.EMP_ID in checked_in_map:
-            status = "Joined"
-            # แปลงเวลาเป็น HH:MM
-            t = checked_in_map[emp.EMP_ID]
-            check_in_time = t.strftime("%H:%M")
+        # 3. วนลูปเช็คพนักงานทุกคน
+        for emp in all_employees:
+            is_match = False
+            if is_target_all:
+                is_match = True
+            else:
+                # เช็คแผนก
+                emp_dept = emp.department.DEP_NAME.strip() if emp.department else ""
+                if emp_dept in target_depts:
+                    is_match = True
+                # เช็คตำแหน่ง
+                if not is_match:
+                    emp_pos = emp.EMP_POSITION.strip()
+                    if emp_pos in target_positions:
+                        is_match = True
+            
+            if is_match:
+                # กำหนดสถานะ: ถ้าเช็คอินแล้ว = Joined, ถ้ายัง = Assigned (แทน Registered)
+                status = "Assigned" 
+                check_in_time = "-"
 
-        results.append({
-            "empId": emp.EMP_ID,
-            "title": emp.EMP_TITLE_EN,
-            "name": emp.EMP_NAME_EN,
-            "department": emp.department.DEP_NAME if emp.department else "-",
-            "status": status,
-            "checkInTime": check_in_time
-        })
+                if emp.EMP_ID in checked_in_map:
+                    status = "Joined"
+                    t = checked_in_map[emp.EMP_ID]
+                    check_in_time = t.strftime("%H:%M")
+                
+                results.append({
+                    "empId": emp.EMP_ID,
+                    "title": emp.EMP_TITLE_EN,
+                    "name": emp.EMP_NAME_EN,
+                    "department": emp.department.DEP_NAME if emp.department else "-",
+                    "status": status,
+                    "checkInTime": check_in_time
+                })
+
+    else:
+        # === กรณี กิจกรรมทั่วไป (ดึงจาก Registration) === (Logic เดิม)
+        if not session_ids: return []
+        
+        regs = db.query(models.Registration).filter(models.Registration.SESSION_ID.in_(session_ids)).all()
+        processed_emp_ids = set()
+
+        for r in regs:
+            emp = r.employee
+            if emp.EMP_ID in processed_emp_ids: continue
+            processed_emp_ids.add(emp.EMP_ID)
+            
+            status = "Registered"
+            check_in_time = "-"
+
+            if emp.EMP_ID in checked_in_map:
+                status = "Joined"
+                t = checked_in_map[emp.EMP_ID]
+                check_in_time = t.strftime("%H:%M")
+
+            results.append({
+                "empId": emp.EMP_ID,
+                "title": emp.EMP_TITLE_EN,
+                "name": emp.EMP_NAME_EN,
+                "department": emp.department.DEP_NAME if emp.department else "-",
+                "status": status,
+                "checkInTime": check_in_time
+            })
     
     return results
 
 
 @app.post("/checkin")
 async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
-    # 1. Validate Employee
     employee = db.query(models.Employee).filter(models.Employee.EMP_ID == req.emp_id).first()
     if not employee:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลพนักงาน")
 
-    # 2. Validate Activity & Find Active Session
-    # ดึงข้อมูล Activity มาก่อน เพื่อเช็คว่าเป็น Compulsory หรือไม่
     activity = db.query(models.Activity).filter(models.Activity.ACT_ID == req.act_id).first()
     if not activity:
         raise HTTPException(status_code=404, detail="ไม่พบข้อมูลกิจกรรม")
 
-    now = datetime.now() # เวลา Server (The Source of Truth)
+    now = datetime.now()
     
-    # หา Session ของวันนี้
     sessions = db.query(models.ActivitySession).filter(
         models.ActivitySession.ACT_ID == req.act_id,
         models.ActivitySession.SESSION_DATE == now.date()
@@ -1367,43 +1626,44 @@ async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
         start_dt = datetime.combine(sess.SESSION_DATE, sess.START_TIME)
         end_dt = datetime.combine(sess.SESSION_DATE, sess.END_TIME)
         
-        # --- [CORE LOGIC UPDATED] ---
-        
-        # 1. เวลาเปิดให้เช็คอิน (เหมือนกันทั้งสองแบบ) = ก่อนเริ่ม 1 ชั่วโมง
         window_open = start_dt - timedelta(hours=1)
         
-        # 2. เวลาปิดรับเช็คอิน (แยกเงื่อนไข)
         if activity.ACT_ISCOMPULSORY:
-            # แบบบังคับ: ให้สายได้แค่ 30 นาทีหลังจากเริ่ม
             window_close = start_dt + timedelta(minutes=30)
             condition_text = "ภายใน 30 นาทีแรก"
         else:
-            # แบบทั่วไป: เช็คอินได้จนจบกิจกรรม
             window_close = end_dt
             condition_text = "ก่อนกิจกรรมจบ"
             
-        # ตรวจสอบช่วงเวลา
         if window_open <= now <= window_close:
             target_session = sess
-            break # เจอ Session ที่ลงได้แล้ว จบ loop
+            break
         else:
-            # เก็บข้อความ Error ไว้ เผื่อไม่เจอ Session ไหนเลยจะได้แจ้งถูก
             time_error_message = f"ไม่อยู่ในช่วงเวลาเช็คอิน ({condition_text})"
 
     if not target_session:
-         # ถ้าวนลูปครบแล้วยังหา Session ที่ลงได้ไม่เจอ
          raise HTTPException(status_code=400, detail=time_error_message or "ไม่อยู่ในช่วงเวลากิจกรรม")
 
-    # 3. Check Registration (เหมือนเดิม)
     reg = db.query(models.Registration).filter(
         models.Registration.EMP_ID == req.emp_id,
         models.Registration.SESSION_ID == target_session.SESSION_ID
     ).first()
     
-    if not reg:
-        raise HTTPException(status_code=400, detail="พนักงานยังไม่ได้ลงทะเบียนกิจกรรมนี้")
+    # 2. [NEW LOGIC] ตรวจสอบสิทธิ์การเข้าร่วม
+    is_authorized = False
+    
+    if reg:
+        # กรณี A: ลงทะเบียนมาแล้ว -> ผ่าน
+        is_authorized = True
+    elif activity.ACT_ISCOMPULSORY:
+        # กรณี B: ยังไม่ลงทะเบียน แต่เป็นกิจกรรมบังคับ -> เช็ค Target
+        if check_is_target(activity, employee):
+            is_authorized = True
+            
+    if not is_authorized:
+        raise HTTPException(status_code=400, detail="พนักงานยังไม่ได้ลงทะเบียน หรือไม่อยู่ในกลุ่มเป้าหมาย")
 
-    # 4. Check Duplicate (เหมือนเดิม)
+    # 3. ตรวจสอบว่าเช็คอินซ้ำไหม (เหมือนเดิม)
     existing_checkin = db.query(models.CheckIn).filter(
         models.CheckIn.EMP_ID == req.emp_id,
         models.CheckIn.SESSION_ID == target_session.SESSION_ID
@@ -1413,7 +1673,6 @@ async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="พนักงานเช็คอินเรียบร้อยแล้ว")
 
     try:
-        # 5. Process Check-in (เหมือนเดิม)
         new_checkin_id = generate_id("CI", 8)
         points_to_give = activity.ACT_POINT
         
@@ -1427,7 +1686,6 @@ async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
         )
         db.add(new_checkin)
         
-        # 6. Update Points & Transaction (เหมือนเดิม)
         emp_points = db.query(models.Points).filter(models.Points.EMP_ID == req.emp_id).first()
         if not emp_points:
             emp_points = models.Points(EMP_ID=req.emp_id, TOTAL_POINTS=0)
@@ -1447,6 +1705,18 @@ async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
         )
         db.add(new_txn)
         
+        # --- [INJECT NOTIFICATION] ---
+        create_notification_internal(
+            db,
+            emp_id=req.emp_id,
+            title="เช็คอินสำเร็จ! 🎉",
+            message=f"ยินดีด้วย! คุณได้รับ {points_to_give} คะแนนจากกิจกรรม '{activity.ACT_NAME}'",
+            notif_type="System",
+            ref_id=req.act_id,
+            route_path="/profile" # กดแล้วไปดูแต้ม
+        )
+        # -----------------------------
+        
         db.commit()
         
         await manager.broadcast(f"CHECKIN_SUCCESS|{req.emp_id}|{activity.ACT_NAME}|{req.scanned_by}")
@@ -1465,8 +1735,9 @@ async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database Error: {str(e)}")
 
-# [NEW] API ดึงกิจกรรมที่ฉันลงทะเบียนไว้ (เฉพาะที่ยังไม่จบ)
-# ค้นหา @app.get("/my-activities/{emp_id}"...) และแทนที่ฟังก์ชันด้วย Code นี้ครับ
+# ไฟล์: lib/backend_api/main.py
+
+# ... (ส่วน import ด้านบนคงเดิม) ...
 
 @app.get("/my-activities/{emp_id}", response_model=list[MyActivityResponse])
 def get_my_upcoming_activities(emp_id: str, db: Session = Depends(get_db)):
@@ -1477,10 +1748,11 @@ def get_my_upcoming_activities(emp_id: str, db: Session = Depends(get_db)):
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
         
-    emp_dept_name = employee.department.DEP_NAME if employee.department else ""
-    emp_position = employee.EMP_POSITION
+    # เตรียมข้อมูลพนักงานเพื่อใช้เทียบเงื่อนไข (Trim ช่องว่างเพื่อความชัวร์)
+    emp_dept_name = employee.department.DEP_NAME.strip() if employee.department else ""
+    emp_position = employee.EMP_POSITION.strip()
     
-    # --- ส่วนที่ 1: กิจกรรมที่ "ลงทะเบียนแล้ว" ---
+    # 2. ดึงกิจกรรมที่ "ลงทะเบียนแล้ว" (Registered)
     registered_acts = db.query(
         models.Registration, models.ActivitySession, models.Activity
     ).join(
@@ -1494,12 +1766,14 @@ def get_my_upcoming_activities(emp_id: str, db: Session = Depends(get_db)):
     ).filter(
         models.Registration.EMP_ID == emp_id,
         models.ActivitySession.SESSION_DATE >= today,
-        models.CheckIn.CHECKIN_ID == None 
+        models.CheckIn.CHECKIN_ID == None  # ยังไม่เช็คอิน
     ).all()
 
+    # เก็บ ID กิจกรรมที่ลงแล้วไว้กันซ้ำ
     registered_act_ids = {act.ACT_ID for _, _, act in registered_acts}
     output = []
 
+    # เพิ่มกิจกรรมที่ลงทะเบียนแล้วเข้า List
     for reg, sess, act in registered_acts:
         output.append({
             "actId": act.ACT_ID,
@@ -1511,47 +1785,66 @@ def get_my_upcoming_activities(emp_id: str, db: Session = Depends(get_db)):
             "endTime": sess.END_TIME.strftime("%H:%M"),
             "status": sess.SESSION_STATUS,
             "sessionId": sess.SESSION_ID,
-            # [FIXED] เพิ่ม 2 บรรทัดนี้ เพื่อให้ตรงกับ Model ใหม่
             "isCompulsory": act.ACT_ISCOMPULSORY == 1,
             "point": act.ACT_POINT
         })
 
-    # --- ส่วนที่ 2: กิจกรรม "บังคับ" (Auto-Add) ---
+    # 3. [CORE FIX] ดึงกิจกรรม "บังคับ" (Compulsory) ตาม Target
     compulsory_acts = db.query(models.Activity).join(models.ActivitySession).filter(
-        models.Activity.ACT_ISCOMPULSORY == True,
-        models.ActivitySession.SESSION_DATE >= today
+        models.Activity.ACT_ISCOMPULSORY == True,        # ต้องเป็นกิจกรรมบังคับ
+        models.Activity.ACT_STATUS == 'Open',            # ต้องสถานะ Open
+        models.ActivitySession.SESSION_DATE >= today     # ต้องยังไม่จบ
     ).distinct().all()
 
     for act in compulsory_acts:
+        # ถ้ากิจกรรมนี้ลงทะเบียนไปแล้ว ข้ามไปเลย (จะได้ไม่โชว์ซ้ำ)
         if act.ACT_ID in registered_act_ids:
             continue 
             
+        # --- LOGIC การเช็ค Target Criteria ---
         is_target = False
+        
         if not act.ACT_TARGET_CRITERIA:
+            # ถ้าไม่มี Criteria แปลว่า "บังคับทุกคน"
             is_target = True
         else:
             try:
+                # แปลง JSON String เป็น Dictionary
                 criteria = json.loads(act.ACT_TARGET_CRITERIA)
                 target_type = criteria.get('type', 'all')
                 
                 if target_type == 'all':
                     is_target = True
                 elif target_type == 'specific':
+                    # 2. ดึง List ออกมา (ใช้ .get([], []) เพื่อกัน Error กรณีไม่มี key)
                     target_depts = criteria.get('departments', [])
-                    if emp_dept_name in target_depts:
-                        is_target = True
-                    
                     target_positions = criteria.get('positions', [])
-                    if not is_target and emp_position in target_positions:
-                        is_target = True
-            except Exception as e:
-                print(f"Error parsing criteria: {e}")
-                is_target = False
 
+                    # 3. เทียบเงื่อนไข (เพิ่มการ .strip() เพื่อตัดช่องว่าง)
+                    # เงื่อนไข: ถ้าแผนกตรง หรือ ตำแหน่งตรง อย่างใดอย่างหนึ่ง
+                    
+                    # ตรวจสอบแผนก
+                    if target_depts:
+                        # แปลงเป็น set เพื่อความเร็วในการค้นหา
+                        if emp_dept_name.strip() in [d.strip() for d in target_depts]:
+                            is_target = True
+                    
+                    # ตรวจสอบตำแหน่ง (เช็คต่อถ้ายังไม่ผ่านเงื่อนไขแรก)
+                    if not is_target and target_positions:
+                        if emp_position.strip() in [p.strip() for p in target_positions]:
+                            is_target = True
+                            
+            except Exception as e:
+                print(f"⚠️ Error parsing criteria for Act {act.ACT_ID}: {e}")
+                # Fallback: ถ้า JSON พัง ให้แสดงไว้ก่อนเพื่อความปลอดภัย (ดีกว่าไม่แสดงงานบังคับ)
+                is_target = True
+
+        # ถ้าตรงเงื่อนไข ให้ดึงรอบที่ยังไม่จบมาแสดง
         if is_target:
-            future_sessions = [s for s in act.sessions if s.SESSION_DATE >= today]
+            future_sessions = [s for s in act.sessions if s.SESSION_DATE >= today and s.SESSION_STATUS == 'Open']
             if not future_sessions: continue
             
+            # เลือกรอบที่เร็วที่สุด
             target_session = sorted(future_sessions, key=lambda x: (x.SESSION_DATE, x.START_TIME))[0]
             
             output.append({
@@ -1562,34 +1855,30 @@ def get_my_upcoming_activities(emp_id: str, db: Session = Depends(get_db)):
                 "activityDate": target_session.SESSION_DATE,
                 "startTime": target_session.START_TIME.strftime("%H:%M"),
                 "endTime": target_session.END_TIME.strftime("%H:%M"),
-                "status": "Auto-Added",
+                "status": "Auto-Added", # สถานะพิเศษ ให้รู้ว่าระบบดึงมาให้เอง
                 "sessionId": target_session.SESSION_ID,
-                # [FIXED] เพิ่ม 2 บรรทัดนี้
                 "isCompulsory": True,
                 "point": act.ACT_POINT
             })
         
+    # เรียงลำดับตามวันที่และเวลา
     output.sort(key=lambda x: (x['activityDate'], x['startTime']))
     
-    return output[:5]
-
-
+    # ส่งกลับสูงสุด 5-10 รายการ (Pagination แบบง่าย)
+    return output[:10]
 
 @app.post("/favorites/toggle")
 def toggle_favorite(req: ToggleFavoriteRequest, db: Session = Depends(get_db)):
-    # เช็คว่ามีอยู่แล้วไหม
     existing_fav = db.query(models.Favorite).filter(
         models.Favorite.EMP_ID == req.emp_id,
         models.Favorite.ACT_ID == req.act_id
     ).first()
 
     if existing_fav:
-        # ถ้ามี -> ลบออก (Unfavorite)
         db.delete(existing_fav)
         db.commit()
         return {"status": "removed", "message": "Removed from favorites"}
     else:
-        # ถ้าไม่มี -> เพิ่มใหม่ (Favorite)
         new_fav_id = generate_id("F")
         new_fav = models.Favorite(
             FAV_ID=new_fav_id,
@@ -1603,41 +1892,46 @@ def toggle_favorite(req: ToggleFavoriteRequest, db: Session = Depends(get_db)):
 
 @app.get("/favorites/{emp_id}")
 def get_user_favorites(emp_id: str, db: Session = Depends(get_db)):
-    # คืนค่าเป็น List ของ ACT_ID ที่ User นี้กด Fav ไว้
     favs = db.query(models.Favorite.ACT_ID).filter(models.Favorite.EMP_ID == emp_id).all()
-    # favs จะเป็น list of tuples [('A001',), ('A002',)] ต้องแปลงเป็น list of strings
     return [f[0] for f in favs]
-
-# [NEW] API ดึงประวัติการลงทะเบียนทั้งหมดของพนักงาน (Upcoming, Joined, Missed)
 @app.get("/my-registrations/{emp_id}", response_model=list[MyActivityResponse])
 def get_my_registrations(emp_id: str, db: Session = Depends(get_db)):
     today = date.today()
     
-    # 1. ดึงข้อมูลการลงทะเบียนทั้งหมดของพนักงาน
+    # 1. ดึงข้อมูลพนักงาน (เพื่อเอาไว้เช็ค Target)
+    employee = db.query(models.Employee).filter(models.Employee.EMP_ID == emp_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    # เตรียมข้อมูลพนักงาน (ตัดช่องว่างเพื่อความแม่นยำ)
+    emp_dept_name = employee.department.DEP_NAME.strip() if employee.department else ""
+    emp_position = employee.EMP_POSITION.strip()
+    
+    # 2. ดึงรายการที่ "ลงทะเบียนแล้ว" (จากตาราง Registration ตามปกติ)
     regs = db.query(models.Registration).filter(models.Registration.EMP_ID == emp_id).all()
     
     output = []
+    registered_act_ids = set() # เก็บ ID ไว้กันซ้ำ
+
     for r in regs:
-        # หา Session และ Activity ที่เกี่ยวข้อง
         sess = db.query(models.ActivitySession).filter(models.ActivitySession.SESSION_ID == r.SESSION_ID).first()
         if not sess: continue
         
         act = db.query(models.Activity).filter(models.Activity.ACT_ID == sess.ACT_ID).first()
         if not act: continue
         
-        # 2. เช็คว่ามีการเช็คอินหรือยัง?
+        registered_act_ids.add(act.ACT_ID)
+
         checkin = db.query(models.CheckIn).filter(
             models.CheckIn.EMP_ID == emp_id, 
             models.CheckIn.SESSION_ID == sess.SESSION_ID
         ).first()
         
-        # 3. คำนวณสถานะ (Logic หัวใจสำคัญ)
         status = "Upcoming"
         if checkin:
             status = "Joined"
         elif sess.SESSION_DATE < today:
             status = "Missed"
-        # ถ้า date >= today และยังไม่ checkin ก็เป็น Upcoming
         
         output.append({
             "actId": act.ACT_ID,
@@ -1647,22 +1941,146 @@ def get_my_registrations(emp_id: str, db: Session = Depends(get_db)):
             "activityDate": sess.SESSION_DATE,
             "startTime": sess.START_TIME.strftime("%H:%M"),
             "endTime": sess.END_TIME.strftime("%H:%M"),
-            "status": status, # ส่งสถานะที่คำนวณแล้วกลับไป
-            
-            "sessionId": sess.SESSION_ID
+            "status": status,
+            "sessionId": sess.SESSION_ID,
+            "isCompulsory": act.ACT_ISCOMPULSORY == 1,
+            "point": act.ACT_POINT
         })
+
+    # 3. [NEW LOGIC] ดึงกิจกรรมบังคับ (Compulsory) ที่ "ยังไม่ได้ลงทะเบียน" มาแทรก
+    # ต้องเช็ค Target Criteria ด้วย เพื่อให้ขึ้นเฉพาะคนที่มีสิทธิ์
     
-    # เรียงลำดับ: วันที่ล่าสุดขึ้นก่อน
+    compulsory_acts = db.query(models.Activity).filter(
+        models.Activity.ACT_ISCOMPULSORY == True,
+        models.Activity.ACT_STATUS == 'Open'
+    ).all()
+
+    for act in compulsory_acts:
+        # ถ้ามีในรายการลงทะเบียนแล้ว ให้ข้าม (จะได้ไม่โชว์ซ้ำ)
+        if act.ACT_ID in registered_act_ids:
+            continue
+
+        # --- Target Checking Logic (Robust Version) ---
+        is_target = False
+        if not act.ACT_TARGET_CRITERIA:
+            is_target = True # ถ้าไม่ระบุ แปลว่าบังคับทุกคน
+        else:
+            try:
+                criteria = json.loads(act.ACT_TARGET_CRITERIA)
+                target_type = criteria.get('type', 'all')
+                
+                if target_type == 'all':
+                    is_target = True
+                elif target_type == 'specific':
+                    target_depts = criteria.get('departments', [])
+                    target_positions = criteria.get('positions', [])
+                    
+                    # เช็คแผนก (ใช้ strip ตัดช่องว่าง)
+                    if target_depts and emp_dept_name in [d.strip() for d in target_depts]:
+                        is_target = True
+                    
+                    # เช็คตำแหน่ง (ถ้ายังไม่ผ่านแผนก)
+                    if not is_target and target_positions:
+                        if emp_position in [p.strip() for p in target_positions]:
+                            is_target = True
+            except:
+                is_target = True # ถ้า JSON พัง ให้แสดงไว้ก่อนเพื่อความปลอดภัย
+
+        # ถ้าตรงเงื่อนไข ให้คำนวณสถานะ (Upcoming หรือ Missed)
+        if is_target:
+            # หา Session ทั้งหมด
+            sessions = sorted(act.sessions, key=lambda x: (x.SESSION_DATE, x.START_TIME))
+            if not sessions: continue
+
+            # แบ่งรอบ อดีต/อนาคต
+            future_sessions = [s for s in sessions if s.SESSION_DATE >= today]
+            past_sessions = [s for s in sessions if s.SESSION_DATE < today]
+            
+            target_session = None
+            derived_status = "Upcoming"
+
+            if future_sessions:
+                # มีรอบในอนาคต -> Upcoming (เอารอบเร็วสุด)
+                target_session = future_sessions[0]
+                derived_status = "Upcoming"
+            elif past_sessions:
+                # มีแต่รอบในอดีต -> Missed (เอารอบล่าสุด)
+                target_session = past_sessions[-1]
+                derived_status = "Missed"
+            
+            if target_session:
+                 output.append({
+                    "actId": act.ACT_ID,
+                    "actType": act.ACT_TYPE,
+                    "name": act.ACT_NAME,
+                    "location": target_session.LOCATION,
+                    "activityDate": target_session.SESSION_DATE,
+                    "startTime": target_session.START_TIME.strftime("%H:%M"),
+                    "endTime": target_session.END_TIME.strftime("%H:%M"),
+                    "status": derived_status, # สถานะที่ระบบคำนวณให้
+                    "sessionId": target_session.SESSION_ID,
+                    "isCompulsory": True,
+                    "point": act.ACT_POINT
+                })
+    
+    # เรียงลำดับตามวันที่ (ใหม่ไปเก่า ตามสไตล์ Todo List)
     output.sort(key=lambda x: x['activityDate'], reverse=True)
         
     return output
 
+@app.post("/activities/register")
+async def register_activity(req: ActivityRegisterRequest, db: Session = Depends(get_db)):
+    existing = db.query(models.Registration).filter(
+        models.Registration.EMP_ID == req.emp_id,
+        models.Registration.SESSION_ID == req.session_id
+    ).first()
+    
+    if existing:
+        raise HTTPException(status_code=400, detail="Already registered")
+        
+    try:
+        new_reg_id = generate_id("R", 8)
+        new_reg = models.Registration(
+            REG_ID=new_reg_id,
+            EMP_ID=req.emp_id,
+            SESSION_ID=req.session_id,
+            REG_DATE=date.today()
+        )
+        db.add(new_reg)
+
+        # ดึงชื่อกิจกรรมมาแสดงในแจ้งเตือน
+        sess = db.query(models.ActivitySession).filter(models.ActivitySession.SESSION_ID == req.session_id).first()
+        act_name = "Activity"
+        if sess and sess.activity:
+            act_name = sess.activity.ACT_NAME
+            
+        create_notification_internal(
+            db, 
+            emp_id=req.emp_id,
+            title="ลงทะเบียนสำเร็จ ✅",
+            message=f"คุณได้ลงทะเบียนกิจกรรม '{act_name}' เรียบร้อยแล้ว",
+            notif_type="Activity",
+            ref_id=sess.ACT_ID if sess else None,
+            route_path="/activity_detail"
+        )
+
+        db.commit()
+        
+        # --- Broadcast Updates ---
+        await manager.broadcast("REFRESH_PARTICIPANTS")
+        await manager.broadcast("REFRESH_ACTIVITIES") 
+        
+        # [FIX] เพิ่มบรรทัดนี้: แจ้งเตือนตัวเลขแดงๆ ทันที
+        await manager.send_personal_message("REFRESH_NOTIFICATIONS", req.emp_id)
+        
+        return {"message": "Registration successful", "reg_id": new_reg_id}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-# [UPDATED] API ยกเลิกการลงทะเบียน พร้อม Business Logic
 @app.post("/activities/unregister")
-def unregister_activity(req: UnregisterRequest, db: Session = Depends(get_db)):
-    # 1. หา Record การลงทะเบียน
+async def unregister_activity(req: UnregisterRequest, db: Session = Depends(get_db)):
     reg = db.query(models.Registration).filter(
         models.Registration.EMP_ID == req.emp_id,
         models.Registration.SESSION_ID == req.session_id
@@ -1671,7 +2089,6 @@ def unregister_activity(req: UnregisterRequest, db: Session = Depends(get_db)):
     if not reg:
         raise HTTPException(status_code=404, detail="Registration not found")
         
-    # 2. ดึงข้อมูล Session และ Activity เพื่อมาเช็คกฎ
     session = db.query(models.ActivitySession).filter(
         models.ActivitySession.SESSION_ID == req.session_id
     ).first()
@@ -1683,89 +2100,128 @@ def unregister_activity(req: UnregisterRequest, db: Session = Depends(get_db)):
         models.Activity.ACT_ID == session.ACT_ID
     ).first()
     
-    if not activity:
-        raise HTTPException(status_code=404, detail="Activity not found")
-    
-    # --- Rule 1: Compulsory Check ---
     if activity.ACT_ISCOMPULSORY:
-        raise HTTPException(
-            status_code=400, 
-            detail="กิจกรรมบังคับ ไม่สามารถยกเลิกได้ (กรุณาติดต่อ HR)"
-        )
+        raise HTTPException(status_code=400, detail="กิจกรรมบังคับ ไม่สามารถยกเลิกได้")
 
-    # --- Rule 2: Time Limit Check (24 Hours) ---
-    # รวมวันที่และเวลาเข้าด้วยกัน
+    # เช็คเวลาล่วงหน้า 24 ชม.
     session_datetime = datetime.combine(session.SESSION_DATE, session.START_TIME)
-    current_datetime = datetime.now()
+    if session_datetime - datetime.now() < timedelta(hours=24):
+        raise HTTPException(status_code=400, detail="ไม่สามารถยกเลิกได้ (ต้องล่วงหน้า 24 ชม.)")
     
-    # หาความต่างของเวลา
-    time_difference = session_datetime - current_datetime
-    
-    # ถ้าเหลือน้อยกว่า 24 ชม. ห้ามยกเลิก
-    if time_difference < timedelta(hours=24):
-        raise HTTPException(
-            status_code=400, 
-            detail="ไม่สามารถยกเลิกได้ (ต้องล่วงหน้าอย่างน้อย 24 ชม.)"
-        )
-    
-    # ถ้าผ่านทุกกฎ -> ลบได้
     try:
-        db.delete(reg)
-        db.commit()
+        db.delete(reg) 
+        
+        create_notification_internal(
+            db,
+            emp_id=req.emp_id,
+            title="ยกเลิกกิจกรรมสำเร็จ 🗑️", 
+            message=f"คุณได้ยกเลิกการลงทะเบียน '{activity.ACT_NAME}' เรียบร้อยแล้ว",
+            notif_type="Activity", 
+            target_role="Employee",
+            ref_id=activity.ACT_ID,
+            route_path="/activity_detail"
+        )
+        
+        db.commit() 
+
+        # --- Broadcast Updates ---
+        await manager.broadcast("REFRESH_PARTICIPANTS")
+        await manager.broadcast("REFRESH_ACTIVITIES") 
+        
+        # [FIX] เพิ่มบรรทัดนี้: แจ้งเตือนตัวเลขแดงๆ ทันที
+        await manager.send_personal_message("REFRESH_NOTIFICATIONS", req.emp_id)
+
         return {"message": "Unregistered successfully"}
+
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+# [NEW API] Upload Image
+@app.post("/upload/image")
+async def upload_image(file: UploadFile = File(...)):
+    try:
+        file_name = f"{datetime.now().timestamp()}_{file.filename}"
+        file_location = f"static/{file_name}"
+        
+        with open(file_location, "wb+") as file_object:
+            shutil.copyfileobj(file.file, file_object)
+            
+        return {"url": f"/static/{file_name}"} 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not upload file: {e}")
 
-# 1. ดึงรายการของรางวัล
 @app.get("/rewards", response_model=list[PrizeResponse])
 def get_rewards(db: Session = Depends(get_db)):
-    prizes = db.query(models.Prize).filter(models.Prize.STATUS == 'Available').all()
-    
+    prizes = db.query(models.Prize).filter(models.Prize.STATUS != 'Discontinued').all()
     results = []
     for p in prizes:
         prize_type_str = str(p.PRIZE_TYPE) if p.PRIZE_TYPE else 'Physical'
+        
+        images_list = []
+        if p.PRIZE_IMAGES:
+            try:
+                images_list = json.loads(p.PRIZE_IMAGES)
+            except:
+                images_list = []
+        
+        if not images_list and hasattr(p, 'PRIZE_IMAGE') and p.PRIZE_IMAGE:
+            images_list = [p.PRIZE_IMAGE]
+
         results.append({
             "id": p.PRIZE_ID,
             "name": p.PRIZE_NAME,
             "pointCost": p.PRIZE_POINTS,
             "description": p.PRIZE_DESCRIPTION or "-",
-            "image": p.PRIZE_IMAGE,
+            "images": images_list,
             "stock": p.STOCK,
             "category": "General",
             "status": p.STATUS,
-            "prizeType": prize_type_str,   # ส่งออกแล้ว
+            "prizeType": prize_type_str,
         })
     return results
 
-
-
-# 2. ดึงประวัติการแลกของฉัน
+# [FIXED API] ดึงประวัติการแลกของรางวัล (รองรับหลายรูป)
 @app.get("/my-redemptions/{emp_id}", response_model=list[MyRedemptionResponse])
 def get_my_redemptions(emp_id: str, db: Session = Depends(get_db)):
+    # 1. ดึงข้อมูลการแลก
     redemptions = db.query(models.Redeem).filter(models.Redeem.EMP_ID == emp_id).order_by(models.Redeem.REDEEM_DATE.desc()).all()
     
     results = []
     for r in redemptions:
+        # 2. ดึงข้อมูลของรางวัล
         prize = db.query(models.Prize).filter(models.Prize.PRIZE_ID == r.PRIZE_ID).first()
-        if prize:
-            results.append({
-                "redeemId": r.REDEEM_ID,
-                "prizeName": prize.PRIZE_NAME,
-                "pointCost": prize.PRIZE_POINTS,
-                "redeemDate": r.REDEEM_DATE,
-                "status": r.STATUS,
-                "image": prize.PRIZE_IMAGE,
-                
-                # [NEW] ส่งค่าจาก DB ไป (ถ้าไม่มีให้ใช้ Default)
-                "pickupInstruction": prize.PICKUP_INSTRUCTION or "Contact HR"
-            })
+        
+        if not prize:
+            continue
+
+        # 3. [Logic] แกะ JSON รูปภาพ (PRIZE_IMAGES -> images list)
+        img_list = []
+        if prize.PRIZE_IMAGES:
+            try:
+                # แปลง JSON String กลับเป็น List
+                img_list = json.loads(prize.PRIZE_IMAGES)
+            except:
+                img_list = []
+        
+        # Fallback สำหรับข้อมูลเก่า
+        if not img_list and hasattr(prize, 'PRIZE_IMAGE') and prize.PRIZE_IMAGE:
+             img_list = [prize.PRIZE_IMAGE]
+
+        results.append({
+            "redeemId": r.REDEEM_ID,
+            "prizeName": prize.PRIZE_NAME,
+            "pointCost": prize.PRIZE_POINTS,
+            "redeemDate": r.REDEEM_DATE,
+            "status": r.STATUS,
+            "images": img_list, # ส่งเป็น List ให้ตรงกับ Schema ใหม่
+            "pickupInstruction": prize.PICKUP_INSTRUCTION or "Contact HR"
+        })
+        
     return results
 
 @app.post("/rewards/redeem")
 async def redeem_reward(req: RedeemRequest, db: Session = Depends(get_db)):
-    # ... (Logic เช็คแต้ม/สต็อก เหมือนเดิม) ...
     emp_points = db.query(models.Points).filter(models.Points.EMP_ID == req.emp_id).first()
     if not emp_points:
         emp_points = models.Points(EMP_ID=req.emp_id, TOTAL_POINTS=0)
@@ -1781,28 +2237,21 @@ async def redeem_reward(req: RedeemRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Insufficient Points")
         
     try:
-        # 4. ตัดยอด
         emp_points.TOTAL_POINTS -= prize.PRIZE_POINTS
         prize.STOCK -= 1
         
-        # [SIMPLIFIED LOGIC] กำหนดสถานะตามประเภท
         voucher_code = None
         usage_expire = None
-        status = "Pending" # Default รอรับของ
+        status = "Pending"
         
         if prize.PRIZE_TYPE == 'Privilege':
-            # วันลา/สิทธิ์พิเศษ -> อนุมัติเลย (Completed) ใช้ได้ถึงสิ้นปี
             status = "Completed"
             this_year = datetime.now().year
             usage_expire = datetime(this_year, 12, 31, 23, 59, 59)
             
         elif prize.PRIZE_TYPE == 'Digital':
-            # คูปอง -> รอ Admin ส่งโค้ดให้ (Pending)
             status = "Pending"
-            # (อนาคตค่อยมาแก้ตรงนี้ถ้าจะ Auto-Gen)
             
-        # Physical -> Pending (รอไปรับ)
-        
         new_redeem_id = generate_id("RD", 8)
         new_redeem = models.Redeem(
             REDEEM_ID=new_redeem_id,
@@ -1811,7 +2260,7 @@ async def redeem_reward(req: RedeemRequest, db: Session = Depends(get_db)):
             REDEEM_DATE=datetime.now(),
             STATUS=status,
             APPROVED_BY=None,
-            VOUCHER_CODE=voucher_code, # เป็น Null ไปก่อน
+            VOUCHER_CODE=voucher_code,
             USAGE_EXPIRED_DATE=usage_expire
         )
         db.add(new_redeem)
@@ -1828,8 +2277,41 @@ async def redeem_reward(req: RedeemRequest, db: Session = Depends(get_db)):
         )
         db.add(new_txn)
         
+        # [LOGIC 1] แจ้งเตือน Admin: มีคำขอแลกของรางวัลใหม่ (New Redemption Request)
+        if prize.PRIZE_TYPE == 'Physical' and status == 'Pending':
+            # หา Admin ทุกคนในระบบ
+            admins = db.query(models.Employee).filter(models.Employee.EMP_ROLE == 'admin').all()
+            for admin in admins:
+                create_notification_internal(
+                    db,
+                    emp_id=admin.EMP_ID,
+                    title="มีคำขอแลกรางวัลใหม่ 🎁",
+                    message=f"พนักงาน {req.emp_id} ขอแลก '{prize.PRIZE_NAME}'",
+                    notif_type="Reward",
+                    target_role="Admin",  # ส่งให้ Admin เท่านั้น
+                    ref_id=new_redeem_id,
+                    route_path="/admin/redemptions" # พาไปหน้าจัดการคำขอ
+                )
+
+        # [LOGIC 2] แจ้งเตือน Admin: ของใกล้หมด (Stock Low Warning)
+        # กำหนดเกณฑ์ Safety Stock เช่น ต่ำกว่า 5 ชิ้น
+        if prize.STOCK < 5: 
+            admins = db.query(models.Employee).filter(models.Employee.EMP_ROLE == 'admin').all()
+            for admin in admins:
+                create_notification_internal(
+                    db,
+                    emp_id=admin.EMP_ID,
+                    title="⚠️ ของรางวัลใกล้หมด",
+                    message=f"'{prize.PRIZE_NAME}' เหลือเพียง {prize.STOCK} ชิ้น กรุณาเติมสต็อก",
+                    notif_type="Alert",
+                    target_role="Admin",
+                    ref_id=prize.PRIZE_ID,
+                    route_path="/admin/rewards"
+                )
+        
         db.commit()
         await manager.broadcast("REFRESH_REWARDS")
+        await manager.send_personal_message("REFRESH_NOTIFICATIONS", req.emp_id)
         
         return {
             "message": "Redemption successful", 
@@ -1842,45 +2324,8 @@ async def redeem_reward(req: RedeemRequest, db: Session = Depends(get_db)):
         print(f"Redeem Error: {e}")
         raise HTTPException(status_code=500, detail=f"Transaction failed: {str(e)}")
 
-
-@app.post("/activities/register")
-async def register_activity(req: ActivityRegisterRequest, db: Session = Depends(get_db)):
-    # 1. เช็คว่าเคยลงหรือยัง
-    existing = db.query(models.Registration).filter(
-        models.Registration.EMP_ID == req.emp_id,
-        models.Registration.SESSION_ID == req.session_id
-    ).first()
-    
-    if existing:
-        raise HTTPException(status_code=400, detail="Already registered")
-        
-    # 2. เช็คที่ว่าง (Optional: ถ้าจะทำ Enterprise จริงต้องเช็ค Max Participants ด้วย)
-    
-    try:
-        new_reg_id = generate_id("R", 8)
-        new_reg = models.Registration(
-            REG_ID=new_reg_id,
-            EMP_ID=req.emp_id,
-            SESSION_ID=req.session_id,
-            REG_DATE=date.today()
-        )
-        db.add(new_reg)
-        db.commit()
-        
-        # [FIXED] ตะโกนบอกทุกคนว่า "มีคนลงทะเบียนเพิ่มแล้วนะ!"
-        await manager.broadcast("REFRESH_PARTICIPANTS")
-        
-        return {"message": "Registration successful", "reg_id": new_reg_id}
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/rewards/cancel")
 async def cancel_redemption(req: CancelRedeemRequest, db: Session = Depends(get_db)):
-    # 1. ดึงข้อมูลการแลก
     redeem = db.query(models.Redeem).filter(
         models.Redeem.REDEEM_ID == req.redeem_id,
         models.Redeem.EMP_ID == req.emp_id
@@ -1892,24 +2337,18 @@ async def cancel_redemption(req: CancelRedeemRequest, db: Session = Depends(get_
     if redeem.STATUS != 'Pending':
         raise HTTPException(status_code=400, detail="Cannot cancel completed or already cancelled item")
 
-    # 2. ดึงข้อมูลของรางวัลและกระเป๋าตังค์
     prize = db.query(models.Prize).filter(models.Prize.PRIZE_ID == redeem.PRIZE_ID).first()
     emp_points = db.query(models.Points).filter(models.Points.EMP_ID == req.emp_id).first()
     
     try:
-        # 3. คืนของและคืนแต้ม (Refund Transaction)
-        # 3.1 เปลี่ยนสถานะ
         redeem.STATUS = 'Cancelled'
         
-        # 3.2 คืนสต็อก
         if prize:
             prize.STOCK += 1
             
-        # 3.3 คืนแต้ม
         if emp_points and prize:
             emp_points.TOTAL_POINTS += prize.PRIZE_POINTS
             
-            # 3.4 บันทึก Transaction Log (Refund)
             new_txn_id = generate_id("TXN", 10)
             new_txn = models.PointTransaction(
                 TXN_ID=new_txn_id,
@@ -1917,15 +2356,14 @@ async def cancel_redemption(req: CancelRedeemRequest, db: Session = Depends(get_
                 TXN_TYPE="Refund",
                 REF_TYPE="REDEEM",
                 REF_ID=redeem.REDEEM_ID,
-                POINTS=prize.PRIZE_POINTS, # แต้มบวกกลับ
+                POINTS=prize.PRIZE_POINTS,
                 TXN_DATE=datetime.now()
             )
             db.add(new_txn)
             
         db.commit()
-        
-        # [NEW] ตะโกนบอกทุกคนว่า "ของรางวัลมีการเปลี่ยนแปลงนะ" (Stock เพิ่มกลับมา)
         await manager.broadcast("REFRESH_REWARDS")
+        await manager.send_personal_message("REFRESH_NOTIFICATIONS", req.emp_id)
         
         return {
             "message": "Cancelled successfully", 
@@ -1936,15 +2374,477 @@ async def cancel_redemption(req: CancelRedeemRequest, db: Session = Depends(get_
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Cancel failed: {str(e)}")
 
+@app.get("/admin/employees")
+def get_all_employees(db: Session = Depends(get_db)):
+    employees = db.query(models.Employee).all()
+    results = []
+    for e in employees:
+        results.append({
+            "id": e.EMP_ID,
+            "name": e.EMP_NAME_EN,
+            "position": e.EMP_POSITION,
+            "phone": e.EMP_PHONE,
+            "email": e.EMP_EMAIL,
+            "department": e.department.DEP_NAME if e.department else "-",
+            "role": e.EMP_ROLE,
+            "status": e.EMP_STATUS
+        })
+    return results
+
+@app.delete("/admin/employees/{emp_id}")
+def delete_employee(emp_id: str, db: Session = Depends(get_db)):
+    emp = db.query(models.Employee).filter(models.Employee.EMP_ID == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    db.query(models.Points).filter(models.Points.EMP_ID == emp_id).delete()
+    
+    db.delete(emp)
+    db.commit()
+    return {"message": "Deleted successfully"}
+
+@app.get("/admin/redemptions")
+def get_all_redemptions(status: str = None, db: Session = Depends(get_db)):
+    query = db.query(models.Redeem).order_by(models.Redeem.REDEEM_DATE.desc())
+    if status:
+        query = query.filter(models.Redeem.STATUS == status)
+    
+    redemptions = query.all()
+    results = []
+    for r in redemptions:
+        emp = db.query(models.Employee).filter(models.Employee.EMP_ID == r.EMP_ID).first()
+        prize = db.query(models.Prize).filter(models.Prize.PRIZE_ID == r.PRIZE_ID).first()
+        
+        results.append({
+            "redeemId": r.REDEEM_ID,
+            "empId": r.EMP_ID,
+            "empName": emp.EMP_NAME_EN if emp else "Unknown",
+            "prizeName": prize.PRIZE_NAME if prize else "Unknown",
+            "pointCost": prize.PRIZE_POINTS if prize else 0,
+            "redeemDate": r.REDEEM_DATE,
+            "status": r.STATUS
+        })
+    return results
+
+@app.put("/admin/redemptions/{redeem_id}/status")
+async def update_redemption_status(redeem_id: str, status: str, db: Session = Depends(get_db)):
+    redeem = db.query(models.Redeem).filter(models.Redeem.REDEEM_ID == redeem_id).first()
+    if not redeem:
+        raise HTTPException(status_code=404, detail="Not found")
+    
+    redeem.STATUS = status
+
+    # Logic คืนแต้มกรณี Cancel (คงเดิม)
+    if status == 'Cancelled':
+        prize = db.query(models.Prize).filter(models.Prize.PRIZE_ID == redeem.PRIZE_ID).first()
+        emp_points = db.query(models.Points).filter(models.Points.EMP_ID == redeem.EMP_ID).first()
+        
+        if prize and emp_points:
+            prize.STOCK += 1
+            emp_points.TOTAL_POINTS += prize.PRIZE_POINTS
+            
+            new_txn = models.PointTransaction(
+                TXN_ID=generate_id("TXN", 10),
+                EMP_ID=redeem.EMP_ID,
+                TXN_TYPE="Refund",
+                REF_TYPE="REDEEM",
+                REF_ID=redeem_id,
+                POINTS=prize.PRIZE_POINTS,
+                TXN_DATE=datetime.now()
+            )
+            db.add(new_txn)
+
+    prize = db.query(models.Prize).filter(models.Prize.PRIZE_ID == redeem.PRIZE_ID).first()
+    prize_name = prize.PRIZE_NAME if prize else "ของรางวัล"
+
+    notif_title = ""
+    notif_msg = ""
+    notif_type = "Reward"
+
+    if status == 'Completed':
+        notif_title = "คำขอแลกรางวัลสำเร็จ ✅"
+        notif_msg = f"คำขอแลก '{prize_name}' ของคุณได้รับการอนุมัติแล้ว"
+    elif status == 'Cancelled':
+        notif_title = "คำขอแลกรางวัลถูกยกเลิก ❌"
+        notif_msg = f"คำขอแลก '{prize_name}' ถูกยกเลิก ระบบได้คืนคะแนนให้คุณแล้ว"
+        notif_type = "Alert"
+    
+    if notif_title:
+        # 1. สร้าง Notification ลง DB (คงเดิม)
+        create_notification_internal(
+            db,
+            emp_id=redeem.EMP_ID, 
+            title=notif_title,
+            message=notif_msg,
+            notif_type=notif_type,
+            ref_id=redeem_id,
+            route_path="/reward_history"
+        )
+        
+        # [แก้ไข] 2. เพิ่มบรรทัดนี้เพื่อยิง Socket หาพนักงานคนนั้น
+        await manager.send_personal_message("REFRESH_NOTIFICATIONS", redeem.EMP_ID)
+        
+    db.commit()
+    return {"message": f"Status updated to {status}"}
+
+
+@app.get("/admin/stats")
+def get_admin_stats(db: Session = Depends(get_db)):
+    total_emp = db.query(models.Employee).count()
+    pending_req = db.query(models.Redeem).filter(models.Redeem.STATUS == 'Pending').count()
+    total_rewards = db.query(models.Prize).filter(models.Prize.STATUS == 'Available').count()
+    total_act = db.query(models.Activity).count()
+    
+    return {
+        "totalEmployees": total_emp,
+        "pendingRequests": pending_req,
+        "totalRewards": total_rewards,
+        "totalActivities": total_act
+    }
+
+@app.post("/admin/policy/run_expiry_batch")
+def run_expiry_batch(admin_id: str, db: Session = Depends(get_db)):
+    company_id = get_admin_company_id_and_check(admin_id, db)
+    
+    today = date.today()
+    
+    expired_users = db.query(models.Points).join(models.Employee).filter(
+        models.Employee.COMPANY_ID == company_id,
+        models.Points.EXPIRY_DATE < today, 
+        models.Points.TOTAL_POINTS > 0
+    ).all()
+    
+    if not expired_users:
+        return {"message": "No expired points found today.", "processed_users": 0, "total_points_removed": 0}
+
+    expired_count = 0
+    total_points_cut = 0
+
+    try:
+        for user_point in expired_users:
+            old_points = user_point.TOTAL_POINTS
+            emp_id = user_point.EMP_ID
+            
+            txn_id = generate_id("TXN", 10)
+            expiry_txn = models.PointTransaction(
+                TXN_ID=txn_id,
+                EMP_ID=emp_id,
+                TXN_TYPE="Expire",
+                REF_TYPE="SYSTEM",
+                REF_ID=f"EXP-{today}",
+                POINTS=-old_points,
+                TXN_DATE=datetime.now()
+            )
+            db.add(expiry_txn)
+            
+            user_point.TOTAL_POINTS = 0
+
+            expired_count += 1
+            total_points_cut += old_points
+        
+        db.commit()
+        
+        print(f"✅ Batch Expiry Complete: {expired_count} users, {total_points_cut} points removed.")
+        return {
+            "message": "Expiry batch executed successfully",
+            "processed_users": expired_count,
+            "total_points_removed": total_points_cut
+        }
+
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Expiry Batch Failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Batch failed: {str(e)}")
+
+@app.get("/admin/policy/points")
+def get_point_policy(admin_id: str, db: Session = Depends(get_db)):
+    company_id = get_admin_company_id_and_check(admin_id, db)
+
+    policy = db.query(models.PointPolicy).filter(
+        models.PointPolicy.COMPANY_ID == company_id
+    ).first()
+
+    if not policy:
+        return {
+            "policy_id": None,
+            "policy_name": "Annual Expiry Policy",
+            "start_date": date(date.today().year, 1, 1).isoformat(),
+            "end_date": date(date.today().year, 12, 31).isoformat(),
+            "description": "The current period ends on December 31st.",
+        }
+
+    return {
+        "policy_id": policy.POLICY_ID,
+        "policy_name": policy.POLICY_NAME,
+        "start_date": policy.START_PERIOD.isoformat(),
+        "end_date": policy.END_PERIOD.isoformat(),
+        "description": policy.DESCRIPTION
+    }
+
+@app.post("/admin/policy/points")
+def set_point_policy(admin_id: str, req: PointPolicyRequest, db: Session = Depends(get_db)):
+    company_id = get_admin_company_id_and_check(admin_id, db)
+    
+    policy = db.query(models.PointPolicy).filter(
+        models.PointPolicy.COMPANY_ID == company_id
+    ).first()
+    
+    if not policy:
+        policy_id = generate_id("POL", 5)
+        policy = models.PointPolicy(
+            POLICY_ID=policy_id,
+            COMPANY_ID=company_id,
+            POLICY_NAME=req.policy_name,
+            START_PERIOD=req.start_date,
+            END_PERIOD=req.end_date,
+            DESCRIPTION=req.description
+        )
+        db.add(policy)
+    else:
+        policy.POLICY_NAME = req.policy_name
+        policy.START_PERIOD = req.start_date
+        policy.END_PERIOD = req.end_date
+        policy.DESCRIPTION = req.description
+        
+    try:
+        db.commit()
+        
+        employee_ids = db.query(models.Employee.EMP_ID).filter(
+            models.Employee.COMPANY_ID == company_id
+        ).all()
+        
+        for emp_id_tuple in employee_ids:
+            emp_id = emp_id_tuple[0]
+            points_record = db.query(models.Points).filter(models.Points.EMP_ID == emp_id).first()
+            if points_record:
+                points_record.EXPIRY_DATE = req.end_date
+            else:
+                new_points = models.Points(
+                    EMP_ID=emp_id,
+                    TOTAL_POINTS=0,
+                    EXPIRY_DATE=req.end_date
+                )
+                db.add(new_points)
+
+        db.commit()
+
+        return {"message": "Point policy and employee expiry dates updated successfully"}
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.post("/admin/rewards")
+def create_reward(req: PrizeCreateRequest, admin_id: str, db: Session = Depends(get_db)):
+    company_id = get_admin_company_id_and_check(admin_id, db)
+    
+    new_id = generate_id("P", 5)
+    new_prize = models.Prize(
+        PRIZE_ID=new_id,
+        COMPANY_ID=company_id,
+        PRIZE_NAME=req.name,
+        PRIZE_POINTS=req.point_cost,
+        PRIZE_DESCRIPTION=req.description,
+        PRIZE_IMAGES=json.dumps(req.images),
+        STOCK=req.stock,
+        STATUS='Available',
+        MANAGED_BY=admin_id,
+        PICKUP_INSTRUCTION=req.pickup_instruction,
+        PRIZE_TYPE=req.prize_type
+    )
+    db.add(new_prize)
+    db.commit()
+    return {"message": "Reward created successfully", "id": new_id}
+
+@app.put("/admin/rewards/{prize_id}")
+def update_reward(prize_id: str, req: PrizeCreateRequest, admin_id: str, db: Session = Depends(get_db)):
+    company_id = get_admin_company_id_and_check(admin_id, db)
+    
+    prize = db.query(models.Prize).filter(models.Prize.PRIZE_ID == prize_id).first()
+    if not prize:
+        raise HTTPException(status_code=404, detail="Reward not found")
+        
+    prize.PRIZE_NAME = req.name
+    prize.PRIZE_POINTS = req.point_cost
+    prize.PRIZE_DESCRIPTION = req.description
+    prize.PRIZE_IMAGES = json.dumps(req.images)
+    prize.STOCK = req.stock
+    prize.PRIZE_TYPE = req.prize_type
+    prize.PICKUP_INSTRUCTION = req.pickup_instruction
+    
+    db.commit()
+    return {"message": "Reward updated successfully"}
+
+@app.delete("/admin/rewards/{prize_id}")
+def delete_reward(prize_id: str, admin_id: str, db: Session = Depends(get_db)):
+    get_admin_company_id_and_check(admin_id, db)
+    
+    prize = db.query(models.Prize).filter(models.Prize.PRIZE_ID == prize_id).first()
+    if not prize:
+        raise HTTPException(status_code=404, detail="Reward not found")
+    
+    prize.STATUS = 'Discontinued' 
+    db.commit()
+    return {"message": "Reward discontinued"}
+
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+async def websocket_endpoint(websocket: WebSocket, emp_id: str = Query(None)):
+    if not emp_id:
+        await websocket.close()
+        return
+    await manager.connect(websocket, emp_id)
     try:
         while True:
-            # รอรับข้อความ (Keep Alive)
             await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
-        
-# หมายเหตุ: อย่าลืมรัน uvicorn ใหม่ทุกครั้งหลังแก้ไฟล์
-# uvicorn main:app --reload --host 0.0.0.0 --port 8000
+        manager.disconnect(emp_id)
+
+def run_scheduler():
+    print("⏳ Scheduler Started...")
+    # รัน Daily Check (24 ชม. / แต้มหมดอายุ) ทุกวันตอน 8 โมงเช้า (หรือตามความเหมาะสม)
+    schedule.every().day.at("08:00").do(check_daily_notifications)
+    
+    # [NEW] รัน Hourly Check ทุก 1 นาที
+    schedule.every(1).minutes.do(check_upcoming_notifications)
+
+    while True:
+        schedule.run_pending()
+        time_module.sleep(1)
+
+    if __name__ == "__main__":
+        import uvicorn
+        scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+        scheduler_thread.start()
+        uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+@app.post("/admin/rewards/scan_pickup")
+def process_pickup_scan(req: PrizePickupRequest, db: Session = Depends(get_db)):
+    # 1. Check Admin Permission
+    get_admin_company_id_and_check(req.admin_id, db)
+
+    # 2. Find the Redemption Record
+    redeem = db.query(models.Redeem).filter(models.Redeem.REDEEM_ID == req.redeem_id).first()
+
+    if not redeem:
+        raise HTTPException(status_code=404, detail="Redemption ID not found.")
+    
+    if redeem.STATUS == 'Completed' or redeem.STATUS == 'Received':
+        raise HTTPException(status_code=400, detail="Reward already picked up.")
+
+    if redeem.STATUS != 'Pending':
+        raise HTTPException(status_code=400, detail=f"Cannot process status: {redeem.STATUS}")
+
+    # 3. Update Status to Completed (Received)
+    redeem.STATUS = 'Completed'
+    redeem.APPROVED_BY = req.admin_id
+    redeem.RECEIVED_DATE = date.today()
+    
+    db.commit()
+    
+    # 4. Notify everyone to refresh UI
+    manager.broadcast("REFRESH_REWARDS")
+    
+    return {
+        "message": "Pickup confirmed and status updated to Completed.",
+        "redeem_id": req.redeem_id,
+        "prize_name": db.query(models.Prize).filter(models.Prize.PRIZE_ID == redeem.PRIZE_ID).first().PRIZE_NAME
+    }
+
+
+@app.put("/admin/employees/{emp_id}")
+def update_employee(emp_id: str, req: EmployeeUpdateRequest, db: Session = Depends(get_db)):
+    # 1. หาพนักงาน
+    emp = db.query(models.Employee).filter(models.Employee.EMP_ID == emp_id).first()
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # 2. จัดการแผนก (ใช้ Logic เดียวกับ Activity เพื่อหา/สร้างแผนก)
+    # เราต้องหา Company ID ของพนักงานคนนี้เพื่อสร้างแผนกในบริษัทเดียวกัน
+    company_id = emp.COMPANY_ID
+    final_dep_id = resolve_department_id(db, req.department_id, company_id) # Reuse function เดิม
+
+    # 3. อัปเดตข้อมูล
+    emp.EMP_TITLE_EN = req.title
+    emp.EMP_NAME_EN = req.name
+    emp.EMP_PHONE = req.phone
+    emp.EMP_EMAIL = req.email
+    emp.DEP_ID = final_dep_id
+    emp.EMP_POSITION = req.position
+    emp.EMP_ROLE = req.role
+    emp.EMP_STATUS = req.status
+    
+    try:
+        emp.EMP_STARTDATE = datetime.strptime(req.start_date, "%Y-%m-%d").date()
+    except:
+        pass # ถ้าวันที่ผิด ไม่ต้องแก้
+
+    try:
+        db.commit()
+        return {"message": "Employee updated successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Update failed: {str(e)}")
+
+
+
+
+
+# [API] ดึงรายการแจ้งเตือน
+@app.get("/notifications/{emp_id}", response_model=list[NotificationResponse])
+def get_my_notifications(
+    emp_id: str, 
+    role: str = "Employee", # <--- [NEW] รับ Query Param (?role=Admin)
+    db: Session = Depends(get_db)
+):
+    # ดึง 50 รายการล่าสุด เรียงจากใหม่ไปเก่า
+    notifs = db.query(models.Notification)\
+        .filter(models.Notification.EMP_ID == emp_id)\
+        .filter(models.Notification.TARGET_ROLE == role)\
+        .order_by(models.Notification.CREATED_AT.desc())\
+        .limit(50)\
+        .all()
+    
+    # Map ข้อมูลให้ตรงกับ Pydantic Model
+    results = []
+    for n in notifs:
+        results.append({
+            "notifId": n.NOTIF_ID,
+            "title": n.TITLE,
+            "message": n.MESSAGE,
+            "type": n.NOTIF_TYPE,
+            "isRead": n.IS_READ,
+            "createdAt": n.CREATED_AT,
+            "routePath": n.ROUTE_PATH,
+            "refId": n.REF_ID
+        })
+    return results
+
+# [API] อ่านแจ้งเตือน
+@app.put("/notifications/{notif_id}/read")
+def mark_notification_read(notif_id: str, db: Session = Depends(get_db)):
+    notif = db.query(models.Notification).filter(models.Notification.NOTIF_ID == notif_id).first()
+    if not notif:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    notif.IS_READ = True
+    db.commit()
+    return {"message": "Marked as read"}
+
+
+@app.get("/notifications/{emp_id}/unread")
+def get_unread_count(
+    emp_id: str, 
+    role: str = "Employee", 
+    db: Session = Depends(get_db)
+):
+    # นับจำนวนแจ้งเตือนของ Role นั้นๆ ที่ยังไม่ได้อ่าน (IS_READ = False)
+    count = db.query(models.Notification)\
+        .filter(models.Notification.EMP_ID == emp_id)\
+        .filter(models.Notification.TARGET_ROLE == role)\
+        .filter(models.Notification.IS_READ == False)\
+        .count()
+    
+    return {"count": count}
+
+

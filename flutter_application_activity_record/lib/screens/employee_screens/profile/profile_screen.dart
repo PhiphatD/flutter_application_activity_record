@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -7,7 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
-
+import '../../admin_screens/admin_main_screen.dart';
 import '../../organizer_screens/main/organizer_main_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -27,7 +28,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String empPosition = "...";
   String empDepartment = "...";
   String companyName = "...";
-  String avatarUrl = "https://i.pravatar.cc/150?img=12";
+  String avatarUrl = "";
   String qrData = "";
   String empEmail = "-";
   String empPhone = "-";
@@ -48,18 +49,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final String? storedEmpId = prefs.getString('empId');
     final String? storedRole = prefs.getString('role');
 
-    if (storedEmpId == null) return;
-
+    // [FIXED] 1. กำหนด Role ทันทีและสร้าง Key Cache ตาม Role
+    final String effectiveRole = storedRole?.toLowerCase() ?? "employee";
     if (mounted) {
       setState(() {
-        userRole = storedRole?.toLowerCase() ?? "employee";
+        userRole = effectiveRole;
       });
     }
 
+    // [FIXED] 2. เช็ค ID ว่างก่อนยิง API
+    if (storedEmpId == null || storedEmpId.isEmpty) {
+      // ... (Error handling) ...
+      return;
+    }
+
+    // [FIXED] 3. สร้าง Key Cache ที่มี Role รวมอยู่ด้วย (แก้ปัญหารูปตีกัน)
+    final String avatarCacheKey = 'avatar_cache_${storedEmpId}_$effectiveRole';
+
+    // [FIXED] 4. ลองดึงรูปจาก Cache ของ Role นั้นๆ มาแสดงก่อน (Fast Load)
+    final String? cachedAvatar = prefs.getString(avatarCacheKey);
+    if (mounted && cachedAvatar != null && cachedAvatar.isNotEmpty) {
+      setState(() {
+        avatarUrl = cachedAvatar;
+      });
+    }
     try {
       final response = await http.get(
         Uri.parse('$apiUrl/employees/$storedEmpId'),
       );
+
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
         if (mounted) {
@@ -73,17 +91,75 @@ class _ProfileScreenState extends State<ProfileScreen> {
             empEmail = data['EMP_EMAIL'] ?? "-";
             empPhone = data['EMP_PHONE'] ?? "-";
             qrData = empId;
+
             if (data['EMP_STARTDATE'] != null) {
-              DateTime startDate = DateTime.parse(data['EMP_STARTDATE']);
-              empStartDateFormatted = DateFormat('d MMM y').format(startDate);
-              _calculateServiceDuration(startDate);
+              try {
+                DateTime startDate = DateTime.parse(data['EMP_STARTDATE']);
+                empStartDateFormatted = DateFormat('d MMM y').format(startDate);
+                _calculateServiceDuration(startDate);
+              } catch (_) {}
             }
+
+            // --- Avatar Logic: ใช้ userRole ที่ถูกดึงมาตอนต้น ---
+            bool isFemale = false;
+            final lowerTitle = empTitle.toLowerCase();
+            if (lowerTitle.contains("ms") ||
+                lowerTitle.contains("mrs") ||
+                lowerTitle.contains("miss") ||
+                lowerTitle.contains("นาง") ||
+                lowerTitle.contains("น.ส.")) {
+              isFemale = true;
+            }
+
+            String newAvatarUrl;
+            if (userRole == 'admin') {
+              // Admin: Operator Style
+              newAvatarUrl = isFemale
+                  ? "https://avatar.iran.liara.run/public/girl?username=$empId"
+                  : "https://avatar.iran.liara.run/public/boy?username=$empId";
+            } else if (userRole == 'organizer') {
+              // Organizer: Astronomer Style
+              newAvatarUrl = isFemale
+                  ? "https://avatar.iran.liara.run/public/girl?username=$empId"
+                  : "https://avatar.iran.liara.run/public/boy?username=$empId";
+            } else {
+              // Employee: Casual Style
+              newAvatarUrl = isFemale
+                  ? "https://avatar.iran.liara.run/public/girl?username=$empId"
+                  : "https://avatar.iran.liara.run/public/boy?username=$empId";
+            }
+
+            avatarUrl = newAvatarUrl;
+            // [FIXED] 5. บันทึก New URL ลงใน Cache Key ที่มี Role เฉพาะ
+            prefs.setString(avatarCacheKey, newAvatarUrl);
+          });
+        }
+      } else {
+        print("API Error: ${response.statusCode}");
+        if (mounted) {
+          setState(() {
+            empName = "Data Not Found";
+            empPosition = "Server Error (${response.statusCode})";
           });
         }
       }
     } catch (e) {
       print("Error fetching profile: $e");
+      if (mounted) {
+        setState(() {
+          empName = "Connection Error";
+          empPosition = "Check Internet";
+        });
+      }
     }
+  }
+
+  void _navigateToAdminMode() {
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const AdminMainScreen()),
+      (route) => false,
+    );
   }
 
   void _navigateToOrganizerMode() {
@@ -91,6 +167,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context,
       MaterialPageRoute(builder: (context) => const OrganizerMainScreen()),
       (route) => false,
+    );
+  }
+
+  Widget _buildSwitchButton({
+    required String title,
+    required IconData icon,
+    required VoidCallback onTap,
+    required Color color,
+  }) {
+    return ElevatedButton.icon(
+      onPressed: onTap,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.white,
+        foregroundColor: color,
+        elevation: 2,
+        minimumSize: const Size(double.infinity, 56),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: color),
+        ),
+      ),
+      icon: Icon(icon),
+      label: Text(
+        title,
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      ),
     );
   }
 
@@ -261,34 +363,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     const SizedBox(height: 30),
 
-                    // [NEW] ปุ่มสลับโหมด (แสดงเฉพาะถ้าไม่ใช่ Employee ธรรมดา)
+                    // [NEW] ปุ่มสลับโหมดตามสิทธิ์
                     if (userRole == 'organizer' || userRole == 'admin') ...[
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 30),
-                        child: ElevatedButton.icon(
-                          onPressed: _navigateToOrganizerMode,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(
-                              0xFF375987,
-                            ), // สีเข้มเพื่อให้รู้ว่าเป็น Admin Mode
-                            foregroundColor: Colors.white,
-                            elevation: 4,
-                            minimumSize: const Size(double.infinity, 56),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
+                        child: Column(
+                          children: [
+                            if (userRole == 'admin') ...[
+                              // Admin สามารถสลับกลับไปหน้า Admin
+                              _buildSwitchButton(
+                                title: "Switch to Admin Console",
+                                icon: Icons.admin_panel_settings_outlined,
+                                onTap: _navigateToAdminMode,
+                                color: const Color(
+                                  0xFF375987,
+                                ), // Dark Blue (Admin)
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+
+                            // Admin และ Organizer สามารถสลับไปหน้า Organizer
+                            _buildSwitchButton(
+                              title: "Switch to Organizer Console",
+                              icon: Icons.dashboard_customize_outlined,
+                              onTap: _navigateToOrganizerMode,
+                              color: const Color(
+                                0xFFFF9F1C,
+                              ), // Blue (Organizer)
                             ),
-                            shadowColor: const Color(
-                              0xFF375987,
-                            ).withOpacity(0.4),
-                          ),
-                          icon: const Icon(Icons.dashboard_customize_outlined),
-                          label: const Text(
-                            "Switch to Organizer Console",
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                          ],
                         ),
                       ),
                       const SizedBox(height: 20),
@@ -355,7 +458,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               children: [
                 CircleAvatar(
                   radius: 50,
-                  backgroundImage: NetworkImage(avatarUrl),
+                  backgroundImage: avatarUrl.isNotEmpty
+                      ? CachedNetworkImageProvider(avatarUrl)
+                      // Fallback: ใช้ NetworkImage ธรรมดาเป็น Placeholder
+                      : NetworkImage(
+                              'https://avatar.iran.liara.run/username?username=$empName',
+                            )
+                            as ImageProvider,
                 ),
                 const SizedBox(height: 15),
                 FittedBox(

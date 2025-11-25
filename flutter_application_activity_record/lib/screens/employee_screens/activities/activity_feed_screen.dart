@@ -1,19 +1,18 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:flutter_application_activity_record/screens/employee_screens/scan/employee_scanner_screen.dart';
-import 'package:google_fonts/google_fonts.dart';
+
+import 'package:google_fonts/google_fonts.dart' hide Config;
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
-import '../profile/profile_screen.dart';
+
 import 'activity_detail_screen.dart';
 import '../widgets/activity_card.dart';
-
 import '../../../models/activity_model.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import '../../../widgets/employee_header.dart';
+import '../../../backend_api/config.dart'; // Import Config
 
 class ActivityFeedScreen extends StatefulWidget {
   final VoidCallback? onGoToTodo;
@@ -26,7 +25,7 @@ class ActivityFeedScreen extends StatefulWidget {
 
 class ActivityFeedScreenState extends State<ActivityFeedScreen>
     with SingleTickerProviderStateMixin {
-  final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
+  final String baseUrl = Config.apiUrl;
   bool _isLoading = true;
 
   List<Activity> _activities = [];
@@ -48,8 +47,7 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
   Set<String> _favoriteActivityIds = {};
   bool _showOnlyFavorites = false;
 
-  WebSocketChannel? _channel;
-  String _currentEmpId = ""; // เก็บ ID พนักงานไว้ใช้สร้าง QR
+  String _currentEmpId = "";
 
   @override
   void initState() {
@@ -57,42 +55,18 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
     _tabController = TabController(length: 3, vsync: this);
     _searchController.addListener(() => setState(() {}));
     refreshData();
-    _connectWebSocket();
+    // ไม่ต้อง connect WebSocket เองแล้ว เพราะ MainScreen จัดการให้
   }
 
   @override
   void dispose() {
     _searchController.dispose();
     _tabController.dispose();
-    _channel?.sink.close();
     super.dispose();
   }
 
-  void _connectWebSocket() {
-    try {
-      final wsUrl = Uri.parse(
-        'ws://numerably-nonevincive-kyong.ngrok-free.dev/ws',
-      );
-      _channel = WebSocketChannel.connect(wsUrl);
-
-      _channel!.stream.listen(
-        (message) {
-          print("⚡ Feed Update: $message");
-          if (message == "REFRESH_ACTIVITIES" ||
-              message == "REFRESH_PARTICIPANTS") {
-            refreshData();
-          }
-        },
-        onError: (error) => print("WS Error: $error"),
-        onDone: () => print("WS Connection Closed"),
-      );
-    } catch (e) {
-      print("WS Connection Failed: $e");
-    }
-  }
-
+  // ฟังก์ชันนี้จะถูกเรียกโดย EmployeeMainScreen ผ่าน GlobalKey
   Future<void> refreshData() async {
-    // ไม่ต้อง Set Loading ทุกครั้ง เพื่อความลื่นไหล (Realtime feel)
     if (_activities.isEmpty) setState(() => _isLoading = true);
 
     try {
@@ -190,16 +164,10 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
 
   List<Activity> _applyFilters(List<Activity> source, String tabFilter) {
     return source.where((act) {
-      // Tab Filter
       if (tabFilter == 'Compulsory' && !act.isCompulsory) return false;
-      // Note: Tab 'New' logic is handled by sorting later
-
-      // Favorite Filter
       if (_showOnlyFavorites && !_favoriteActivityIds.contains(act.actId)) {
         return false;
       }
-
-      // Search Text
       final query = _searchController.text.toLowerCase();
       if (query.isNotEmpty) {
         final match =
@@ -207,51 +175,24 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
             act.location.toLowerCase().contains(query);
         if (!match) return false;
       }
-
-      // Type Filter
       if (_selectedTypes.isNotEmpty && !_selectedTypes.contains(act.actType)) {
         return false;
       }
-
-      // Availability
       if (_filterAvailableOnly) {
         if (act.maxParticipants > 0 &&
             act.currentParticipants >= act.maxParticipants) {
           return false;
         }
       }
-
-      // Point Range
       if (act.point < _pointRange.start || act.point > _pointRange.end) {
         return false;
       }
-
-      // Date Range
-      if (_selectedDateRange != null) {
-        final actDate = DateUtils.dateOnly(act.activityDate);
-        final start = DateUtils.dateOnly(_selectedDateRange!.start);
-        final end = DateUtils.dateOnly(_selectedDateRange!.end);
-        if (actDate.isBefore(start) || actDate.isAfter(end)) {
-          return false;
-        }
-      }
-
       return true;
     }).toList();
   }
 
-  // --- UI Builders ---
-
   @override
   Widget build(BuildContext context) {
-    bool isPointChanged =
-        _pointRange.start > _minPoint || _pointRange.end < _maxPoint;
-    final hasFilter =
-        _selectedTypes.isNotEmpty ||
-        _filterAvailableOnly ||
-        isPointChanged ||
-        _selectedDateRange != null;
-
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       body: SafeArea(
@@ -259,8 +200,45 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
             ? const Center(child: CircularProgressIndicator())
             : Column(
                 children: [
-                  _buildFixedHeader(),
-                  _buildSearchBar(hasFilter),
+                  EmployeeHeader(
+                    title: "Hello, Employee!",
+                    subtitle: "Let's join activities",
+                    searchController: _searchController,
+                    searchHint: "Search activities...",
+                    onFilterTap: _showFilterModal,
+                    onRefresh: refreshData,
+                    rightActionWidget: GestureDetector(
+                      onTap: () => setState(
+                        () => _showOnlyFavorites = !_showOnlyFavorites,
+                      ),
+                      child: Container(
+                        height: 50,
+                        width: 50,
+                        decoration: BoxDecoration(
+                          color: _showOnlyFavorites
+                              ? Colors.red.shade50
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          border: _showOnlyFavorites
+                              ? Border.all(color: Colors.red.shade100)
+                              : null,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.03),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          _showOnlyFavorites
+                              ? Icons.favorite
+                              : Icons.favorite_border,
+                          color: _showOnlyFavorites ? Colors.red : Colors.grey,
+                        ),
+                      ),
+                    ),
+                  ),
                   Expanded(
                     child: NestedScrollView(
                       headerSliverBuilder: (context, innerBoxIsScrolled) {
@@ -288,11 +266,89 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
     );
   }
 
-  // ... (ฟังก์ชัน _buildFixedHeader, _buildSearchBar, _showFilterModal เหมือนเดิม) ...
-  // เพื่อความกระชับ ผมขอละไว้ ให้ใช้ของเดิมในไฟล์ที่คุณส่งมาได้เลยครับ
-  // แต่ต้อง "เพิ่ม" ฟังก์ชัน _buildTicketCard ด้านล่างนี้ครับ
+  Widget _buildMyUpcomingSection() {
+    if (_myUpcomingActivities.isEmpty) {
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade200),
+        ),
+        child: Column(
+          children: [
+            Icon(Icons.event_available, size: 40, color: Colors.grey.shade400),
+            const SizedBox(height: 8),
+            Text(
+              "No upcoming activities",
+              style: GoogleFonts.poppins(color: Colors.grey.shade600),
+            ),
+            Text(
+              "Register now to join!",
+              style: GoogleFonts.poppins(
+                color: const Color(0xFF4A80FF),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
 
-  // [ADDED] ฟังก์ชันที่หายไป
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  "Upcoming",
+                  style: GoogleFonts.poppins(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF1F2937),
+                  ),
+                ),
+                if (_myUpcomingActivities.length > 2)
+                  GestureDetector(
+                    onTap: widget.onGoToTodo,
+                    child: Text(
+                      "See all",
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: const Color(0xFF4A80FF),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 150,
+            child: ListView.separated(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              scrollDirection: Axis.horizontal,
+              itemCount: _myUpcomingActivities.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 16),
+              itemBuilder: (context, index) {
+                final act = _myUpcomingActivities[index];
+                return _buildTicketCard(act);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildTicketCard(Activity act) {
     return Container(
       width: 320,
@@ -314,13 +370,11 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // --- LEFT PART: Event Info ---
               Expanded(
                 flex: 3,
                 child: Material(
                   color: Colors.white,
                   child: InkWell(
-                    // [DOUBLE SAFETY] กดแล้วรอ แล้วโหลดใหม่
                     onTap: () async {
                       await Navigator.push(
                         context,
@@ -437,7 +491,6 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
                   ),
                 ),
               ),
-              // --- RIGHT PART: Action Stub ---
               Material(
                 color: const Color(0xFF4A80FF),
                 child: InkWell(
@@ -481,8 +534,7 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
   }
 
   void _showTicketQrModal(Activity act) {
-    final qrString =
-        "ACTION:CHECKIN|SESSION:${act.sessionId}|EMP:$_currentEmpId";
+    final qrString = _currentEmpId;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -510,7 +562,7 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
                     ),
                   ),
                   Text(
-                    "Activity Ticket",
+                    "Member QR Code",
                     style: GoogleFonts.poppins(
                       fontSize: 16,
                       color: Colors.grey[500],
@@ -550,6 +602,16 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
                     ),
                   ),
                   const SizedBox(height: 24),
+                  Text(
+                    "ID: $_currentEmpId",
+                    style: GoogleFonts.inter(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[700],
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
                   SizedBox(
                     width: double.infinity,
                     height: 50,
@@ -578,7 +640,6 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
     );
   }
 
-  // [UPDATED] ฟังก์ชันสร้างรายการกิจกรรม (เพิ่ม Double Safety)
   Widget _buildActivityList({required String filter}) {
     List<Activity> displayList = List.from(_activities);
     displayList = _applyFilters(displayList, filter);
@@ -593,8 +654,16 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
       displayList.sort((a, b) => a.activityDate.compareTo(b.activityDate));
     }
 
-    if (displayList.isEmpty) return _buildEmptyState();
+    return RefreshIndicator(
+      onRefresh: refreshData,
+      color: const Color(0xFF4A80FF),
+      child: displayList.isEmpty
+          ? _buildEmptyState()
+          : _buildListContent(displayList),
+    );
+  }
 
+  Widget _buildListContent(List<Activity> displayList) {
     Map<DateTime, List<Activity>> grouped = {};
     for (var act in displayList) {
       final dateKey = DateTime(
@@ -609,6 +678,7 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
 
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(20, 10, 20, 80),
+      physics: const AlwaysScrollableScrollPhysics(),
       itemCount: sortedDates.length,
       itemBuilder: (context, index) {
         final date = sortedDates[index];
@@ -621,7 +691,6 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
     );
   }
 
-  // [UPDATED] ส่ง onTap ไปให้ ActivityCard
   Widget _buildActivityGroup({
     required String activityDate,
     required String relativeDate,
@@ -693,188 +762,6 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
     );
   }
 
-  Widget _buildFixedHeader() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ProfileScreen()),
-            ),
-            child: const CircleAvatar(
-              backgroundImage: CachedNetworkImageProvider(
-                'https://i.pravatar.cc/150?img=32',
-              ),
-              radius: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                "Hello, Employee!",
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                ),
-              ),
-              Text(
-                "Let's join activities",
-                style: GoogleFonts.poppins(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF375987),
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
-
-          // [NEW] ย้ายปุ่ม Scan มาไว้ตรงนี้ (ข้างกระดิ่ง)
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: IconButton(
-              icon: const Icon(
-                Icons.qr_code_scanner,
-                color: Color(0xFF4A80FF),
-              ), // ใช้สี Theme
-              onPressed: () async {
-                final result = await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const EmployeeScannerScreen(),
-                  ),
-                );
-                if (result == true) {
-                  refreshData(); // เรียกฟังก์ชันของตัวเองได้เลย
-                }
-              },
-            ),
-          ),
-
-          const SizedBox(width: 12), // เว้นระยะห่าง
-          // ปุ่ม Notification เดิม
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-            child: IconButton(
-              icon: const Icon(
-                Icons.notifications_outlined,
-                color: Colors.black54,
-              ),
-              onPressed: () {},
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMyUpcomingSection() {
-    if (_myUpcomingActivities.isEmpty) {
-      return Container(
-        width: double.infinity,
-        margin: const EdgeInsets.all(20),
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.grey.shade200),
-        ),
-        child: Column(
-          children: [
-            Icon(Icons.event_available, size: 40, color: Colors.grey.shade400),
-            const SizedBox(height: 8),
-            Text(
-              "No upcoming activities",
-              style: GoogleFonts.poppins(color: Colors.grey.shade600),
-            ),
-            Text(
-              "Register now to join!",
-              style: GoogleFonts.poppins(
-                color: const Color(0xFF4A80FF),
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  "Upcoming",
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: const Color(0xFF1F2937),
-                  ),
-                ),
-                if (_myUpcomingActivities.length > 2)
-                  GestureDetector(
-                    onTap: widget.onGoToTodo,
-                    child: Text(
-                      "See all",
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        color: const Color(0xFF4A80FF),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          SizedBox(
-            height: 150,
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              scrollDirection: Axis.horizontal,
-              itemCount: _myUpcomingActivities.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 16),
-              itemBuilder: (context, index) {
-                final act = _myUpcomingActivities[index];
-                return _buildTicketCard(act);
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   TabBar _buildTabBar() {
     return TabBar(
       controller: _tabController,
@@ -892,94 +779,6 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
     );
   }
 
-  Widget _buildSearchBar(bool hasFilter) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: Row(
-        children: [
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12.0),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 10.0,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Search activities...',
-                  hintStyle: GoogleFonts.poppins(color: Colors.grey[400]),
-                  prefixIcon: Icon(Icons.search, color: Colors.grey.shade500),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          GestureDetector(
-            onTap: () {
-              setState(() {
-                _showOnlyFavorites = !_showOnlyFavorites;
-              });
-            },
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _showOnlyFavorites ? Colors.red.shade50 : Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-                border: _showOnlyFavorites
-                    ? Border.all(color: Colors.red.shade200)
-                    : null,
-              ),
-              child: Icon(
-                _showOnlyFavorites ? Icons.favorite : Icons.favorite_border,
-                color: _showOnlyFavorites ? Colors.red : Colors.grey.shade700,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          GestureDetector(
-            onTap: _showFilterModal,
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: hasFilter ? const Color(0xFF4A80FF) : Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Icon(
-                Icons.tune_rounded,
-                color: hasFilter ? Colors.white : Colors.grey.shade700,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ... (Copy _showFilterModal, _buildEmptyState, Helpers เดิมมาใส่ตรงนี้) ...
-  // หรือถ้าคุณมีไฟล์เดิมอยู่แล้ว แค่แก้ _buildActivityGroup และเพิ่ม _buildTicketCard ก็พอครับ
   void _showFilterModal() {
     showModalBottomSheet(
       context: context,
@@ -1064,7 +863,6 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
                           );
                         }).toList(),
                       ),
-                      // ... (ส่วนอื่นๆ ของ Filter Modal เหมือนเดิม) ...
                     ],
                   ),
                 ),
@@ -1077,18 +875,27 @@ class ActivityFeedScreenState extends State<ActivityFeedScreen>
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.search_off, size: 60, color: Colors.grey[300]),
-          const SizedBox(height: 16),
-          Text(
-            "No activities found",
-            style: GoogleFonts.poppins(color: Colors.grey[500], fontSize: 16),
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        SizedBox(height: MediaQuery.of(context).size.height * 0.2),
+        Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.search_off, size: 60, color: Colors.grey[300]),
+              const SizedBox(height: 16),
+              Text(
+                "No activities found",
+                style: GoogleFonts.poppins(
+                  color: Colors.grey[500],
+                  fontSize: 16,
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -1133,10 +940,7 @@ class _SliverTabBarDelegate extends SliverPersistentHeaderDelegate {
     double shrinkOffset,
     bool overlapsContent,
   ) {
-    return Container(
-      color: Colors.white, // สีพื้นหลัง TabBar
-      child: _tabBar,
-    );
+    return Container(color: Colors.white, child: _tabBar);
   }
 
   @override

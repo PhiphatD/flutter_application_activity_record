@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'enterprise_scanner_screen.dart';
 import 'activities/activity_qr_display_screen.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 class ParticipantsDetailsScreen extends StatefulWidget {
   final String activityId;
@@ -37,7 +38,7 @@ class ParticipantsDetailsScreen extends StatefulWidget {
 
 class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
   final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
-
+  WebSocketChannel? _channel;
   List<Map<String, dynamic>> _allParticipants = [];
   List<Map<String, dynamic>> _filteredParticipants = [];
 
@@ -58,12 +59,33 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
     super.initState();
     _fetchParticipants();
     _searchController.addListener(_onSearchChanged);
+    _connectWebSocket();
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _channel?.sink.close();
     super.dispose();
+  }
+
+  void _connectWebSocket() {
+    try {
+      final wsUrl = Uri.parse(
+        'ws://numerably-nonevincive-kyong.ngrok-free.dev/ws',
+      );
+      _channel = WebSocketChannel.connect(wsUrl);
+      _channel!.stream.listen((message) {
+        // ถ้ามีข้อความว่ามีการเช็คอิน หรือ อัปเดตข้อมูล
+        if (message == "REFRESH_PARTICIPANTS" ||
+            message.toString().contains("CHECKIN_SUCCESS")) {
+          print("⚡ Real-time update received!");
+          _fetchParticipants(); // โหลดข้อมูลใหม่ทันที
+        }
+      }, onError: (e) => print("WS Error: $e"));
+    } catch (e) {
+      print("WS Connection Failed: $e");
+    }
   }
 
   void _onSearchChanged() {
@@ -671,10 +693,24 @@ class _ParticipantsDetailsScreenState extends State<ParticipantsDetailsScreen> {
                   child: _isLoading
                       ? const Center(child: CircularProgressIndicator())
                       : _filteredParticipants.isEmpty
-                      ? _buildEmptyState()
-                      : RefreshIndicator(
+                      ? RefreshIndicator(
+                          // [NEW] Wrap Empty State ด้วย
                           onRefresh: _fetchParticipants,
+                          child: SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            child: SizedBox(
+                              height: MediaQuery.of(context).size.height * 0.5,
+                              child: _buildEmptyState(),
+                            ),
+                          ),
+                        )
+                      : RefreshIndicator(
+                          // [NEW] Wrap ListView ด้วย RefreshIndicator
+                          onRefresh: _fetchParticipants,
+                          color: const Color(0xFF4A80FF),
                           child: ListView.builder(
+                            physics:
+                                const AlwaysScrollableScrollPhysics(), // สำคัญ! ต้องมีเพื่อให้ลากได้
                             padding: const EdgeInsets.only(
                               left: 20,
                               right: 20,
@@ -1005,15 +1041,22 @@ class _ParticipantCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.orange.shade50,
+                color: data['status'] == 'Assigned'
+                    ? Colors
+                          .purple
+                          .shade50 // สีม่วงสำหรับ Assigned (Compulsory)
+                    : Colors.orange.shade50, // สีส้มสำหรับ Registered (General)
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                "Registered",
+                data['status'] ??
+                    "Pending", // แสดงคำว่า Assigned หรือ Registered
                 style: GoogleFonts.poppins(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color: Colors.orange.shade700,
+                  color: data['status'] == 'Assigned'
+                      ? Colors.purple.shade700
+                      : Colors.orange.shade700,
                 ),
               ),
             ),

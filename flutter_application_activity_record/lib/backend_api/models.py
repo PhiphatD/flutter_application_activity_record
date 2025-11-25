@@ -90,7 +90,11 @@ class Activity(Base):
     ACT_TRAVEL_INFO = Column(String(100))
     ACT_MORE_DETAILS = Column(Text)
     ACT_TARGET_CRITERIA = Column(Text, nullable=True)
-    ACT_IMAGE = Column(String(255))
+    # [CHANGE] เปลี่ยนจาก ACT_IMAGE เป็น ACT_ATTACHMENTS เพื่อเก็บ JSON List
+    # ตัวอย่างข้อมูล: '[{"url": "/static/img1.jpg", "type": "IMAGE", "name": "cover.jpg"}]'
+    ACT_ATTACHMENTS = Column(Text, default="[]")
+    
+    # ACT_IMAGE = Column(String(255)) # <-- ของเดิม (เลิกใช้ หรือเก็บไว้เป็น Backward Compat)
     ACT_AGENDA = Column(Text)
 
     # Relationships
@@ -158,7 +162,7 @@ class Prize(Base):
     PRIZE_NAME = Column(String(50), nullable=False)
     PRIZE_POINTS = Column(Integer, nullable=False)
     PRIZE_DESCRIPTION = Column(Text)
-    PRIZE_IMAGE = Column(String(255))
+    PRIZE_IMAGES = Column(Text, default="[]")
     STOCK = Column(Integer, default=0)
     STATUS = Column(String(20), default="Available")
     EXPIRED_DATE = Column(Date)
@@ -190,14 +194,23 @@ class Favorite(Base):
 # --- 14. ตารางแจ้งเตือน (NEW) ---
 class Notification(Base):
     __tablename__ = "NOTIFICATION"
-    NOTIF_ID = Column(String(8), primary_key=True)
+    # เปลี่ยน Primary Key ให้ยาวขึ้นรองรับ NTxxxxxxxxxx
+    NOTIF_ID = Column(String(20), primary_key=True) 
     EMP_ID = Column(String(5), ForeignKey("EMPLOYEE.EMP_ID"), nullable=False)
-    ACT_ID = Column(String(5))
-    NOTIF_TYPE = Column(String(30), nullable=False)
-    NOTIF_TEXT = Column(String(255), nullable=False)
-    SENT_DATE = Column(DateTime, nullable=False)
-    STATUS = Column(String(10), nullable=False)
-
+    
+    # Display Data
+    TITLE = Column(String(100), nullable=False)      # หัวข้อแจ้งเตือน
+    MESSAGE = Column(Text, nullable=False)           # เนื้อหาละเอียด
+    NOTIF_TYPE = Column(String(20), nullable=False)  # Activity, Reward, Alert, System
+    
+    # Navigation Data
+    REF_ID = Column(String(20))                      # ID อ้างอิง (เช่น ACT_ID, REDEEM_ID)
+    ROUTE_PATH = Column(String(50))                  # หน้าปลายทาง (เช่น /activity_detail)
+    
+    # Status
+    IS_READ = Column(Boolean, default=False)         # อ่านหรือยัง
+    CREATED_AT = Column(DateTime, nullable=False)    # เวลาที่สร้าง
+    TARGET_ROLE = Column(String(20), nullable=False, default="Employee")
 # --- 15. ตารางนโยบายคะแนน (NEW) ---
 class PointPolicy(Base):
     __tablename__ = "POINT_POLICY"

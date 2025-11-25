@@ -1,13 +1,17 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async'; // For Timer
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
-import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart'; // [CHANGED] ใช้ ImagePicker แทน FilePicker เพื่อความง่ายในการจัดการรูป
 import 'package:day_night_time_picker/day_night_time_picker.dart';
 import 'package:day_night_time_picker/lib/state/time.dart';
+import '../../../models/activity_model.dart';
+import 'package:animated_custom_dropdown/custom_dropdown.dart';
+import 'package:calendar_date_picker2/calendar_date_picker2.dart';
 
 class CreateActivityScreen extends StatefulWidget {
   final Map<String, dynamic>? initialData;
@@ -29,7 +33,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
   bool _isSubmitting = false;
   bool _isLoadingData = true;
-
+  Set<DateTime> _busyDates = {};
   // --- Controllers ---
   final _formKey = GlobalKey<FormState>();
 
@@ -63,8 +67,12 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   final _conditionCtrl = TextEditingController(); // ACT_PARTICIPATION_CONDITION
 
   // 6. Attachments & Cover
-  final _imageUrlCtrl = TextEditingController(); // ACT_IMAGE (Cover URL)
-  List<PlatformFile> _selectedFiles = []; // For additional attachments
+  // 6. Attachments & Cover
+  // final _imageUrlCtrl = TextEditingController(); // [REMOVED]
+  final ImagePicker _picker = ImagePicker();
+  List<ActivityAttachment> _existingAttachments = []; // รูปเดิม (URL)
+  List<File> _newImages = []; // รูปใหม่ (File)
+  // List<PlatformFile> _selectedFiles = []; // [REMOVED]
 
   // --- State Variables ---
   String? _selectedType = 'Training';
@@ -95,10 +103,85 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   List<String> _dbDepartments = [];
   List<String> _dbPositions = [];
 
+  // [NEW] Auto Count Logic
+  int _autoCountedParticipants = 0;
+  bool _isCounting = false;
+  Timer? _debounce;
+
+  Future<void> _fetchTargetCount() async {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+
+    _debounce = Timer(const Duration(milliseconds: 500), () async {
+      setState(() => _isCounting = true);
+
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final adminId = prefs.getString('empId');
+
+        final body = {
+          "type": _targetType,
+          "departments": _selectedTargetDepts,
+          "positions": _selectedTargetPositions,
+          "admin_id": adminId,
+        };
+
+        final response = await http.post(
+          Uri.parse('$baseUrl/activities/count-target'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(body),
+        );
+
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body);
+          if (mounted) {
+            setState(() {
+              _autoCountedParticipants = data['count'];
+              // Update controller if compulsory so it submits correctly
+              if (_isCompulsory == 1) {
+                _maxParticipantsCtrl.text = _autoCountedParticipants.toString();
+              }
+            });
+          }
+        }
+      } catch (e) {
+        print("Count Error: $e");
+      } finally {
+        if (mounted) setState(() => _isCounting = false);
+      }
+    });
+  }
+
   @override
   void initState() {
     super.initState();
     _fetchInitialData();
+    _fetchBusyDates();
+  }
+
+  Future<void> _fetchBusyDates() async {
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/activities'));
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
+        final Set<DateTime> dates = {};
+
+        for (var item in data) {
+          if (item['activityDate'] != null) {
+            final d = DateTime.parse(item['activityDate']);
+            // เก็บเฉพาะวันที่ (ตัดเวลาทิ้ง) เพื่อเปรียบเทียบง่าย
+            dates.add(DateUtils.dateOnly(d));
+          }
+        }
+
+        if (mounted) {
+          setState(() {
+            _busyDates = dates;
+          });
+        }
+      }
+    } catch (e) {
+      print("Error fetching busy dates: $e");
+    }
   }
 
   Future<void> _fetchInitialData() async {
@@ -140,6 +223,104 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
     }
   }
 
+  void _openSmartCalendar() async {
+    // [FIX 1] ปรับความกว้างให้ยืดหยุ่นขึ้น (ขั้นต่ำ 300px เพื่อให้หัวข้อไม่เบียด)
+    final screenWidth = MediaQuery.of(context).size.width;
+    final dialogWidth = (screenWidth * 0.9).clamp(300.0, 400.0);
+
+    final values = await showCalendarDatePicker2Dialog(
+      context: context,
+      config: CalendarDatePicker2WithActionButtonsConfig(
+        calendarType: CalendarDatePicker2Type.single,
+        firstDate: DateTime.now(),
+        lastDate: DateTime.now().add(const Duration(days: 365)),
+
+        // Design Settings
+        selectedDayHighlightColor: const Color(0xFF4A80FF),
+
+        // Weekday Labels
+        weekdayLabels: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+        weekdayLabelTextStyle: GoogleFonts.inter(
+          color: Colors.grey,
+          fontWeight: FontWeight.w600,
+          fontSize: 12,
+        ),
+
+        // [FIX 2] ลดขนาด Font หัวข้อ (เดือน ปี) ลงเหลือ 14 หรือ 15
+        controlsTextStyle: GoogleFonts.kanit(
+          fontWeight: FontWeight.bold,
+          color: Colors.black87,
+          fontSize: 14, // ลดจาก 16 เป็น 14 เพื่อแก้ Overflow
+        ),
+
+        // Custom Builder (คงเดิม)
+        dayBuilder:
+            ({
+              required date,
+              textStyle,
+              decoration,
+              isSelected,
+              isDisabled,
+              isToday,
+            }) {
+              // ... (Logic วาดจุดสีส้ม เหมือนเดิมเป๊ะ) ...
+              final bool hasActivity = _busyDates.contains(
+                DateUtils.dateOnly(date),
+              );
+              Color textColor = Colors.black87;
+              if (isSelected == true)
+                textColor = Colors.white;
+              else if (isDisabled == true)
+                textColor = Colors.grey.shade300;
+              else if (isToday == true)
+                textColor = const Color(0xFF4A80FF);
+
+              return Container(
+                decoration: decoration,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      date.day.toString(),
+                      style: GoogleFonts.inter(
+                        color: textColor,
+                        fontWeight: (isSelected == true || isToday == true)
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        fontSize: 13,
+                      ),
+                    ),
+                    if (hasActivity && isDisabled != true) ...[
+                      const SizedBox(height: 4),
+                      Container(
+                        width: 5,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: (isSelected == true)
+                              ? Colors.white
+                              : Colors.orange,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
+      ),
+      // ใช้ความกว้างใหม่
+      dialogSize: Size(dialogWidth, 400),
+      borderRadius: BorderRadius.circular(20),
+      value: [_selectedDate],
+    );
+
+    if (values != null && values.isNotEmpty && values[0] != null) {
+      setState(() {
+        _selectedDate = values[0];
+      });
+    }
+  }
+
   void _loadExistingData() {
     final act = widget.initialData!['ACTIVITY'];
     final org = widget.initialData!['ORGANIZER'];
@@ -163,7 +344,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
       _isCompulsory = (act['ACT_ISCOMPULSORY'] ?? 0) == 1 ? 1 : 0;
 
       // Load Full DB Fields
-      _imageUrlCtrl.text = act['ACT_IMAGE'] ?? '';
+      // _imageUrlCtrl.text = act['ACT_IMAGE'] ?? ''; // [REMOVED]
       _feeCtrl.text = (act['ACT_COST'] ?? 0).toString();
       _hostCtrl.text = act['ACT_EVENT_HOST'] ?? '';
       _guestCtrl.text = act['ACT_GUEST_SPEAKER'] ?? '';
@@ -206,6 +387,33 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
           }
         } catch (_) {}
       }
+      // [NEW] Load Attachments
+      if (act['ACT_ATTACHMENTS'] != null) {
+        // กรณี Frontend ส่งมาเป็น List<ActivityAttachment> แล้ว
+        if (act['ACT_ATTACHMENTS'] is List) {
+          _existingAttachments = List<ActivityAttachment>.from(
+            act['ACT_ATTACHMENTS'].map((x) => ActivityAttachment.fromJson(x)),
+          );
+        } else if (act['ACT_ATTACHMENTS'] is String) {
+          try {
+            final List<dynamic> list = jsonDecode(act['ACT_ATTACHMENTS']);
+            _existingAttachments = list
+                .map((x) => ActivityAttachment.fromJson(x))
+                .toList();
+          } catch (_) {}
+        }
+      }
+      // Fallback for legacy 'ACT_IMAGE'
+      else if (act['ACT_IMAGE'] != null &&
+          act['ACT_IMAGE'].toString().isNotEmpty) {
+        _existingAttachments.add(
+          ActivityAttachment(
+            url: act['ACT_IMAGE'],
+            type: 'IMAGE',
+            name: 'Cover',
+          ),
+        );
+      }
     }
 
     if (org != null) {
@@ -233,33 +441,54 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
     }
   }
 
-  // --- File Picker Logic ---
-  Future<void> _pickFiles() async {
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        allowMultiple: true,
-        type: FileType.custom,
-        allowedExtensions: ['jpg', 'png', 'jpeg', 'pdf'],
+  // --- Image Logic ---
+  Future<void> _pickImages() async {
+    int currentCount = _existingAttachments.length + _newImages.length;
+    if (currentCount >= 10) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Maximum 10 images allowed.")),
       );
+      return;
+    }
 
-      if (result != null) {
-        setState(() {
-          _selectedFiles.addAll(result.files);
-        });
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Error picking file: $e")));
+    final List<XFile> picked = await _picker.pickMultiImage(
+      limit: 10 - currentCount,
+      imageQuality: 80, // บีบอัดรูปเล็กน้อย
+    );
+
+    if (picked.isNotEmpty) {
+      setState(() {
+        _newImages.addAll(picked.map((e) => File(e.path)));
+      });
     }
   }
 
-  void _removeFile(int index) {
-    setState(() => _selectedFiles.removeAt(index));
+  // Upload Helper
+  Future<String?> _uploadFile(File file) async {
+    try {
+      final uploadUrl = Uri.parse('$baseUrl/upload/image');
+      final request = http.MultipartRequest('POST', uploadUrl);
+      request.files.add(await http.MultipartFile.fromPath('file', file.path));
+      final response = await request.send();
+      final respStr = await response.stream.bytesToString();
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(respStr);
+        return "$baseUrl${data['url']}"; // Return Full URL
+      }
+    } catch (e) {
+      print("Upload error: $e");
+    }
+    return null;
   }
 
   // --- Submit Logic ---
   Future<void> _submitData() async {
+    // ถ้าเป็น Compulsory ให้ใส่ค่ามั่วๆ ไปก่อน (เช่น 0) เพราะ Backend จะคำนวณทับให้อยู่ดี
+    if (_isCompulsory == 1) {
+      _maxParticipantsCtrl.text = "0";
+    }
+
     if (!_formKey.currentState!.validate()) return;
     if (_locationCtrl.text.isEmpty) {
       ScaffoldMessenger.of(
@@ -268,7 +497,39 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
       return;
     }
 
+    // [VALIDATION] Check Images
+    if (_existingAttachments.isEmpty && _newImages.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please add at least 1 cover image.")),
+      );
+      return;
+    }
+
     setState(() => _isSubmitting = true);
+
+    // 1. Upload New Images
+    List<Map<String, String>> finalAttachments = [];
+
+    // Add existing
+    for (var att in _existingAttachments) {
+      finalAttachments.add({
+        'url': att.url,
+        'type': att.type,
+        'name': att.name,
+      });
+    }
+
+    // Upload and add new
+    for (var file in _newImages) {
+      String? url = await _uploadFile(file);
+      if (url != null) {
+        finalAttachments.add({
+          'url': url,
+          'type': 'IMAGE',
+          'name': file.path.split('/').last,
+        });
+      }
+    }
 
     // Prepare Data
     final startStr =
@@ -301,8 +562,9 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
         "ACT_STATUS": _selectedStatus,
         "ACT_ISCOMPULSORY": _isCompulsory,
 
-        // Full DB Mapping
-        "ACT_IMAGE": _imageUrlCtrl.text,
+        // [NEW] ส่งเป็น List Attachments
+        "ACT_ATTACHMENTS": finalAttachments,
+
         "ACT_AGENDA": jsonEncode(_agendaItems),
         "ACT_COST": double.tryParse(_feeCtrl.text) ?? 0.0,
         "ACT_EVENT_HOST": _hostCtrl.text,
@@ -407,9 +669,8 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            // 1. Cover Image
-            _buildSectionTitle("Cover Image"),
-            _buildCoverImageSection(),
+            // 1. Images
+            _buildCard(child: _buildImageSection()), // [NEW]
             const SizedBox(height: 24),
 
             // 2. Basic Info
@@ -437,10 +698,10 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
             _buildMoreDetailsCard(),
             const SizedBox(height: 24),
 
-            // 7. Attachments (Multiple Files)
-            _buildSectionTitle("Documents & Files"),
-            _buildAttachmentsCard(),
-            const SizedBox(height: 40),
+            // 7. Attachments (Multiple Files) -> Moved to top as Gallery
+            // _buildSectionTitle("Documents & Files"),
+            // _buildAttachmentsCard(),
+            // const SizedBox(height: 40),
           ],
         ),
       ),
@@ -449,68 +710,163 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
 
   // --- Widgets ---
 
-  Widget _buildCoverImageSection() {
-    return Container(
-      height: 200,
-      decoration: BoxDecoration(
-        color: Colors.grey[200],
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade300),
-        image: _imageUrlCtrl.text.isNotEmpty
-            ? DecorationImage(
-                image: NetworkImage(_imageUrlCtrl.text),
-                fit: BoxFit.cover,
-              )
-            : null,
-      ),
-      child: Stack(
-        children: [
-          if (_imageUrlCtrl.text.isEmpty)
-            Center(
+  // [NEW UI] ส่วนจัดการรูปภาพแบบ Grid
+  Widget _buildImageSection() {
+    int totalCount = _existingAttachments.length + _newImages.length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              "Gallery ($totalCount/10)",
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+            ),
+            TextButton.icon(
+              onPressed: _pickImages,
+              icon: const Icon(Icons.add_photo_alternate),
+              label: const Text("Add Photos"),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (totalCount == 0)
+          Container(
+            height: 120,
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: Colors.grey.shade300,
+                style: BorderStyle.solid,
+              ),
+            ),
+            child: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.image_outlined, size: 40, color: Colors.grey[400]),
+                  Icon(Icons.image, size: 40, color: Colors.grey[400]),
                   const SizedBox(height: 8),
                   Text(
-                    "Enter URL below",
-                    style: GoogleFonts.inter(color: Colors.grey[500]),
+                    "No images added",
+                    style: GoogleFonts.inter(color: Colors.grey),
                   ),
                 ],
               ),
             ),
-          Positioned(
-            bottom: 10,
-            left: 10,
-            right: 10,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: TextField(
-                controller: _imageUrlCtrl,
-                decoration: const InputDecoration(
-                  hintText: "Paste Image URL...",
-                  border: InputBorder.none,
-                  prefixIcon: Icon(Icons.link),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 14,
-                  ),
-                ),
-                onChanged: (val) => setState(() {}),
-              ),
+          )
+        else
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+              childAspectRatio: 1,
             ),
+            itemCount: totalCount,
+            itemBuilder: (context, index) {
+              // Logic: Show Existing First, Then New
+              bool isExisting = index < _existingAttachments.length;
+              ImageProvider imgProvider;
+
+              if (isExisting) {
+                imgProvider = NetworkImage(_existingAttachments[index].url);
+              } else {
+                imgProvider = FileImage(
+                  _newImages[index - _existingAttachments.length],
+                );
+              }
+
+              return Stack(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      image: DecorationImage(
+                        image: imgProvider,
+                        fit: BoxFit.cover,
+                      ),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                  ),
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: GestureDetector(
+                      onTap: () {
+                        setState(() {
+                          if (isExisting) {
+                            _existingAttachments.removeAt(index);
+                          } else {
+                            _newImages.removeAt(
+                              index - _existingAttachments.length,
+                            );
+                          }
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: const BoxDecoration(
+                          color: Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.close,
+                          size: 14,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (!isExisting)
+                    Positioned(
+                      bottom: 4,
+                      left: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          "NEW",
+                          style: TextStyle(color: Colors.white, fontSize: 8),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
-        ],
-      ),
+      ],
+    );
+  }
+
+  // [STYLE] กำหนดสไตล์กลางสำหรับ Dropdown เพื่อให้แก้ที่เดียวเปลี่ยนทั้งหน้า
+  CustomDropdownDecoration _getDropdownDecoration() {
+    return CustomDropdownDecoration(
+      closedBorder: Border.all(color: Colors.grey.shade300),
+      closedFillColor: const Color(0xFFF9FAFB), // สีพื้นหลังเทาอ่อน
+      closedBorderRadius: BorderRadius.circular(12),
+      hintStyle: GoogleFonts.poppins(color: Colors.grey[400], fontSize: 14),
+      headerStyle: GoogleFonts.poppins(fontSize: 14, color: Colors.black87),
+      expandedFillColor: Colors.white,
+      expandedBorder: Border.all(color: Colors.grey.shade200),
+      expandedBorderRadius: BorderRadius.circular(12),
     );
   }
 
   Widget _buildBasicInfoCard() {
     return _buildCard(
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildTextField(
             controller: _nameCtrl,
@@ -518,31 +874,72 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
             validator: (v) => v!.isEmpty ? "Required" : null,
           ),
           const SizedBox(height: 16),
+
+          // [UPDATED] ใช้ CustomDropdown แทน _buildDropdown เดิม
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: _buildDropdown(
-                  "Type",
-                  _selectedType,
-                  _activityTypes,
-                  (v) => setState(() => _selectedType = v),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Type",
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    CustomDropdown<String>(
+                      hintText: 'Select type',
+                      items: _activityTypes,
+                      initialItem: _selectedType,
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedType = value;
+                        });
+                      },
+                      decoration: _getDropdownDecoration(),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(width: 16),
               Expanded(
-                child: _buildDropdown(
-                  "Status",
-                  _selectedStatus,
-                  _statuses,
-                  (v) => setState(() => _selectedStatus = v),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Status",
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    CustomDropdown<String>(
+                      hintText: 'Select status',
+                      items: _statuses,
+                      initialItem: _selectedStatus,
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedStatus = value;
+                        });
+                      },
+                      decoration: _getDropdownDecoration(),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
+
           if (_selectedType == 'Other') ...[
             const SizedBox(height: 16),
             _buildTextField(controller: _customTypeCtrl, label: "Specify Type"),
           ],
+
           const SizedBox(height: 16),
           TextFormField(
             controller: _descCtrl,
@@ -566,12 +963,19 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
               style: GoogleFonts.inter(fontWeight: FontWeight.w600),
             ),
             subtitle: Text(
-              "Required for target employees",
+              "System will auto-count participants based on target.",
               style: GoogleFonts.inter(fontSize: 12),
             ),
             value: _isCompulsory == 1,
             activeColor: const Color(0xFF4A80FF),
-            onChanged: (val) => setState(() => _isCompulsory = val ? 1 : 0),
+            onChanged: (val) {
+              setState(() {
+                _isCompulsory = val ? 1 : 0;
+                if (_isCompulsory == 1) {
+                  _fetchTargetCount(); // Trigger count when toggled on
+                }
+              });
+            },
             contentPadding: EdgeInsets.zero,
           ),
         ],
@@ -579,27 +983,20 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
     );
   }
 
-  // [UPDATED] ใช้ DayNightTimePicker แทน showTimePicker
+  // [UPDATED] Widget การ์ดวันเวลาที่เรียกใช้ปฏิทินใหม่
   Widget _buildDateTimeLocationCard() {
     return _buildCard(
       child: Column(
         children: [
           InkWell(
-            onTap: () async {
-              final picked = await showDatePicker(
-                context: context,
-                initialDate: _selectedDate ?? DateTime.now(),
-                firstDate: DateTime(2020),
-                lastDate: DateTime(2030),
-              );
-              if (picked != null) setState(() => _selectedDate = picked);
-            },
+            onTap: _openSmartCalendar, // เรียกฟังก์ชันใหม่
+            borderRadius: BorderRadius.circular(12),
             child: _buildReadOnlyField(
               "Date",
               DateFormat(
                 'EEE, d MMMM y',
               ).format(_selectedDate ?? DateTime.now()),
-              Icons.calendar_month,
+              Icons.calendar_month_rounded, // Icon ใหม่สวยกว่า
             ),
           ),
           const SizedBox(height: 16),
@@ -614,7 +1011,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
           _buildTextField(
             controller: _locationCtrl,
             label: "Location *",
-            icon: Icons.place,
+            icon: Icons.place_outlined,
           ),
         ],
       ),
@@ -652,16 +1049,22 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
             sunrise: Time(hour: 6, minute: 0),
             sunset: Time(hour: 18, minute: 0),
             duskSpanInMinutes: 120,
-            is24HrFormat: true,
+
+            // [FIXED] เปลี่ยนเป็น false เพื่อให้แสดง AM/PM
+            is24HrFormat: false,
+
             accentColor: const Color(0xFF4A80FF),
             okText: "Select",
             cancelText: "Cancel",
+            // เพิ่มเพื่อให้ UI ดูทันสมัยขึ้น (Optional)
+            iosStylePicker: true,
           ),
         );
       },
       child: _buildReadOnlyField(
         label,
-        time?.format(context) ?? "--:--", // แสดงผลเวลาใน UI เดิม
+        // format(context) จะแสดง AM/PM ตาม Locale เครื่องให้อัตโนมัติ
+        time?.format(context) ?? "--:--",
         isStart ? Icons.access_time : Icons.access_time_filled,
       ),
     );
@@ -733,6 +1136,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
     final timeCtrl = TextEditingController();
     final titleCtrl = TextEditingController();
     final detailCtrl = TextEditingController();
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -740,30 +1144,36 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // [NEW] ใช้ DayNightTimePicker ใน Dialog นี้ด้วยก็ดีครับ แต่เพื่อความง่าย ใช้ TextField พิมพ์เองไปก่อนก็ได้ หรือจะเพิ่มปุ่มเลือกเวลาก็ได้
             TextField(
               controller: timeCtrl,
               decoration: InputDecoration(
-                labelText: "Time (e.g. 09:00)",
+                labelText: "Time (e.g. 09:00 AM)",
                 suffixIcon: IconButton(
-                  icon: Icon(Icons.access_time),
+                  icon: const Icon(Icons.access_time),
                   onPressed: () {
                     Navigator.of(context).push(
                       showPicker(
                         context: context,
                         value: Time(hour: 9, minute: 0),
                         onChange: (Time newTime) {
-                          final formatted =
-                              "${newTime.hour.toString().padLeft(2, '0')}:${newTime.minute.toString().padLeft(2, '0')}";
-                          timeCtrl.text = formatted;
+                          // [UPDATED] แปลงเวลาเป็นแบบมี AM/PM
+                          final timeOfDay = TimeOfDay(
+                            hour: newTime.hour,
+                            minute: newTime.minute,
+                          );
+                          timeCtrl.text = timeOfDay.format(context);
                         },
                         sunrise: Time(hour: 6, minute: 0),
                         sunset: Time(hour: 18, minute: 0),
                         duskSpanInMinutes: 120,
-                        is24HrFormat: true,
+
+                        // [FIXED] เปลี่ยนเป็น false
+                        is24HrFormat: false,
+
                         accentColor: const Color(0xFF4A80FF),
                         okText: "Select",
                         cancelText: "Cancel",
+                        iosStylePicker: true,
                       ),
                     );
                   },
@@ -804,75 +1214,130 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
   Widget _buildTargetAudienceCard() {
     return _buildCard(
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Text(
+            "Who can join?",
+            style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16),
+          ),
+          const SizedBox(height: 12),
           Row(
             children: [
               Radio<String>(
                 value: 'all',
                 groupValue: _targetType,
-                onChanged: (v) => setState(() => _targetType = v!),
+                onChanged: (v) {
+                  setState(() => _targetType = v!);
+                  _fetchTargetCount();
+                },
               ),
-              const Text('Everyone'),
-              const SizedBox(width: 20),
+              const Text("All Employees"),
+              const SizedBox(width: 16),
               Radio<String>(
                 value: 'specific',
                 groupValue: _targetType,
-                onChanged: (v) => setState(() => _targetType = v!),
+                onChanged: (v) {
+                  setState(() => _targetType = v!);
+                  _fetchTargetCount();
+                },
               ),
-              const Text('Specific Group'),
+              const Text("Specific Group"),
             ],
           ),
           if (_targetType == 'specific') ...[
-            const Divider(),
-            const Text("Departments:"),
-            Wrap(
-              spacing: 8,
-              children: _dbDepartments.where((d) => d != 'Other').map((dep) {
-                final isSel = _selectedTargetDepts.contains(dep);
-                return FilterChip(
-                  label: Text(dep),
-                  selected: isSel,
-                  onSelected: (val) => setState(
-                    () => val
-                        ? _selectedTargetDepts.add(dep)
-                        : _selectedTargetDepts.remove(dep),
-                  ),
-                );
-              }).toList(),
+            const SizedBox(height: 16),
+            Text("Departments", style: GoogleFonts.inter(fontSize: 12)),
+            const SizedBox(height: 6),
+            CustomDropdown<String>.multiSelect(
+              hintText: 'Select departments',
+              items: _dbDepartments,
+              initialItems: _selectedTargetDepts,
+              onListChanged: (value) {
+                setState(() => _selectedTargetDepts = value);
+                _fetchTargetCount();
+              },
+              decoration: _getDropdownDecoration(),
             ),
-            const SizedBox(height: 10),
-            const Text("Positions:"),
-            Wrap(
-              spacing: 8,
-              children: _dbPositions.map((pos) {
-                final isSel = _selectedTargetPositions.contains(pos);
-                return FilterChip(
-                  label: Text(pos),
-                  selected: isSel,
-                  onSelected: (val) => setState(
-                    () => val
-                        ? _selectedTargetPositions.add(pos)
-                        : _selectedTargetPositions.remove(pos),
-                  ),
-                );
-              }).toList(),
+            const SizedBox(height: 12),
+            Text("Positions", style: GoogleFonts.inter(fontSize: 12)),
+            const SizedBox(height: 6),
+            CustomDropdown<String>.multiSelect(
+              hintText: 'Select positions',
+              items: _dbPositions,
+              initialItems: _selectedTargetPositions,
+              onListChanged: (value) {
+                setState(() => _selectedTargetPositions = value);
+                _fetchTargetCount();
+              },
+              decoration: _getDropdownDecoration(),
             ),
           ],
-          const SizedBox(height: 16),
+          const SizedBox(height: 24),
           Row(
             children: [
               Expanded(
-                child: _buildTextField(
-                  controller: _maxParticipantsCtrl,
-                  label: "Max People",
-                  isNumber: true,
-                ),
+                child: _isCompulsory == 1
+                    ? Container(
+                        height: 50,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Max People (Auto)",
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                                _isCounting
+                                    ? const SizedBox(
+                                        width: 12,
+                                        height: 12,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : Text(
+                                        "$_autoCountedParticipants",
+                                        style: GoogleFonts.poppins(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                          color: Colors.black87,
+                                        ),
+                                      ),
+                              ],
+                            ),
+                            const Icon(
+                              Icons.lock_outline,
+                              size: 16,
+                              color: Colors.grey,
+                            ),
+                          ],
+                        ),
+                      )
+                    : _buildTextField(
+                        controller: _maxParticipantsCtrl,
+                        label: "Max People",
+                        isNumber: true,
+                        validator: (v) =>
+                            (v == null || v.isEmpty) ? "Required" : null,
+                      ),
               ),
               const SizedBox(width: 16),
               Expanded(
                 child: _buildTextField(
                   controller: _pointsCtrl,
-                  label: "Points",
+                  label: "Points per Person",
                   isNumber: true,
                 ),
               ),
@@ -897,13 +1362,26 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildSectionHeader("Organizer & Host"),
-          _buildDropdownField(
-            label: 'Hosting Department',
-            value: _selectedHostDept,
-            items: _dbDepartments.isEmpty ? ['Other'] : _dbDepartments,
-            onChanged: (val) => setState(() => _selectedHostDept = val),
-            hint: 'Select Department',
+
+          // [UPDATED] Hosting Department Dropdown
+          Text(
+            "Hosting Department",
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.w500,
+              color: Colors.grey[700],
+            ),
           ),
+          const SizedBox(height: 6),
+          CustomDropdown<String>(
+            hintText: 'Select Department',
+            items: _dbDepartments.isEmpty ? ['Other'] : _dbDepartments,
+            initialItem: _selectedHostDept,
+            onChanged: (value) {
+              setState(() => _selectedHostDept = value);
+            },
+            decoration: _getDropdownDecoration(),
+          ),
+
           if (_selectedHostDept == 'Other') ...[
             const SizedBox(height: 20),
             _buildTextField(
@@ -935,6 +1413,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
             label: "Contact Info (Tel/Email)",
             icon: Icons.contact_phone,
           ),
+          // ... (Logistics ส่วนที่เหลือคงเดิม) ...
           const SizedBox(height: 30),
           const Divider(),
           const SizedBox(height: 10),
@@ -960,7 +1439,7 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
             controller: _conditionCtrl,
             label: "Conditions / Requirements",
             icon: Icons.rule,
-            hint: "e.g. Laptop required, Casual dress code",
+            hint: "e.g. Laptop required",
           ),
           const SizedBox(height: 20),
           _buildTextField(
@@ -985,86 +1464,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
           color: const Color(0xFF4A80FF),
           letterSpacing: 0.5,
         ),
-      ),
-    );
-  }
-
-  Widget _buildAttachmentsCard() {
-    return _buildCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_selectedFiles.isNotEmpty) ...[
-            ..._selectedFiles.asMap().entries.map((entry) {
-              final index = entry.key;
-              final file = entry.value;
-              final isImage = [
-                'jpg',
-                'jpeg',
-                'png',
-              ].contains(file.extension?.toLowerCase());
-              return ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  width: 50,
-                  height: 50,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(8),
-                    image: isImage && file.path != null
-                        ? DecorationImage(
-                            image: FileImage(File(file.path!)),
-                            fit: BoxFit.cover,
-                          )
-                        : null,
-                  ),
-                  child: !isImage
-                      ? const Icon(Icons.insert_drive_file, color: Colors.grey)
-                      : null,
-                ),
-                title: Text(
-                  file.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text("${(file.size / 1024).toStringAsFixed(1)} KB"),
-                trailing: IconButton(
-                  icon: const Icon(Icons.close, color: Colors.red),
-                  onPressed: () => _removeFile(index),
-                ),
-              );
-            }).toList(),
-            const SizedBox(height: 12),
-          ],
-          InkWell(
-            onTap: _pickFiles,
-            child: Container(
-              height: 80,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF5F7FA),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: const Color(0xFF4A80FF).withOpacity(0.5),
-                  style: BorderStyle.solid,
-                ),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.upload_file, color: Color(0xFF4A80FF)),
-                  Text(
-                    "Upload Images / PDF",
-                    style: GoogleFonts.inter(
-                      color: const Color(0xFF4A80FF),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -1157,77 +1556,6 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
           horizontal: 16,
           vertical: 12,
         ),
-      ),
-    );
-  }
-
-  Widget _buildDropdown(
-    String label,
-    String? value,
-    List<String> items,
-    Function(String?) onChanged,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.inter(fontSize: 12, color: Colors.grey[600]),
-        ),
-        const SizedBox(height: 6),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            color: const Color(0xFFF9FAFB),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              value: items.contains(value) ? value : null,
-              isExpanded: true,
-              items: items
-                  .map((e) => DropdownMenuItem(value: e, child: Text(e)))
-                  .toList(),
-              onChanged: onChanged,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildDropdownField({
-    required String label,
-    required String? value,
-    required List<String> items,
-    required void Function(String?)? onChanged,
-    String? hint,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: GoogleFonts.inter(fontWeight: FontWeight.w500)),
-          const SizedBox(height: 6),
-          DropdownButtonFormField<String>(
-            value: value,
-            isExpanded: true,
-            items: items.map((String item) {
-              return DropdownMenuItem<String>(value: item, child: Text(item));
-            }).toList(),
-            onChanged: onChanged,
-            decoration: InputDecoration(
-              hintText: hint,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
-              ),
-              filled: true,
-              fillColor: const Color(0xFFF9FAFB),
-            ),
-          ),
-        ],
       ),
     );
   }

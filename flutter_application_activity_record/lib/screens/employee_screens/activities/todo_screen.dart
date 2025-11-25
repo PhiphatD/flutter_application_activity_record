@@ -1,12 +1,15 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
+import 'package:google_fonts/google_fonts.dart' hide Config;
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
+
 import 'activity_detail_screen.dart';
-import '../profile/profile_screen.dart';
+import '../../../widgets/employee_header.dart';
+import '../../../services/websocket_service.dart'; // [IMPORT ใหม่]
+import '../../../backend_api/config.dart';
 
 class TodoScreen extends StatefulWidget {
   const TodoScreen({super.key});
@@ -17,17 +20,16 @@ class TodoScreen extends StatefulWidget {
 
 class _TodoScreenState extends State<TodoScreen>
     with SingleTickerProviderStateMixin {
-  final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
+  final String baseUrl = Config.apiUrl;
   bool _isLoading = true;
-  List<_TodoActivity> _allActivities = []; // ข้อมูลดิบทั้งหมด
+  List<_TodoActivity> _allActivities = [];
   late TabController _tabController;
 
-  // --- Filter State ---
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = "";
   List<String> _selectedTypes = [];
   bool _showMandatoryOnly = false;
-  // รายการ Type ที่มีให้เลือก (ควรดึงจาก DB จริงๆ แต่ Hardcode เพื่อ Demo ได้)
+
   final List<String> _availableTypes = [
     'Training',
     'Seminar',
@@ -35,9 +37,6 @@ class _TodoScreenState extends State<TodoScreen>
     'Activity',
     'Expo',
   ];
-
-  // [NEW] WebSocket for Real-time Updates
-  WebSocketChannel? _channel;
 
   @override
   void initState() {
@@ -49,123 +48,33 @@ class _TodoScreenState extends State<TodoScreen>
       });
     });
     _fetchMyRegistrations();
-    _connectWebSocket(); // [NEW] Start Real-time Listener
+    _initRealtimeListener(); // [NEW]
+  }
+
+  // [NEW] Listen to global websocket service
+  void _initRealtimeListener() {
+    WebSocketService().events.listen((event) {
+      final String type = event['event'];
+
+      // ถ้ากิจกรรมมีการเปลี่ยนแปลง (ลงทะเบียน, ยกเลิก, เช็คอิน) ให้ดึงข้อมูลใหม่
+      if (type == "REFRESH_ACTIVITIES" ||
+          type == "REFRESH_PARTICIPANTS" ||
+          type == "CHECKIN_SUCCESS") {
+        print("TodoScreen: Realtime update received ($type)");
+        _fetchMyRegistrations();
+      }
+    });
   }
 
   @override
   void dispose() {
     _tabController.dispose();
     _searchController.dispose();
-    _channel?.sink.close(); // [NEW] Close WebSocket
     super.dispose();
   }
 
-  // [NEW] WebSocket Connection for Real-time Updates
-  void _connectWebSocket() async {
-    // ดึง EMP_ID ของตัวเองเตรียมไว้เช็ค
-    final prefs = await SharedPreferences.getInstance();
-    final myEmpId = prefs.getString('empId') ?? '';
-
-    try {
-      final wsUrl = Uri.parse(
-        'ws://numerably-nonevincive-kyong.ngrok-free.dev/ws',
-      );
-      _channel = WebSocketChannel.connect(wsUrl);
-
-      _channel!.stream.listen(
-        (message) {
-          print("⚡ TodoScreen Update: $message");
-
-          // Case 1: ข้อมูลเปลี่ยน ให้รีเฟรชหน้าจอเงียบๆ
-          if (message.toString().startsWith("CHECKIN_SUCCESS|") ||
-              message == "REFRESH_ACTIVITIES" ||
-              message == "REFRESH_PARTICIPANTS") {
-            _fetchMyRegistrations(); // รีเฟรชข้อมูลเงียบๆ
-          }
-
-          // Case 2: [NEW] มีคนเช็คอิน -> เช็คว่าเป็นเราไหม?
-          // Message Format: "CHECKIN_SUCCESS|E0001|Activity Name"
-          if (message.toString().startsWith("CHECKIN_SUCCESS|")) {
-            final parts = message.toString().split('|');
-            if (parts.length >= 3) {
-              final checkInEmpId = parts[1];
-              final activityName = parts[2];
-
-              // ถ้าเป็น ID ของเรา -> แสดงแจ้งเตือน!
-              if (checkInEmpId == myEmpId) {
-                if (mounted) {
-                  _showCheckInSuccessDialog(activityName); // เรียก Dialog
-                  _fetchMyRegistrations(); // รีเฟรชสถานะเป็น Joined ทันที
-                }
-              }
-            }
-          }
-        },
-        onError: (error) => print("WS Error: $error"),
-        onDone: () => print("WS Connection Closed"),
-      );
-    } catch (e) {
-      print("WS Connection Failed: $e");
-    }
-  }
-
-  void _showCheckInSuccessDialog(String activityName) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.green.shade50,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.check_circle,
-                color: Colors.green,
-                size: 48,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              "Check-in Successful!",
-              style: GoogleFonts.poppins(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              "You have joined\n\"$activityName\"",
-              textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
-            ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
-                child: const Text("OK", style: TextStyle(color: Colors.white)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Future<void> _fetchMyRegistrations() async {
-    // [Optimization] ไม่ต้อง show loading ถ้าเป็นการ refresh เงียบๆ (Realtime)
-    // แต่ถ้าเป็นครั้งแรก (_allActivities.isEmpty) ให้โชว์
+    // Loading เฉพาะครั้งแรก
     if (_allActivities.isEmpty) {
       setState(() => _isLoading = true);
     }
@@ -196,10 +105,8 @@ class _TodoScreenState extends State<TodoScreen>
     }
   }
 
-  // [CORE LOGIC] ฟังก์ชันกรองข้อมูลหลัก
   List<_TodoActivity> _getFilteredList(String statusFilter) {
     return _allActivities.where((act) {
-      // 1. Status Filter (Tab)
       bool statusMatch = false;
       if (statusFilter == 'History') {
         statusMatch = act.status == 'Joined';
@@ -208,7 +115,6 @@ class _TodoScreenState extends State<TodoScreen>
       }
       if (!statusMatch) return false;
 
-      // 2. Search Query
       if (_searchQuery.isNotEmpty) {
         final query = _searchQuery.toLowerCase();
         final matchName = act.name.toLowerCase().contains(query);
@@ -216,17 +122,13 @@ class _TodoScreenState extends State<TodoScreen>
         if (!matchName && !matchLoc) return false;
       }
 
-      // 3. Type Filter
       if (_selectedTypes.isNotEmpty) {
-        // เช็คว่า type ของกิจกรรม อยู่ใน list ที่เลือกไหม (case insensitive)
         bool typeMatch = _selectedTypes.any(
           (t) => t.toLowerCase() == act.actType.toLowerCase(),
         );
-        // เผื่อกรณีข้อมูลไม่ตรงเป๊ะ หรือ actType เป็นค่าอื่น
         if (!typeMatch) return false;
       }
 
-      // 4. Mandatory Filter
       if (_showMandatoryOnly && !act.isCompulsory) {
         return false;
       }
@@ -235,7 +137,7 @@ class _TodoScreenState extends State<TodoScreen>
     }).toList();
   }
 
-  // [UI] Filter Modal Bottom Sheet
+  // ... (โค้ด UI Filter Modal ยังคงเดิม)
   void _showFilterModal() {
     showModalBottomSheet(
       context: context,
@@ -269,7 +171,6 @@ class _TodoScreenState extends State<TodoScreen>
                       ),
                       TextButton(
                         onPressed: () {
-                          // Reset Logic
                           setState(() {
                             _selectedTypes.clear();
                             _showMandatoryOnly = false;
@@ -284,8 +185,6 @@ class _TodoScreenState extends State<TodoScreen>
                     ],
                   ),
                   const SizedBox(height: 20),
-
-                  // Mandatory Switch
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(
@@ -308,8 +207,6 @@ class _TodoScreenState extends State<TodoScreen>
                   ),
                   const Divider(),
                   const SizedBox(height: 10),
-
-                  // Activity Types
                   Text(
                     "Activity Type",
                     style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
@@ -347,8 +244,6 @@ class _TodoScreenState extends State<TodoScreen>
                     }).toList(),
                   ),
                   const SizedBox(height: 30),
-
-                  // Apply Button
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -380,122 +275,44 @@ class _TodoScreenState extends State<TodoScreen>
 
   @override
   Widget build(BuildContext context) {
-    bool isFilterActive = _selectedTypes.isNotEmpty || _showMandatoryOnly;
-
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
-      appBar: _buildAppBar(),
-      body: Column(
-        children: [
-          // [NEW] Search & Filter Bar Area
-          Container(
-            color: Colors.white,
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    height: 45,
-                    decoration: BoxDecoration(
-                      color: Colors.grey[100],
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: 'Search activities...',
-                        hintStyle: GoogleFonts.poppins(
-                          color: Colors.grey[400],
-                          fontSize: 14,
-                        ),
-                        prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          vertical: 12,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                GestureDetector(
-                  onTap: _showFilterModal,
-                  child: Container(
-                    height: 45,
-                    width: 45,
-                    decoration: BoxDecoration(
-                      color: isFilterActive
-                          ? const Color(0xFF4A80FF)
-                          : Colors.grey[100],
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      Icons.tune_rounded,
-                      color: isFilterActive ? Colors.white : Colors.grey[600],
-                    ),
-                  ),
-                ),
-              ],
+      body: SafeArea(
+        child: Column(
+          children: [
+            EmployeeHeader(
+              title: "Hello, Employee!",
+              subtitle: "Your activities",
+              searchController: _searchController,
+              searchHint: "Search activities...",
+              onFilterTap: _showFilterModal,
+              onRefresh: _fetchMyRegistrations,
             ),
-          ),
-
-          _buildTabBar(),
-
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _buildGroupedList(
-                        statusFilter: "Upcoming",
-                        isTimeline: true,
-                      ),
-                      _buildGroupedList(
-                        statusFilter: "Joined",
-                        isTimeline: false,
-                      ),
-                      _buildGroupedList(
-                        statusFilter: "Missed",
-                        isTimeline: false,
-                      ),
-                    ],
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  AppBar _buildAppBar() {
-    return AppBar(
-      backgroundColor: Colors.white,
-      elevation: 0,
-      centerTitle: true,
-      title: Text(
-        'My Schedule',
-        style: GoogleFonts.poppins(
-          color: const Color(0xFF375987),
-          fontWeight: FontWeight.bold,
-          fontSize: 20,
+            _buildTabBar(),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildGroupedList(
+                          statusFilter: "Upcoming",
+                          isTimeline: true,
+                        ),
+                        _buildGroupedList(
+                          statusFilter: "Joined",
+                          isTimeline: false,
+                        ),
+                        _buildGroupedList(
+                          statusFilter: "Missed",
+                          isTimeline: false,
+                        ),
+                      ],
+                    ),
+            ),
+          ],
         ),
       ),
-      actions: [
-        Padding(
-          padding: const EdgeInsets.only(right: 16.0),
-          child: GestureDetector(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ProfileScreen()),
-            ),
-            child: const CircleAvatar(
-              radius: 18,
-              backgroundColor: Color(0xFFF0F0F0),
-              backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=12'),
-            ),
-          ),
-        ),
-      ],
     );
   }
 
@@ -506,7 +323,7 @@ class _TodoScreenState extends State<TodoScreen>
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
-            offset: const Offset(0, 4), // เงาลงล่างนิดหน่อยเพื่อให้แยกส่วน
+            offset: const Offset(0, 4),
             blurRadius: 8,
           ),
         ],
@@ -534,12 +351,22 @@ class _TodoScreenState extends State<TodoScreen>
     required String statusFilter,
     required bool isTimeline,
   }) {
-    // [UPDATED] ใช้ฟังก์ชันกรองข้อมูลที่สร้างใหม่
     final filteredList = _getFilteredList(statusFilter);
 
-    if (filteredList.isEmpty) return _buildEmptyState(statusFilter);
+    return RefreshIndicator(
+      onRefresh: _fetchMyRegistrations,
+      color: const Color(0xFF4A80FF),
+      child: filteredList.isEmpty
+          ? _buildEmptyState(statusFilter)
+          : _buildListContent(filteredList, statusFilter, isTimeline),
+    );
+  }
 
-    // Group by Date
+  Widget _buildListContent(
+    List<_TodoActivity> filteredList,
+    String statusFilter,
+    bool isTimeline,
+  ) {
     Map<String, List<_TodoActivity>> grouped = {};
     for (var act in filteredList) {
       String dateKey = DateFormat('yyyy-MM-dd').format(act.activityDate);
@@ -547,7 +374,6 @@ class _TodoScreenState extends State<TodoScreen>
       grouped[dateKey]!.add(act);
     }
 
-    // Sort Keys
     var sortedKeys = grouped.keys.toList();
     if (statusFilter == 'Upcoming') {
       sortedKeys.sort((a, b) => a.compareTo(b));
@@ -556,6 +382,7 @@ class _TodoScreenState extends State<TodoScreen>
     }
 
     return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       itemCount: sortedKeys.length,
       itemBuilder: (context, index) {
@@ -579,12 +406,6 @@ class _TodoScreenState extends State<TodoScreen>
       },
     );
   }
-
-  // ... (ส่วน UI Widget: _buildDateHeader, _buildTimelineCard, _buildStandardCard, _buildEmptyState Copy ของเดิมมาแปะได้เลยครับ)
-  // เพื่อประหยัดพื้นที่ ผมจะละส่วน UI ที่ไม่ได้แก้ไว้ (ใช้ของเดิมจากคำตอบก่อนหน้าได้เลย)
-
-  // [PASTE PREVIOUS UI WIDGETS HERE: _buildDateHeader, _buildTimelineCard, _buildStandardCard, _buildEmptyState, _goToDetail, _getTypeColor]
-  // (หากคุณต้องการให้ผมแปะให้ครบทุกบรรทัด แจ้งได้เลยครับ แต่ Logic หลักๆ อยู่ด้านบนหมดแล้ว)
 
   Widget _buildDateHeader(DateTime date, bool isHighlightToday) {
     bool isToday = DateUtils.isSameDay(date, DateTime.now());
@@ -959,15 +780,12 @@ class _TodoScreenState extends State<TodoScreen>
   }
 
   Future<void> _goToDetail(_TodoActivity act) async {
-    // 2. ใช้ await รอจนกว่าจะกลับมาจากหน้า Detail
     await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => ActivityDetailScreen(activityId: act.actId),
       ),
     );
-
-    // 3. พอกลับมาแล้ว ให้โหลดข้อมูลใหม่ทันที
     _fetchMyRegistrations();
   }
 
@@ -986,37 +804,43 @@ class _TodoScreenState extends State<TodoScreen>
       icon = Icons.check_circle_outline_rounded;
     }
 
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.shade200,
-                  blurRadius: 20,
-                  spreadRadius: 5,
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        SizedBox(height: MediaQuery.of(context).size.height * 0.2),
+        Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.shade200,
+                      blurRadius: 20,
+                      spreadRadius: 5,
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            child: Icon(icon, size: 50, color: Colors.grey[400]),
+                child: Icon(icon, size: 50, color: Colors.grey[400]),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  color: Colors.grey[500],
+                  fontSize: 16,
+                  height: 1.5,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 24),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(
-              color: Colors.grey[500],
-              fontSize: 16,
-              height: 1.5,
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -1034,7 +858,6 @@ class _TodoScreenState extends State<TodoScreen>
   }
 }
 
-// [UPDATED MODEL]
 class _TodoActivity {
   final String actId;
   final String name;

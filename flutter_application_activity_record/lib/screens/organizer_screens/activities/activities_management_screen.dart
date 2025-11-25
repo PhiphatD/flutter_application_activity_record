@@ -1,14 +1,17 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
+import 'package:web_socket_channel/web_socket_channel.dart';
 import 'activity_create_screen.dart';
 import 'activity_edit_screen.dart';
 import 'activity_detail_screen.dart';
-import '../profile/organizer_profile_screen.dart';
+
+import '../participants/enterprise_scanner_screen.dart';
+import '../../../widgets/organizer_header.dart';
 
 class ActivityManagementScreen extends StatefulWidget {
   const ActivityManagementScreen({super.key});
@@ -19,13 +22,16 @@ class ActivityManagementScreen extends StatefulWidget {
 }
 
 class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
+  // --- [FIXED] ย้าย baseUrl มาไว้ตรงนี้ เพื่อให้ทุกฟังก์ชันเรียกใช้ได้ ---
+  final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
+
   final TextEditingController _searchController = TextEditingController();
   String _searchText = '';
   String _currentOrgId = '';
   List<String> _selectedTypes = [];
   String? _selectedStatus;
   List<String> _availableTypes = [];
-
+  WebSocketChannel? _channel;
   int _filterCompulsoryIndex = 0;
   bool _filterOnlyAvailable = false;
   int _selectedOwnerSegment = 0;
@@ -43,6 +49,28 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
         _searchText = _searchController.text.trim();
       });
     });
+    _connectWebSocket();
+  }
+
+  void _connectWebSocket() {
+    try {
+      final wsUrl = Uri.parse(
+        'ws://numerably-nonevincive-kyong.ngrok-free.dev/ws',
+      );
+      _channel = WebSocketChannel.connect(wsUrl);
+
+      _channel!.stream.listen((message) {
+        // [CHECK] ต้องมี REFRESH_ACTIVITIES อยู่ในนี้
+        if (message == "REFRESH_ACTIVITIES" ||
+            message == "REFRESH_PARTICIPANTS" ||
+            message.toString().contains("CHECKIN_SUCCESS")) {
+          print("⚡ Real-time Update: $message");
+          _fetchActivities();
+        }
+      }, onError: (e) => print("WS Error: $e"));
+    } catch (e) {
+      print("WS Connection Failed: $e");
+    }
   }
 
   Future<void> _loadCurrentUser() async {
@@ -54,7 +82,7 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   }
 
   Future<void> _fetchActivities() async {
-    final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
+    // [REMOVED] ลบการประกาศ local variable ออก
     final url = Uri.parse('$baseUrl/activities');
 
     try {
@@ -82,9 +110,234 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     }
   }
 
+  // 1. ดึงกิจกรรมวันนี้ของฉัน (Reuse Logic)
+  Future<List<Activity>> _fetchMyActivitiesToday() async {
+    try {
+      // ใช้ข้อมูล _activities ที่มีอยู่แล้ว กรองเอาเลยเพื่อความเร็ว
+      final today = DateTime.now();
+
+      final myTodayActs = _activities.where((a) {
+        // เช็คว่าเป็นของฉัน (เทียบกับ orgId ที่โหลดมา)
+        if (a.orgId != _currentOrgId) return false;
+
+        if (a.status == 'Closed' || a.status == 'Cancelled') return false;
+
+        final actDate = a.activityDate;
+        final isToday =
+            actDate.year == today.year &&
+            actDate.month == today.month &&
+            actDate.day == today.day;
+        return isToday;
+      }).toList();
+
+      return myTodayActs;
+    } catch (e) {
+      print("Error fetching activities today: $e");
+    }
+    return [];
+  }
+
+  // 2. ฟังก์ชันหลักเมื่อกดปุ่ม Scan
+  void _handleSmartScan() async {
+    // Show Loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final activities = await _fetchMyActivitiesToday();
+
+    if (!mounted) return;
+    Navigator.pop(context); // Close Loading
+
+    if (activities.isEmpty) {
+      _showErrorDialog(
+        "No Activities Today",
+        "คุณไม่มีกิจกรรมที่จัดขึ้นในวันนี้ หรือกิจกรรมยังไม่เปิด",
+      );
+    } else if (activities.length == 1) {
+      // เจอ 1 อัน -> ลุยเลย!
+      final act = activities.first;
+      _openScanner(act.actId, act.name);
+    } else {
+      // เจอหลายอัน -> ให้เลือกก่อน
+      _showActivitySelectionSheet(activities);
+    }
+  }
+
+  // [UI] Popup เลือกกิจกรรม
+  void _showActivitySelectionSheet(List<Activity> activities) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(
+                  "Select Activity to Check-in",
+                  style: GoogleFonts.poppins(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              ...activities.map(
+                (act) => ListTile(
+                  leading: const Icon(Icons.event, color: Color(0xFF4A80FF)),
+                  title: Text(act.name, style: GoogleFonts.kanit()),
+                  subtitle: Text("${act.startTime} - ${act.endTime}"),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _openScanner(act.actId, act.name);
+                  },
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // [SCANNER] เปิดกล้อง
+  void _openScanner(String defaultActId, String actName) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const EnterpriseScannerScreen()),
+    );
+
+    if (result != null) {
+      String targetActId = defaultActId;
+      String empId = result;
+
+      if (result.contains("EMP:")) {
+        empId = result.split("EMP:")[1].split("|")[0];
+      } else if (result.contains("_REFRESH_")) {
+        empId = result.split("_REFRESH_")[0];
+      }
+
+      _processCheckIn(empId, targetActId);
+    }
+  }
+
+  Future<void> _processCheckIn(String empId, String actId) async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Processing Check-in..."),
+        duration: Duration(seconds: 1),
+      ),
+    );
+
+    try {
+      final response = await http.post(
+        Uri.parse(
+          '$baseUrl/checkin',
+        ), // ตอนนี้ใช้งานได้แล้ว เพราะ baseUrl เป็น Class Member
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'emp_id': empId,
+          'act_id': actId,
+          'scanned_by': 'organizer',
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        _showResultDialog(
+          true,
+          "Check-in Success!",
+          "${data['emp_name']}\nEarned +${data['points_earned']} pts",
+        );
+        // Refresh List เพื่ออัปเดตตัวเลขผู้เข้าร่วม
+        _fetchActivities();
+      } else {
+        final err = jsonDecode(utf8.decode(response.bodyBytes));
+        _showResultDialog(
+          false,
+          "Check-in Failed",
+          err['detail'] ?? "Unknown Error",
+        );
+      }
+    } catch (e) {
+      _showResultDialog(false, "Error", "Connection failed");
+    }
+  }
+
+  void _showResultDialog(bool success, String title, String msg) {
+    showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              success ? Icons.check_circle : Icons.cancel,
+              color: success ? Colors.green : Colors.red,
+              size: 60,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              msg,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(c),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: success ? Colors.green : Colors.red,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              child: const Text("OK", style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showErrorDialog(String title, String msg) {
+    showDialog(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(
+          title,
+          style: GoogleFonts.poppins(fontWeight: FontWeight.bold),
+        ),
+        content: Text(msg, style: GoogleFonts.poppins()),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
+    _channel?.sink.close();
     super.dispose();
   }
 
@@ -410,7 +663,6 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
   }
 
   void _deleteActivity(String actId) async {
-    final String baseUrl = "https://numerably-nonevincive-kyong.ngrok-free.dev";
     try {
       final response = await http.delete(
         Uri.parse('$baseUrl/activities/$actId'),
@@ -457,17 +709,69 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
       ),
       body: Stack(
         children: [
-          Container(color: const Color.fromARGB(255, 255, 255, 255)),
+          Container(color: const Color(0xFFF5F7FA)),
           SafeArea(
             child: Column(
               children: [
-                _buildModernHeader(),
+                OrganizerHeader(
+                  title: "Welcome Organizer",
+                  subtitle: "Manage your activities",
+                  searchController: _searchController,
+                  searchHint: "Search activities...",
+                  onFilterTap: _showFilterModal,
+                  onScanSuccess: _handleSmartScan,
+                ),
 
-                const SizedBox(height: 10),
+                // [FIXED] คืนชีพ Filter Chips (My Activities / Others) กลับมา
+                Container(
+                  color: const Color.fromARGB(255, 255, 255, 255),
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _buildChipSelector(
+                          "My Activities",
+                          _selectedOwnerSegment == 0,
+                          () => setState(() => _selectedOwnerSegment = 0),
+                        ),
+                        const SizedBox(width: 8),
+                        _buildChipSelector(
+                          "Others",
+                          _selectedOwnerSegment == 1,
+                          () => setState(() => _selectedOwnerSegment = 1),
+                        ),
+                        Container(
+                          height: 24,
+                          width: 1,
+                          color: Colors.grey.shade300,
+                          margin: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
+                        _buildChipSelector(
+                          "Active",
+                          _selectedTimeFilter == 0,
+                          () => setState(() => _selectedTimeFilter = 0),
+                          isStatus: true,
+                        ),
+                        const SizedBox(width: 8),
+                        _buildChipSelector(
+                          "History",
+                          _selectedTimeFilter == 1,
+                          () => setState(() => _selectedTimeFilter = 1),
+                          isStatus: true,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
                 Expanded(
-                  child: _isLoading
-                      ? const Center(child: CircularProgressIndicator())
-                      : _buildGroupedList(),
+                  child: RefreshIndicator(
+                    onRefresh: _fetchActivities,
+                    child: _isLoading
+                        ? const Center(child: CircularProgressIndicator())
+                        : _buildGroupedList(),
+                  ),
                 ),
               ],
             ),
@@ -705,390 +1009,36 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
     );
   }
 
-  Widget _buildCustomAppBar() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: SizedBox(
-        height: 56,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: GestureDetector(
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const OrganizerProfileScreen(),
-                  ),
-                ),
-                child: CircleAvatar(
-                  radius: 22,
-                  backgroundColor: Colors.grey.shade200,
-                  backgroundImage: const NetworkImage(
-                    'https://i.pravatar.cc/150?img=32',
-                  ),
-                ),
-              ),
-            ),
-            Center(
-              child: Text(
-                'Management',
-                style: GoogleFonts.poppins(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF375987),
-                ),
-              ),
-            ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: IconButton(
-                icon: const Icon(
-                  Icons.notifications_outlined,
-                  color: Colors.black54,
-                  size: 28,
-                ),
-                onPressed: () {},
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSearchBar() {
-    final hasFilter =
-        _selectedTypes.isNotEmpty ||
-        _selectedStatus != null ||
-        _filterCompulsoryIndex != 0 ||
-        _filterOnlyAvailable;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: Row(
-        children: [
-          Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12.0),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 10.0,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Search activities...',
-                  hintStyle: GoogleFonts.poppins(color: Colors.grey[400]),
-                  prefixIcon: Icon(Icons.search, color: Colors.grey.shade500),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 20.0,
-                    vertical: 15.0,
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          GestureDetector(
-            onTap: _showFilterModal,
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: hasFilter ? const Color(0xFF4A80FF) : Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 10.0,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Icon(
-                Icons.filter_list_rounded,
-                color: hasFilter ? Colors.white : Colors.grey.shade700,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOwnerSegment() {
-    // [FIX] เพิ่ม Align ครอบเพื่อให้ชิดซ้าย
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 4.0),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.start,
-          children: [
-            ChoiceChip(
-              avatar: Icon(
-                Icons.person_outline,
-                size: 18,
-                color: _selectedOwnerSegment == 0 ? Colors.black : Colors.grey,
-              ),
-              label: const Text('My Activities'),
-              labelStyle: TextStyle(
-                color: _selectedOwnerSegment == 0
-                    ? Colors.black
-                    : Colors.black87,
-                fontWeight: _selectedOwnerSegment == 0
-                    ? FontWeight.bold
-                    : FontWeight.normal,
-              ),
-              selected: _selectedOwnerSegment == 0,
-              onSelected: (selected) {
-                if (selected) setState(() => _selectedOwnerSegment = 0);
-              },
-              backgroundColor: Colors.white,
-              selectedColor: const Color(0xFFFFD600),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24.0),
-                side: BorderSide(
-                  color: _selectedOwnerSegment == 0
-                      ? const Color(0xFFFFD600)
-                      : Colors.grey.shade400,
-                ),
-              ),
-              showCheckmark: false,
-            ),
-            const SizedBox(width: 8.0),
-            ChoiceChip(
-              avatar: Icon(
-                Icons.group_outlined,
-                size: 18,
-                color: _selectedOwnerSegment == 1 ? Colors.black : Colors.grey,
-              ),
-              label: const Text('Other Organizers'),
-              labelStyle: TextStyle(
-                color: _selectedOwnerSegment == 1
-                    ? Colors.black
-                    : Colors.black87,
-                fontWeight: _selectedOwnerSegment == 1
-                    ? FontWeight.bold
-                    : FontWeight.normal,
-              ),
-              selected: _selectedOwnerSegment == 1,
-              onSelected: (selected) {
-                if (selected) setState(() => _selectedOwnerSegment = 1);
-              },
-              backgroundColor: Colors.white,
-              selectedColor: const Color(0xFFFFD600),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24.0),
-                side: BorderSide(
-                  color: _selectedOwnerSegment == 1
-                      ? const Color(0xFFFFD600)
-                      : Colors.grey.shade400,
-                ),
-              ),
-              showCheckmark: false,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildModernHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          // Row 1: Profile & Greeting
-          Row(
-            children: [
-              GestureDetector(
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const OrganizerProfileScreen(),
-                  ),
-                ),
-                child: Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: const Color(0xFF4A80FF),
-                      width: 2,
-                    ),
-                  ),
-                  child: const CircleAvatar(
-                    radius: 20,
-                    backgroundImage: NetworkImage(
-                      'https://i.pravatar.cc/150?img=32',
-                    ), // หรือใช้รูปจริง
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Welcome back,",
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: Colors.grey[500],
-                    ),
-                  ),
-                  Text(
-                    "Organizer Team", // หรือใส่ชื่อจริง _currentOrganizerName
-                    style: GoogleFonts.poppins(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: const Color(0xFF375987),
-                    ),
-                  ),
-                ],
-              ),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(
-                  Icons.notifications_outlined,
-                  color: Colors.black54,
-                ),
-                onPressed: () {},
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 20),
-
-          // Row 2: Search Bar & Filter
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF5F7FA),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: TextField(
-                    controller: _searchController,
-                    decoration: InputDecoration(
-                      hintText: 'Search activities...',
-                      hintStyle: GoogleFonts.poppins(
-                        color: Colors.grey[400],
-                        fontSize: 14,
-                      ),
-                      prefixIcon: Icon(
-                        Icons.search,
-                        color: Colors.grey[400],
-                        size: 22,
-                      ),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              GestureDetector(
-                onTap: _showFilterModal,
-                child: Container(
-                  height: 48,
-                  width: 48,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF4A80FF), // สีปุ่ม Filter เด่นๆ
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.tune, color: Colors.white),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 20),
-
-          // Row 3: Smart Tabs (รวม My/Other และ Active/History)
-          // เราจะใช้ดีไซน์แบบ "Chips" แนวนอนที่เลื่อนได้ เพื่อประหยัดที่
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                // Group 1: Owner (My / Others)
-                _buildChipSelector(
-                  "My Activities",
-                  _selectedOwnerSegment == 0,
-                  () => setState(() => _selectedOwnerSegment = 0),
-                ),
-                const SizedBox(width: 8),
-                _buildChipSelector(
-                  "Others",
-                  _selectedOwnerSegment == 1,
-                  () => setState(() => _selectedOwnerSegment = 1),
-                ),
-
-                Container(
-                  height: 24,
-                  width: 1,
-                  color: Colors.grey.shade300,
-                  margin: const EdgeInsets.symmetric(horizontal: 12),
-                ), // เส้นคั่น
-                // Group 2: Status (Active / History)
-                _buildChipSelector(
-                  "Active",
-                  _selectedTimeFilter == 0,
-                  () => setState(() => _selectedTimeFilter = 0),
-                  isStatus: true,
-                ),
-                const SizedBox(width: 8),
-                _buildChipSelector(
-                  "History",
-                  _selectedTimeFilter == 1,
-                  () => setState(() => _selectedTimeFilter = 1),
-                  isStatus: true,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Helper Widget สำหรับปุ่มเลือกเล็กๆ (Chip)
+  // Helper Widget สำหรับปุ่มเลือกเล็กๆ (Chip) - คงเดิม
   Widget _buildChipSelector(
     String label,
     bool isSelected,
     VoidCallback onTap, {
     bool isStatus = false,
   }) {
-    // สี Active: ถ้าเป็นกลุ่ม Owner ใช้สีเหลือง, ถ้าเป็น Status ใช้สีฟ้า
-    final activeColor = isStatus
-        ? const Color(0xFFE6EFFF)
-        : const Color(0xFFFFF8E1);
-    final activeText = isStatus
-        ? const Color(0xFF4A80FF)
-        : Colors.amber.shade900;
-    final border = isStatus ? const Color(0xFF4A80FF) : Colors.amber;
+    // กำหนดสีที่แน่นอน
+    Color bgColor;
+    Color textColor;
+    Color borderColor;
+
+    if (isSelected) {
+      if (isStatus) {
+        // Active/History Tab (Blue Theme)
+        bgColor = const Color(0xFFE6EFFF);
+        textColor = const Color(0xFF4A80FF);
+        borderColor = const Color(0xFF4A80FF);
+      } else {
+        // My/Others Tab (Orange/Yellow Theme)
+        bgColor = const Color(0xFFFFF8E1);
+        textColor = Colors.amber.shade900;
+        borderColor = Colors.amber;
+      }
+    } else {
+      // Unselected State
+      bgColor = Colors.white;
+      textColor = Colors.grey.shade600;
+      borderColor = Colors.grey.shade300;
+    }
 
     return GestureDetector(
       onTap: onTap,
@@ -1096,18 +1046,28 @@ class _ActivityManagementScreenState extends State<ActivityManagementScreen> {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? activeColor : Colors.transparent,
+          color: bgColor,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: isSelected ? border.withOpacity(0.3) : Colors.grey.shade300,
-          ),
+          border: Border.all(color: borderColor.withOpacity(0.5), width: 1),
+          // เพิ่มเงาเล็กน้อยเมื่อเลือก เพื่อให้ดูเด่นขึ้น (ลดอาการดูเหมือนกระพริบ)
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: borderColor.withOpacity(0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : [],
         ),
         child: Text(
           label,
           style: GoogleFonts.poppins(
             fontSize: 13,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected ? activeText : Colors.grey[600],
+            fontWeight: isSelected
+                ? FontWeight.w600
+                : FontWeight.normal, // ปรับน้ำหนักฟอนต์
+            color: textColor,
           ),
         ),
       ),

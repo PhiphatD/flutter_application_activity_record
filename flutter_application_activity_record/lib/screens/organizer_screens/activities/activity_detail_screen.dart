@@ -274,8 +274,10 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
   }
 
   Widget _buildSliverAppBar(Activity act) {
+    final images = act.attachments.where((a) => a.type == 'IMAGE').toList();
+
     return SliverAppBar(
-      expandedHeight: 280, // [UI TWEAK] เพิ่มความสูงให้เห็นรูปมากขึ้น
+      expandedHeight: 280,
       pinned: true,
       backgroundColor: const Color(0xFF4A80FF),
       leading: Container(
@@ -290,18 +292,23 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
         ),
       ),
       flexibleSpace: FlexibleSpaceBar(
-        background: act.actImage != null && act.actImage!.isNotEmpty
-            ? Image.network(
-                act.actImage!,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  color: Colors.grey[300],
-                  child: const Icon(
-                    Icons.broken_image,
-                    size: 50,
-                    color: Colors.grey,
-                  ),
-                ),
+        background: images.isNotEmpty
+            ? PageView.builder(
+                itemCount: images.length,
+                itemBuilder: (context, index) {
+                  return Image.network(
+                    images[index].url,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Container(
+                      color: Colors.grey[300],
+                      child: const Icon(
+                        Icons.broken_image,
+                        size: 50,
+                        color: Colors.grey,
+                      ),
+                    ),
+                  );
+                },
               )
             : Container(
                 decoration: const BoxDecoration(

@@ -29,10 +29,13 @@ dependencies:
   web_socket_channel: ^3.0.3
   cached_network_image: ^3.4.0
   file_picker: ^10.3.7
-  image_picker: ^1.0.7
+  image_picker: ^1.2.1
   open_file: ^3.3.2    # (Optional) สำหรับเปิดดูไฟล์ที่แนบ
   day_night_time_picker: 1.3.1
-
+  shimmer: ^3.0.0
+  dotted_border: ^2.0.0
+  animated_custom_dropdown: ^3.1.1
+  syncfusion_flutter_datepicker: ^28.1.38
   # [NEW] WebSocket
 dev_dependencies:
   flutter_test:
@@ -49,6 +52,7 @@ flutter:
     - assets/images/login_ellipse.png
     - assets/images/card_background.png
     - assets/images/card_background_oganize.png
+    - assets/images/card_background_admin.png
     - assets/images/bgcredit.jpg
     - assets/animations/
     - assets/fonts/

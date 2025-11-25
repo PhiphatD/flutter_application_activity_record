@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import '../profile/profile_screen.dart';
+import '../../../widgets/employee_header.dart';
 import 'package:flutter_application_activity_record/theme/app_colors.dart';
 import 'reward_detail_screen.dart';
 import 'redeemed_detail_screen.dart';
@@ -21,7 +21,7 @@ class RewardItem {
   final String name;
   final int pointsCost;
   final int stock;
-  final String? imageUrl;
+  final List<String> images; // [CHANGED] เปลี่ยนเป็น List
   final String description;
   final String category;
   final String prizeType;
@@ -31,35 +31,46 @@ class RewardItem {
     required this.name,
     required this.pointsCost,
     required this.stock,
-    this.imageUrl,
+    required this.images, // [CHANGED]
     required this.description,
     this.category = 'General',
     required this.prizeType,
   });
 
   factory RewardItem.fromJson(Map<String, dynamic> json) {
-    // [FINAL FIX] ใช้การดึงค่าแบบปลอดภัยและแปลงเป็น String ทันที
-    // เราจะใช้ String() ครอบเพื่อให้แน่ใจว่าค่าที่ได้ (ไม่ว่าจะเป็น null, 'Digital', หรืออะไรก็ตาม)
-    // ถูกแปลงเป็น String ก่อน แล้วค่อย trim/normalize
-
-    // 1. ดึงค่าจากคีย์ที่คาดหวัง (PrizeType หรือ Prize_type)
+    // 1. Handle Prize Type
     final dynamic rawPrizeType = json['prizeType'] ?? json['prize_type'];
-
-    // 2. แปลงเป็น String และ Trim, หากเป็น null หรือ "null" (จาก JSON) ให้ใช้ค่า Default
     String finalPrizeType = 'Physical';
     if (rawPrizeType != null && rawPrizeType.toString().trim().isNotEmpty) {
-      // ใช้ toUpperCase() เพื่อให้มั่นใจว่าค่าที่ได้ตรงกับ filter options ที่เราใช้ตัวพิมพ์ใหญ่ในการตั้งค่า
-      // (แม้ว่า filter logic จะใช้ .toLowerCase() แล้วก็ตาม) แต่เพื่อความสะอาดของ Model
       String cleanedType = rawPrizeType.toString().toUpperCase().trim();
-
-      // เราต้องใช้ค่าตามที่ Filter Options กำหนด (Digital, Privilege)
       if (cleanedType == 'DIGITAL') {
         finalPrizeType = 'Digital';
       } else if (cleanedType == 'PRIVILEGE') {
         finalPrizeType = 'Privilege';
-      } else if (cleanedType == 'PHYSICAL') {
-        finalPrizeType = 'Physical';
       }
+    }
+
+    // 2. [NEW] Handle Images List (ส่วนสำคัญที่ทำให้รูปขึ้น)
+    List<String> imgList = [];
+
+    // เช็คว่า Backend ส่ง images (List) มาไหม
+    if (json['images'] != null) {
+      if (json['images'] is List) {
+        imgList = List<String>.from(json['images']);
+      } else if (json['images'] is String) {
+        // เผื่อ Server ส่งมาเป็น JSON String
+        try {
+          List<dynamic> parsed = jsonDecode(json['images']);
+          imgList = parsed.map((e) => e.toString()).toList();
+        } catch (_) {}
+      }
+    }
+
+    // Fallback: ถ้าไม่มี List ให้ลองดู field เก่า 'image'
+    if (imgList.isEmpty &&
+        json['image'] != null &&
+        json['image'].toString().isNotEmpty) {
+      imgList.add(json['image'].toString());
     }
 
     return RewardItem(
@@ -67,12 +78,19 @@ class RewardItem {
       name: json['name'],
       pointsCost: json['pointCost'],
       stock: json['stock'],
-      imageUrl: json['image'],
-      description: json['description'],
+      images: imgList, // [CHANGED] ส่ง List เข้าไป
+      description: json['description'] ?? '-',
       category: json['category'] ?? 'General',
-      // ใช้ค่าที่ผ่านการทำความสะอาดแล้ว
       prizeType: finalPrizeType,
     );
+  }
+
+  // [NEW] Getter สำหรับดึงรูปปก (รูปแรก)
+  String get coverImage {
+    if (images.isNotEmpty && images.first.isNotEmpty) {
+      return images.first;
+    }
+    return '';
   }
 
   List<String> get tags {
@@ -91,7 +109,7 @@ class RedeemedItem {
   final int pointsCost;
   final DateTime redeemDate;
   final String status;
-  final String? imageUrl;
+  final List<String> images;
   final String pickupInstruction;
 
   RedeemedItem({
@@ -100,21 +118,31 @@ class RedeemedItem {
     required this.pointsCost,
     required this.redeemDate,
     required this.status,
-    this.imageUrl,
+    required this.images,
     this.pickupInstruction = "Contact HR",
   });
 
   factory RedeemedItem.fromJson(Map<String, dynamic> json) {
+    // Parsing Images Logic
+    List<String> imgList = [];
+    if (json['images'] != null && json['images'] is List) {
+      imgList = List<String>.from(json['images']);
+    } else if (json['image'] != null) {
+      imgList.add(json['image'].toString());
+    }
+
     return RedeemedItem(
       id: json['redeemId'],
       prizeName: json['prizeName'],
       pointsCost: json['pointCost'],
       redeemDate: DateTime.parse(json['redeemDate']),
       status: json['status'],
-      imageUrl: json['image'],
+      images: imgList, // [CHANGED]
       pickupInstruction: json['pickupInstruction'] ?? "Contact HR",
     );
   }
+
+  String get coverImage => images.isNotEmpty ? images.first : '';
 }
 
 class RewardScreen extends StatefulWidget {
@@ -170,6 +198,7 @@ class _RewardScreenState extends State<RewardScreen>
 
   @override
   void initState() {
+    super.initState();
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _searchController.addListener(() {
@@ -373,31 +402,40 @@ class _RewardScreenState extends State<RewardScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
-      body: Column(
-        children: [
-          _buildCustomAppBar(),
-          // [NEW] TabBar เหมือนหน้า Todo
-          _buildTabBar(),
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : TabBarView(
-                    controller: _tabController,
-                    children: [
-                      // Tab 1: Rewards (Marketplace)
-                      RefreshIndicator(
-                        onRefresh: _fetchInitialData,
-                        child: _buildMarketplaceTab(),
-                      ),
-                      // Tab 2: History
-                      RefreshIndicator(
-                        onRefresh: _fetchInitialData,
-                        child: _buildHistoryTab(),
-                      ),
-                    ],
-                  ),
-          ),
-        ],
+      body: SafeArea(
+        child: Column(
+          children: [
+            EmployeeHeader(
+              title: "Hello, Employee!",
+              subtitle: "Redeem your points",
+              searchController: _searchController,
+              searchHint: "Find rewards...",
+              onFilterTap: _showFilterModal,
+              onRefresh: _fetchInitialData,
+            ),
+            // [NEW] TabBar เหมือนหน้า Todo
+            _buildTabBar(),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : TabBarView(
+                      controller: _tabController,
+                      children: [
+                        // Tab 1: Rewards (Marketplace)
+                        RefreshIndicator(
+                          onRefresh: _fetchInitialData,
+                          child: _buildMarketplaceTab(),
+                        ),
+                        // Tab 2: History
+                        RefreshIndicator(
+                          onRefresh: _fetchInitialData,
+                          child: _buildHistoryTab(),
+                        ),
+                      ],
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -438,7 +476,7 @@ class _RewardScreenState extends State<RewardScreen>
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(child: _buildLoyaltyCard()),
-        SliverToBoxAdapter(child: _buildSearchAndFilter()),
+        // SliverToBoxAdapter(child: _buildSearchAndFilter()), // Removed as it's in header now
         SliverToBoxAdapter(child: _buildFilterChips()), // Chips are now here
         _buildAvailableSliverGrid(),
         const SliverToBoxAdapter(child: SizedBox(height: 80)),
@@ -470,63 +508,6 @@ class _RewardScreenState extends State<RewardScreen>
   }
 
   // ... (UI Components: AppBar, LoyaltyCard, Search, Filters, Modal, Grids)
-
-  Widget _buildCustomAppBar() {
-    return SafeArea(
-      // Wrap with SafeArea for correct padding
-      bottom: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Rewards',
-                  style: GoogleFonts.poppins(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: const Color(0xFF375987),
-                  ),
-                ),
-                Text(
-                  "Redeem your points",
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ],
-            ),
-            GestureDetector(
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const ProfileScreen()),
-              ),
-              child: Container(
-                padding: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: const Color(0xFF4A80FF),
-                    width: 1.5,
-                  ),
-                ),
-                child: const CircleAvatar(
-                  radius: 18,
-                  backgroundImage: CachedNetworkImageProvider(
-                    'https://i.pravatar.cc/150?img=12',
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _buildLoyaltyCard() {
     final pointsText = NumberFormat.decimalPattern().format(_userPoints);
@@ -658,77 +639,6 @@ class _RewardScreenState extends State<RewardScreen>
     );
   }
 
-  Widget _buildSearchAndFilter() {
-    bool isFilterActive =
-        _selectedSort != SortOption.none ||
-        _currentPointRange.start != _minPointDb ||
-        _currentPointRange.end != _maxPointDb;
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 20.0,
-        vertical: 0.0,
-      ), // Reduced Vertical Padding
-      child: Row(
-        children: [
-          Expanded(
-            child: Container(
-              height: 48,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  hintText: 'Find rewards...',
-                  hintStyle: GoogleFonts.poppins(
-                    color: Colors.grey[400],
-                    fontSize: 14,
-                  ),
-                  prefixIcon: Icon(Icons.search, color: Colors.grey.shade400),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          GestureDetector(
-            onTap: _showFilterModal,
-            child: Container(
-              height: 48,
-              width: 48,
-              decoration: BoxDecoration(
-                color: isFilterActive ? const Color(0xFF4A80FF) : Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: isFilterActive
-                        ? const Color(0xFF4A80FF).withOpacity(0.3)
-                        : Colors.black.withOpacity(0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Icon(
-                Icons.tune_rounded,
-                color: isFilterActive ? Colors.white : Colors.grey.shade600,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildFilterChips() {
     return Container(
       height: 50,
@@ -783,7 +693,7 @@ class _RewardScreenState extends State<RewardScreen>
           crossAxisCount: 2,
           mainAxisSpacing: 16.0,
           crossAxisSpacing: 16.0,
-          childAspectRatio: 0.60,
+          childAspectRatio: 0.57,
         ),
         delegate: SliverChildBuilderDelegate((context, index) {
           final item = filteredRewards[index];
@@ -965,7 +875,7 @@ class _RewardScreenState extends State<RewardScreen>
           rewardName: item.name,
           pointsCost: item.pointsCost,
           description: item.description,
-          imageUrls: item.imageUrl != null ? [item.imageUrl!] : [],
+          imageUrls: item.images, // [CHANGED] ส่ง List ทั้งหมดไป
           category: item.category,
           stock: item.stock,
           userPoints: _userPoints,
@@ -976,7 +886,7 @@ class _RewardScreenState extends State<RewardScreen>
   }
 
   void _openRedeemedDetail(RedeemedItem item) {
-    final images = item.imageUrl != null ? [item.imageUrl!] : <String>[];
+    final images = item.images;
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -1066,14 +976,17 @@ class _RewardItemCard extends StatelessWidget {
                     borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(20),
                     ),
-                    child: item.imageUrl != null
+                    child: item.coverImage.isNotEmpty
                         ? CachedNetworkImage(
-                            imageUrl: item.imageUrl!,
+                            imageUrl: item.coverImage,
                             fit: BoxFit.cover,
+                            memCacheWidth: 300,
                             placeholder: (context, url) =>
                                 Container(color: Colors.grey[100]),
-                            errorWidget: (context, url, error) =>
-                                const Icon(Icons.error),
+                            errorWidget: (context, url, error) => const Icon(
+                              Icons.broken_image,
+                              color: Colors.grey,
+                            ),
                           )
                         : Container(
                             color: Colors.grey[100],
@@ -1171,7 +1084,7 @@ class _RewardItemCard extends StatelessWidget {
                             color: isOutOfStock ? Colors.grey : priceColor,
                           ),
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 6),
                         if (isOutOfStock)
                           Container(
                             height: 4,
@@ -1184,7 +1097,7 @@ class _RewardItemCard extends StatelessWidget {
                         else if (canRedeem)
                           Container(
                             width: double.infinity,
-                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            padding: const EdgeInsets.symmetric(vertical: 6),
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
                                 colors: [Color(0xFF4A80FF), Color(0xFF2E5BFF)],
@@ -1349,9 +1262,9 @@ class _RedeemedItemCard extends StatelessWidget {
               child: SizedBox(
                 width: 70,
                 height: 70,
-                child: item.imageUrl != null
+                child: item.coverImage.isNotEmpty
                     ? CachedNetworkImage(
-                        imageUrl: item.imageUrl!,
+                        imageUrl: item.coverImage,
                         fit: BoxFit.cover,
                       )
                     : Container(
