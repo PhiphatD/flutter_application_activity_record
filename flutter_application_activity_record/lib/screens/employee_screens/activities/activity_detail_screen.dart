@@ -30,43 +30,23 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
   String? _selectedSessionId;
   List<dynamic> _sessions = [];
 
-  // [NEW] WebSocket for Real-time Updates
   WebSocketChannel? _channel;
-
-  Map<String, String> _getSelectedSessionDetails() {
-    if (_selectedSessionId == null) return {'date': '-', 'time': '-'};
-    final session = _sessions.firstWhere(
-      (s) => s['sessionId'] == _selectedSessionId,
-      orElse: () => null,
-    );
-    if (session == null) return {'date': '-', 'time': '-'};
-
-    try {
-      final date = DateFormat(
-        'd MMM y',
-      ).format(DateTime.parse(session['date']));
-      final time =
-          "${session['startTime'].substring(0, 5)} - ${session['endTime'].substring(0, 5)}";
-      return {'date': date, 'time': time};
-    } catch (_) {
-      return {'date': 'Invalid Date', 'time': 'Invalid Time'};
-    }
-  }
 
   @override
   void initState() {
     super.initState();
     _fetchDetail();
-    _connectWebSocket(); // [NEW] Start Real-time Listener
+    _connectWebSocket();
   }
 
   @override
   void dispose() {
-    _channel?.sink.close(); // [NEW] Close WebSocket
+    _channel?.sink.close();
     super.dispose();
   }
 
-  // [NEW] WebSocket Connection for Real-time Updates
+  // --- DATA & LOGIC SECTION ---
+
   void _connectWebSocket() {
     try {
       final wsUrl = Uri.parse(
@@ -74,24 +54,13 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
       );
       _channel = WebSocketChannel.connect(wsUrl);
 
-      _channel!.stream.listen(
-        (message) {
-          // ถ้ามีคนสมัคร/ยกเลิก (REFRESH_PARTICIPANTS)
-          // หรือข้อมูลกิจกรรมเปลี่ยน (REFRESH_ACTIVITIES เช่น แก้ไขรายละเอียด)
-          // ให้โหลดข้อมูลใหม่ทันที เพื่ออัปเดตยอด Current Participants
-          if (message == "REFRESH_PARTICIPANTS" ||
-              message == "REFRESH_ACTIVITIES") {
-            print("⚡ Detail Update: $message");
-            _fetchDetail(); // เรียกฟังก์ชันเดิมเพื่อโหลดข้อมูลใหม่
-          }
-        },
-        onError: (error) {
-          print("WS Error: $error");
-        },
-        onDone: () {
-          print("WS Connection Closed");
-        },
-      );
+      _channel!.stream.listen((message) {
+        if (message == "REFRESH_PARTICIPANTS" ||
+            message == "REFRESH_ACTIVITIES") {
+          print("⚡ Detail Update: $message");
+          _fetchDetail();
+        }
+      }, onError: (error) => print("WS Error: $error"));
     } catch (e) {
       print("WS Connection Failed: $e");
     }
@@ -113,8 +82,12 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
           setState(() {
             _activityData = act;
             _sessions = data['sessions'] ?? [];
-            if (_sessions.length == 1)
+
+            // Auto-select first session if available
+            if (_sessions.isNotEmpty) {
               _selectedSessionId = _sessions[0]['sessionId'];
+            }
+
             _isLoading = false;
           });
         }
@@ -126,43 +99,9 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
 
   Future<void> _toggleFavorite() async {
     if (_activityData == null) return;
-
     final bool currentStatus = _activityData!.isFavorite;
 
-    // Optimistic Update: Update UI immediately
     setState(() {
-      // Create a new Activity object with the toggled favorite status
-      // Assuming Activity has a copyWith method or we can recreate it.
-      // Since I don't see copyWith in the provided code, I'll assume I can't easily clone it
-      // without modifying the model. However, the user instruction showed:
-      // _activityData!.isFavorite = !currentStatus;
-      // which implies the field might be mutable or they want me to make it mutable.
-      // But I recall seeing it was final.
-      // Let's check if I can just use the user's provided code which implies mutability or
-      // if I should use a workaround.
-      // The user provided:
-      // setState(() {
-      //   _activityData!.isFavorite = !currentStatus;
-      // });
-      // If isFavorite is final, this will fail.
-      // But wait, if I look at the previous `view_file` of `ActivityCard`, it takes `isFavorite`.
-      // The `Activity` model was imported. I didn't check `Activity` model file.
-      // But the user's snippet suggests they want me to use that code.
-      // I will assume `isFavorite` is mutable OR I should modify the model.
-      // BUT, I can't modify the model file as I haven't read it and it's not in the plan.
-      // Wait, I can try to use `copyWith` if it exists.
-      // If not, I'll just try to set it and if it fails I'll know.
-      // Actually, to be safe and follow instructions, I will use the code provided by the user.
-      // If it's final, I might need to fix the model too.
-      // Let's assume the user knows what they are doing or I should fix the model if needed.
-      // Actually, I'll check the model file first? No, I'll just try to apply the user's code.
-      // Wait, I can't see the model file.
-      // I'll just apply the code. If it errors, I'll fix the model.
-      // Actually, I'll just cast it to dynamic to bypass the check if I really have to, but that's bad.
-      // Let's look at the user request again.
-      // The user code: `_activityData!.isFavorite = !currentStatus;`
-      // This implies `isFavorite` is not final.
-      // I will use the user's code.
       _activityData!.isFavorite = !currentStatus;
     });
 
@@ -175,49 +114,66 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'emp_id': empId, 'act_id': widget.activityId}),
       );
-      // Success: UI is already updated
     } catch (e) {
       print("Error toggling favorite: $e");
-      // Error: Rollback UI state
       setState(() {
         _activityData!.isFavorite = currentStatus;
       });
     }
   }
 
+  Map<String, String> _getSelectedSessionDetails() {
+    // Fallback to first session if none selected but sessions exist
+    if (_selectedSessionId == null && _sessions.isNotEmpty) {
+      _selectedSessionId = _sessions[0]['sessionId'];
+    }
+
+    if (_selectedSessionId == null) return {'date': '-', 'time': '-'};
+    final session = _sessions.firstWhere(
+      (s) => s['sessionId'] == _selectedSessionId,
+      orElse: () => null,
+    );
+    if (session == null) return {'date': '-', 'time': '-'};
+
+    try {
+      final date = DateFormat(
+        'd MMM y',
+      ).format(DateTime.parse(session['date']));
+      final time =
+          "${session['startTime'].substring(0, 5)} - ${session['endTime'].substring(0, 5)}";
+      return {'date': date, 'time': time};
+    } catch (_) {
+      return {'date': 'Invalid Date', 'time': 'Invalid Time'};
+    }
+  }
+
   Future<void> _handleRegister() async {
+    // Ensure a session is selected (fallback to first one)
+    if (_selectedSessionId == null && _sessions.isNotEmpty) {
+      _selectedSessionId = _sessions[0]['sessionId'];
+    }
+
     if (_selectedSessionId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please select a session time first")),
+        const SnackBar(content: Text("No session available to register")),
       );
       return;
     }
 
-    // ---------------------------------------------------------
-    // [NEW CODE START] เพิ่มส่วนนี้: ถามยืนยันก่อนสมัคร
-    // ---------------------------------------------------------
     final details = _getSelectedSessionDetails();
-
     final bool? confirm = await showDialog<bool>(
       context: context,
       builder: (context) => CustomConfirmDialog.success(
-        // Reuse Widget เดิม
         title: "Confirm Registration",
         subtitle:
             "Join '${_activityData!.name}'?\n\n📅 ${details['date']}\n⏰ ${details['time']}",
         confirmText: "Yes, Join",
-        onConfirm: () {
-          Navigator.pop(context, true); // ส่งค่า true กลับไป
-        },
+        onConfirm: () => Navigator.pop(context, true),
       ),
     );
 
-    if (confirm != true) return; // ถ้ากด Cancel หรือปิด Dialog ให้หยุดทำงาน
-    // ---------------------------------------------------------
-    // [NEW CODE END]
-    // ---------------------------------------------------------
+    if (confirm != true) return;
 
-    // Show Loading
     if (!mounted) return;
     showDialog(
       context: context,
@@ -227,34 +183,28 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      final empId = prefs.getString('empId') ?? '';
+      final String empId = prefs.getString('empId') ?? '';
 
-      // ยิง API จริง
       final response = await http.post(
         Uri.parse('$baseUrl/activities/register'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'emp_id': empId, 'session_id': _selectedSessionId}),
       );
 
-      if (mounted) Navigator.pop(context); // Close Loading
+      if (mounted) Navigator.pop(context);
 
       if (response.statusCode == 200) {
-        // Re-fetch to get updated data
         await _fetchDetail();
-
-        // Show Success (อันนี้คือตัวที่ Auto Close ถ้าอยากให้อยู่นานขึ้น ปรับ duration ได้)
         if (mounted) {
           await showDialog(
             context: context,
             barrierDismissible: false,
-            builder: (ctx) => AutoCloseSuccessDialog(
+            builder: (ctx) => const AutoCloseSuccessDialog(
               title: "Registration Confirmed! 🎉",
               subtitle: "You have successfully joined the activity.",
               icon: Icons.check_circle,
               color: Colors.green,
-              duration: const Duration(
-                seconds: 3,
-              ), // [OPTIONAL] เพิ่มเวลาจาก 2 เป็น 3 วิ
+              duration: Duration(seconds: 3),
             ),
           );
         }
@@ -279,12 +229,111 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     }
   }
 
+  Future<void> _handleUnregister() async {
+    // Ensure a session is selected for cancellation (fallback to first one)
+    if (_selectedSessionId == null && _sessions.isNotEmpty) {
+      _selectedSessionId = _sessions[0]['sessionId'];
+    }
+
+    if (_selectedSessionId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Cannot determine session to cancel")),
+      );
+      return;
+    }
+
+    final details = _getSelectedSessionDetails();
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => CustomConfirmDialog.danger(
+        title: "Cancel Registration?",
+        subtitle:
+            "You will unregister from '${_activityData!.name}'\nDate: ${details['date']} | Time: ${details['time']}",
+        confirmText: "Yes, Cancel",
+        onConfirm: () => Navigator.pop(context, true),
+      ),
+    );
+
+    if (confirm != true) return;
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final empId = prefs.getString('empId');
+
+      final response = await http.post(
+        Uri.parse('$baseUrl/activities/unregister'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'emp_id': empId, 'session_id': _selectedSessionId}),
+      );
+
+      if (mounted) Navigator.pop(context);
+
+      if (response.statusCode == 200) {
+        await _fetchDetail();
+        if (mounted) {
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (ctx) => const AutoCloseSuccessDialog(
+              title: "Cancellation Successful 🗑️",
+              subtitle: "You are no longer registered.",
+              icon: Icons.person_remove_alt_1_rounded,
+              color: Colors.orange,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      } else {
+        final errorData = json.decode(utf8.decode(response.bodyBytes));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorData['detail'] ?? "Cannot cancel"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  // Helper function to handle empty strings and nulls
+  String _display(String? value) {
+    if (value == null || value.trim().isEmpty || value == "null") return "-";
+    return value;
+  }
+
+  TimeOfDay _parseTime(String timeStr) {
+    try {
+      final parts = timeStr.split(":");
+      return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+    } catch (e) {
+      return const TimeOfDay(hour: 23, minute: 59);
+    }
+  }
+
+  // --- UI SECTION ---
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading)
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     if (_activityData == null)
-      return const Scaffold(body: Center(child: Text("Not found")));
+      return const Scaffold(body: Center(child: Text("Activity not found")));
 
     final act = _activityData!;
 
@@ -294,210 +343,147 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
         children: [
           CustomScrollView(
             slivers: [
+              // 1. Sliver App Bar with Image
               _buildSliverAppBar(act),
+
+              // 2. Content Body
               SliverToBoxAdapter(
-                child: Transform.translate(
-                  offset: const Offset(0, -20),
-                  child: Container(
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.vertical(
-                        top: Radius.circular(24),
-                      ),
-                    ),
-                    padding: const EdgeInsets.all(24.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildHeader(act),
-                        const SizedBox(height: 24),
-
-                        if (_sessions.isNotEmpty) ...[
-                          Text(
-                            "Select Session",
-                            style: GoogleFonts.poppins(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          _buildSessionSelector(),
-                          const SizedBox(height: 24),
-                          const Divider(),
-                          const SizedBox(height: 24),
-                        ],
-
-                        Wrap(
-                          spacing: 16,
-                          runSpacing: 16,
-                          children: [
-                            _buildInfoCard(
-                              Icons.person,
-                              "Speaker",
-                              act.guestSpeaker,
-                            ),
-                            _buildInfoCard(
-                              Icons.business,
-                              "Host",
-                              act.eventHost,
-                            ),
-                            _buildInfoCard(
-                              Icons.restaurant,
-                              "Food",
-                              act.foodInfo,
-                            ),
-                            _buildInfoCard(
-                              Icons.directions_bus,
-                              "Travel",
-                              act.travelInfo,
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 24),
-                        _buildSection(
-                          "Cost",
-                          act.participationFee,
-                          Icons.attach_money,
-                          isHighlight: true,
-                        ),
-                        _buildSection("Condition", act.condition, Icons.rule),
-
-                        // [NEW] Agenda Section (Timeline)
-                        if (act.agendaList.isNotEmpty) ...[
-                          const SizedBox(height: 24),
-                          Text(
-                            "Agenda",
-                            style: GoogleFonts.poppins(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          _buildAgendaTimeline(act.agendaList),
-                        ],
-
-                        const SizedBox(height: 24),
-                        Text(
-                          "Description",
-                          style: GoogleFonts.poppins(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          act.description,
-                          style: GoogleFonts.kanit(
-                            fontSize: 15,
-                            color: Colors.black87,
-                            height: 1.6,
-                          ),
-                        ),
-
-                        if (act.moreDetails != '-') ...[
-                          const SizedBox(height: 16),
-                          Text(
-                            "Note: ${act.moreDetails}",
-                            style: GoogleFonts.kanit(
-                              fontSize: 14,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-
-                        const SizedBox(height: 100),
-                      ],
+                child: Container(
+                  transform: Matrix4.translationValues(0, -10, 0),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(24),
                     ),
                   ),
-                ),
-              ),
-            ],
-          ),
-          Positioned(left: 0, right: 0, bottom: 0, child: _buildBottomBar(act)),
-        ],
-      ),
-    );
-  }
-
-  // [NEW WIDGET] Agenda Timeline
-  Widget _buildAgendaTimeline(List<AgendaItem> agendaList) {
-    return Column(
-      children: agendaList.asMap().entries.map((entry) {
-        final index = entry.key;
-        final item = entry.value;
-        final isLast = index == agendaList.length - 1;
-
-        return IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1. Time Column
-              SizedBox(
-                width: 60,
-                child: Text(
-                  item.time,
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
-                  textAlign: TextAlign.right,
-                ),
-              ),
-              const SizedBox(width: 12),
-
-              // 2. Timeline Line & Dot
-              Column(
-                children: [
-                  Container(
-                    width: 12,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF4A80FF),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.blue.withOpacity(0.3),
-                          blurRadius: 4,
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (!isLast)
-                    Expanded(
-                      child: Container(
-                        width: 2,
-                        color: Colors.grey.shade200,
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(width: 12),
-
-              // 3. Content Card
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 24.0),
+                  padding: const EdgeInsets.fromLTRB(
+                    24,
+                    32,
+                    24,
+                    120,
+                  ), // Bottom padding for action bar
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Header (Title, Type, Status)
+                      _buildHeader(act),
+                      const SizedBox(height: 24),
+
+                      // --- REMOVED SESSION SELECTOR UI HERE ---
+
+                      // Date & Location
+                      _buildTimeLocationInfo(act),
+                      const SizedBox(height: 24),
+
+                      // Detail Grid (Always visible now)
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          _buildInfoCard(
+                            Icons.person,
+                            "Speaker",
+                            _display(act.guestSpeaker),
+                          ),
+                          _buildInfoCard(
+                            Icons.business,
+                            "Host",
+                            _display(act.eventHost),
+                          ),
+                          _buildInfoCard(
+                            Icons.restaurant,
+                            "Food",
+                            _display(act.foodInfo),
+                          ),
+                          _buildInfoCard(
+                            Icons.directions_bus,
+                            "Travel",
+                            _display(act.travelInfo),
+                          ),
+                          _buildInfoCard(
+                            Icons.support_agent,
+                            "Contact",
+                            _display(act.organizerContact),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Cost & Max (Always visible)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildSection(
+                              "Cost",
+                              _display(
+                                act.participationFee,
+                              ), // Use _display helper
+                              Icons.attach_money,
+                              isHighlight: true,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildSection(
+                              "Max People",
+                              "${act.maxParticipants}",
+                              Icons.group,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      // Condition (Always visible)
+                      _buildSection(
+                        "Condition",
+                        _display(act.condition),
+                        Icons.rule,
+                      ),
+
+                      // Agenda
+                      const SizedBox(height: 24),
                       Text(
-                        item.title,
-                        style: GoogleFonts.kanit(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: const Color(0xFF375987),
+                        "Agenda",
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      if (item.detail.isNotEmpty) ...[
-                        const SizedBox(height: 4),
+                      const SizedBox(height: 16),
+                      if (act.agendaList.isNotEmpty)
+                        _buildAgendaTimeline(act.agendaList)
+                      else
                         Text(
-                          item.detail,
+                          "- No Agenda Provided -",
+                          style: GoogleFonts.inter(color: Colors.grey),
+                        ),
+
+                      // Description
+                      const SizedBox(height: 24),
+                      Text(
+                        "Description",
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _display(act.description),
+                        style: GoogleFonts.kanit(
+                          fontSize: 15,
+                          color: Colors.black87,
+                          height: 1.6,
+                        ),
+                      ),
+
+                      if (act.moreDetails != '-' &&
+                          act.moreDetails.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          "Note: ${act.moreDetails}",
                           style: GoogleFonts.kanit(
-                            fontSize: 13,
+                            fontSize: 14,
                             color: Colors.grey[600],
                           ),
                         ),
@@ -508,21 +494,51 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
               ),
             ],
           ),
-        );
-      }).toList(),
+
+          // 3. Bottom Action Bar (Register/Cancel)
+          Positioned(left: 0, right: 0, bottom: 0, child: _buildBottomBar(act)),
+        ],
+      ),
     );
   }
 
-  // ... (Widgets อื่นๆ: _buildSliverAppBar, _buildHeader, _buildSessionSelector, _buildBottomBar, _buildInfoCard, _buildSection ใช้โค้ดเดิม)
-  // เพื่อความกระชับ ผมขอละไว้ (ท่านสามารถ copy จากไฟล์เดิมมาแปะต่อได้เลยครับ)
+  // --- WIDGET COMPONENTS ---
 
   Widget _buildSliverAppBar(Activity act) {
     final images = act.attachments.where((a) => a.type == 'IMAGE').toList();
 
     return SliverAppBar(
-      expandedHeight: 250,
+      expandedHeight: 280,
       pinned: true,
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFF4A80FF),
+      leading: Container(
+        margin: const EdgeInsets.all(8),
+        decoration: const BoxDecoration(
+          color: Colors.black26,
+          shape: BoxShape.circle,
+        ),
+        child: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      actions: [
+        // Favorite Button on AppBar
+        Container(
+          margin: const EdgeInsets.all(8),
+          decoration: const BoxDecoration(
+            color: Colors.black26,
+            shape: BoxShape.circle,
+          ),
+          child: IconButton(
+            icon: Icon(
+              act.isFavorite ? Icons.favorite : Icons.favorite_border,
+              color: act.isFavorite ? Colors.redAccent : Colors.white,
+            ),
+            onPressed: _toggleFavorite,
+          ),
+        ),
+      ],
       flexibleSpace: FlexibleSpaceBar(
         background: images.isNotEmpty
             ? PageView.builder(
@@ -533,11 +549,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => Container(
                       color: Colors.grey[300],
-                      child: const Icon(
-                        Icons.broken_image,
-                        size: 50,
-                        color: Colors.grey,
-                      ),
+                      child: const Icon(Icons.image_not_supported),
                     ),
                   );
                 },
@@ -546,46 +558,13 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
                     colors: [Color(0xFF4A80FF), Color(0xFF2D5BFF)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
                   ),
                 ),
-                child: Center(
-                  child: Icon(
-                    Icons.image,
-                    size: 80,
-                    color: Colors.white.withOpacity(0.5),
-                  ),
+                child: const Center(
+                  child: Icon(Icons.image, size: 80, color: Colors.white54),
                 ),
               ),
       ),
-      leading: Container(
-        margin: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.9),
-          shape: BoxShape.circle,
-        ),
-        child: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      actions: [
-        Container(
-          margin: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.9),
-            shape: BoxShape.circle,
-          ),
-          child: IconButton(
-            icon: Icon(
-              act.isFavorite ? Icons.favorite : Icons.favorite_border,
-              color: act.isFavorite ? Colors.red : Colors.grey,
-            ),
-            onPressed: _toggleFavorite,
-          ),
-        ),
-      ],
     );
   }
 
@@ -595,13 +574,11 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
       children: [
         Row(
           children: [
-            Chip(
-              label: Text(act.actType),
-              backgroundColor: Colors.blue[50],
-              labelStyle: GoogleFonts.poppins(
-                color: Colors.blue[700],
-                fontSize: 11,
-              ),
+            _buildTag(act.actType, Colors.blue),
+            const SizedBox(width: 8),
+            _buildTag(
+              act.status,
+              act.status == 'Open' ? Colors.green : Colors.red,
             ),
             const Spacer(),
             Container(
@@ -626,7 +603,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 16),
         Text(
           act.name,
           style: GoogleFonts.kanit(
@@ -636,152 +613,286 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
           ),
         ),
         const SizedBox(height: 8),
-        Row(
-          children: [
-            const Icon(Icons.location_on, size: 16, color: Colors.grey),
-            const SizedBox(width: 4),
-            Text(
-              act.location,
-              style: GoogleFonts.kanit(color: Colors.grey[700]),
-            ),
-          ],
+        Text(
+          "${act.currentParticipants} / ${act.maxParticipants} Registered",
+          style: GoogleFonts.inter(
+            color: Colors.grey[600],
+            fontWeight: FontWeight.w500,
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildSessionSelector() {
-    if (_sessions.isEmpty) return const Text("No sessions available");
-    return Column(
-      children: _sessions
-          .map(
-            (s) => RadioListTile(
-              value: s['sessionId'],
-              groupValue: _selectedSessionId,
-              onChanged: (v) =>
-                  setState(() => _selectedSessionId = v.toString()),
-              title: Text(
-                DateFormat('EEE, d MMM y').format(DateTime.parse(s['date'])),
-              ),
-              subtitle: Text(
-                "${s['startTime'].substring(0, 5)} - ${s['endTime'].substring(0, 5)}",
-              ),
-              activeColor: const Color(0xFF4A80FF),
-              contentPadding: EdgeInsets.zero,
-            ),
-          )
-          .toList(),
+  Widget _buildTag(String text, MaterialColor color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color[50],
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        text.toUpperCase(),
+        style: GoogleFonts.poppins(
+          color: color[700],
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 
-  // [MODIFIED] อัปเดต _handleUnregister ให้ใช้ CustomConfirmDialog และ AutoCloseSuccessDialog
-  Future<void> _handleUnregister() async {
-    final details = _getSelectedSessionDetails();
+  // --- REMOVED: _buildSessionSelector() ---
 
-    // 1. [NEW UX] Custom Confirm Dialog with Details
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => CustomConfirmDialog.danger(
-        title: "Cancel Registration?",
-        subtitle:
-            "You will unregister from '${_activityData!.name}'\nDate: ${details['date']} | Time: ${details['time']}",
-        confirmText: "Yes, Cancel",
-        onConfirm: () => Navigator.pop(context, true),
+  Widget _buildTimeLocationInfo(Activity act) {
+    // Using first session date for display if multiple (as fallback)
+    String dateDisplay = DateFormat('d MMM y').format(act.activityDate);
+    String timeDisplay = "${act.startTime} - ${act.endTime}";
+
+    if (_sessions.isNotEmpty) {
+      final firstSession = _sessions[0];
+      try {
+        dateDisplay = DateFormat(
+          'd MMM y',
+        ).format(DateTime.parse(firstSession['date']));
+        timeDisplay =
+            "${firstSession['startTime'].substring(0, 5)} - ${firstSession['endTime'].substring(0, 5)}";
+      } catch (_) {}
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.calendar_today,
+                      size: 16,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      dateDisplay,
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    const Icon(Icons.access_time, size: 16, color: Colors.grey),
+                    const SizedBox(width: 8),
+                    Text(
+                      timeDisplay,
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Container(width: 1, height: 40, color: Colors.grey[300]),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Row(
+              children: [
+                const Icon(Icons.place, size: 16, color: Colors.red),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    act.location,
+                    style: GoogleFonts.kanit(fontWeight: FontWeight.w600),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
+  }
 
-    if (confirm != true) return; // Exit if not confirmed
-
-    // 2. Loading
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+  Widget _buildInfoCard(IconData icon, String label, String value) {
+    // MODIFIED: Always show the card. The value is already processed by _display().
+    final width = (MediaQuery.of(context).size.width - 48 - 12) / 2;
+    return Container(
+      width: width,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: Colors.grey[600]),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: Colors.grey[500],
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: GoogleFonts.kanit(fontSize: 13, fontWeight: FontWeight.w500),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
     );
+  }
 
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final empId = prefs.getString('empId');
-
-      if (_selectedSessionId == null) {
-        if (mounted) Navigator.pop(context); // Close Loading
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Please select a session to cancel")),
-        );
-        return;
-      }
-
-      final response = await http.post(
-        Uri.parse('$baseUrl/activities/unregister'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'emp_id': empId, 'session_id': _selectedSessionId}),
-      );
-
-      if (response.statusCode == 200) {
-        if (mounted) Navigator.pop(context); // Close Loading
-
-        await _fetchDetail(); // Re-fetch to get updated data
-
-        // [NEW UX] Use AutoCloseSuccessDialog
-        if (mounted) {
-          await showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (ctx) => AutoCloseSuccessDialog(
-              title: "Cancellation Successful 🗑️",
-              subtitle:
-                  "You are no longer registered for '${_activityData!.name}'",
-              icon: Icons.person_remove_alt_1_rounded,
-              color: Colors.orange,
-              duration: const Duration(seconds: 3),
+  Widget _buildSection(
+    String label,
+    String value,
+    IconData icon, {
+    bool isHighlight = false,
+  }) {
+    // MODIFIED: Always show the section.
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isHighlight ? const Color(0xFFF0FDF4) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isHighlight ? Colors.green.shade200 : Colors.grey.shade200,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 20,
+            color: isHighlight ? Colors.green[700] : Colors.grey[600],
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: GoogleFonts.inter(
+                    fontSize: 10,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                Text(
+                  value,
+                  style: GoogleFonts.kanit(
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
-          );
-        }
-        // if (mounted) Navigator.pop(context, true); // Close detail page (Optional)
-      } else {
-        if (mounted) Navigator.pop(context); // Close Loading
-        // [UPDATED] แสดงเหตุผลที่ Backend ตีกลับมา
-        try {
-          final errorData = json.decode(utf8.decode(response.bodyBytes));
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(errorData['detail'] ?? "Cannot cancel"),
-                backgroundColor: Colors.red,
-                duration: const Duration(seconds: 3),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAgendaTimeline(List<AgendaItem> agendaList) {
+    return Column(
+      children: agendaList.asMap().entries.map((entry) {
+        final isLast = entry.key == agendaList.length - 1;
+        return IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 50,
+                child: Text(
+                  entry.value.time,
+                  textAlign: TextAlign.right,
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
-            );
-          }
-        } catch (_) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text("Failed: ${response.body}"),
-                backgroundColor: Colors.red,
+              const SizedBox(width: 12),
+              Column(
+                children: [
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF4A80FF),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  if (!isLast)
+                    Expanded(
+                      child: Container(width: 2, color: Colors.grey[200]),
+                    ),
+                ],
               ),
-            );
-          }
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        if (Navigator.canPop(context)) Navigator.pop(context);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Error: $e")));
-      }
-    }
+              const SizedBox(width: 12),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        entry.value.title,
+                        style: GoogleFonts.kanit(fontWeight: FontWeight.w600),
+                      ),
+                      if (entry.value.detail.isNotEmpty)
+                        Text(
+                          entry.value.detail,
+                          style: GoogleFonts.kanit(
+                            fontSize: 13,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
   }
 
   Widget _buildBottomBar(Activity act) {
-    // --- [NEW LOGIC] 1. ตรวจสอบว่ากิจกรรมจบหรือยัง ---
+    // Check if activity is expired
     bool isExpired = false;
     try {
-      // รวมวันที่และเวลาสิ้นสุดเข้าด้วยกัน
       final DateTime actDate = act.activityDate;
       final TimeOfDay endTime = _parseTime(act.endTime);
-
       final DateTime endDateTime = DateTime(
         actDate.year,
         actDate.month,
@@ -789,37 +900,24 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
         endTime.hour,
         endTime.minute,
       );
-
-      // ถ้าเวลาปัจจุบัน เลยเวลาจบกิจกรรมไปแล้ว = Expired
-      if (DateTime.now().isAfter(endDateTime)) {
+      if (DateTime.now().isAfter(endDateTime)) isExpired = true;
+    } catch (_) {
+      if (DateTime.now().isAfter(act.activityDate.add(const Duration(days: 1))))
         isExpired = true;
-      }
-    } catch (e) {
-      // กรณี parse เวลาผิดพลาด ให้ยึดตามวันที่
-      if (DateTime.now().isAfter(
-        act.activityDate.add(const Duration(days: 1)),
-      )) {
-        isExpired = true;
-      }
     }
 
-    // --- [NEW UI] 2. ถ้ากิจกรรมจบแล้ว (History / Missed) ---
+    // State: Expired / Completed
     if (isExpired) {
-      // เช็คสถานะย่อย: ถ้าลงทะเบียนไว้แต่จบแล้ว = Completed หรือ Missed
-      // (ในที่นี้ขอแสดงรวมๆ ว่า Ended เพื่อความปลอดภัย หรือปรับตาม Business Logic)
-
-      String label = "Activity Ended";
-      Color bgColor = Colors.grey.shade100;
-      Color textColor = Colors.grey.shade600;
-      IconData icon = Icons.event_busy;
-
-      if (act.isRegistered) {
-        // ถ้าเคยลงทะเบียนไว้แล้วจบแล้ว
-        label = "Activity Completed"; // หรือ Joined
-        bgColor = Colors.grey.shade200;
-        textColor = Colors.grey.shade700;
-        icon = Icons.check_circle_outline;
-      }
+      String label = act.isRegistered ? "Activity Completed" : "Activity Ended";
+      Color bgColor = act.isRegistered
+          ? Colors.green.shade50
+          : Colors.grey.shade100;
+      Color textColor = act.isRegistered
+          ? Colors.green.shade700
+          : Colors.grey.shade600;
+      IconData icon = act.isRegistered
+          ? Icons.check_circle_outline
+          : Icons.event_busy;
 
       return Container(
         padding: const EdgeInsets.all(20),
@@ -841,7 +939,6 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
             decoration: BoxDecoration(
               color: bgColor,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey.shade300),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -863,11 +960,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
       );
     }
 
-    // ---------------------------------------------------------
-    // ด้านล่างคือ Logic เดิมสำหรับกิจกรรมที่ยังไม่จบ (Upcoming)
-    // ---------------------------------------------------------
-
-    // กรณีที่ 0: กิจกรรมบังคับ (Compulsory)
+    // State: Compulsory (Mandatory)
     if (act.isCompulsory) {
       return Container(
         padding: const EdgeInsets.all(20),
@@ -911,7 +1004,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
       );
     }
 
-    // กรณีที่ 1: ลงทะเบียนแล้ว (และยังไม่จบ)
+    // State: Registered
     if (act.isRegistered) {
       return Container(
         padding: const EdgeInsets.all(20),
@@ -954,8 +1047,6 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                 ),
               ),
               const SizedBox(width: 12),
-
-              // ปุ่มยกเลิก (แสดงเฉพาะตอนยังไม่จบ)
               InkWell(
                 onTap: _handleUnregister,
                 borderRadius: BorderRadius.circular(12),
@@ -978,7 +1069,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
       );
     }
 
-    // กรณีที่ 2: ยังไม่ลงทะเบียน (และยังไม่จบ)
+    // State: Register Now
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -1001,9 +1092,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
-            elevation: 0,
             disabledBackgroundColor: Colors.grey.shade300,
-            disabledForegroundColor: Colors.grey.shade600,
           ),
           child: Text(
             act.status == 'Full' ? "Fully Booked" : "Register Now",
@@ -1014,109 +1103,6 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  // Helper สำหรับแปลงเวลา String เป็น TimeOfDay (ถ้ายังไม่มีใน class ให้เพิ่มเข้าไปครับ)
-  TimeOfDay _parseTime(String timeStr) {
-    try {
-      final parts = timeStr.split(":");
-      return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
-    } catch (e) {
-      return const TimeOfDay(hour: 23, minute: 59); // Default end of day
-    }
-  }
-
-  Widget _buildInfoCard(IconData icon, String label, String value) {
-    if (value == "-" || value.isEmpty) return const SizedBox.shrink();
-    final width = (MediaQuery.of(context).size.width - 48 - 16) / 2;
-    return Container(
-      width: width,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF9FAFB),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: Colors.grey[600]),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: GoogleFonts.poppins(
-                  fontSize: 11,
-                  color: Colors.grey[500],
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: GoogleFonts.kanit(
-              fontSize: 13,
-              color: Colors.black87,
-              fontWeight: FontWeight.w500,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSection(
-    String label,
-    String value,
-    IconData icon, {
-    bool isHighlight = false,
-  }) {
-    if (value == "-" || value.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: isHighlight ? Colors.green[50] : Colors.blue[50],
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              icon,
-              size: 20,
-              color: isHighlight ? Colors.green : Colors.blue,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  color: Colors.grey[500],
-                ),
-              ),
-              Text(
-                value,
-                style: GoogleFonts.kanit(
-                  fontSize: 15,
-                  color: Colors.black87,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }
