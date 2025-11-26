@@ -18,9 +18,24 @@ class AdminMainScreen extends StatefulWidget {
 class _AdminMainScreenState extends State<AdminMainScreen> {
   int _selectedIndex = 0;
 
+  final GlobalKey<AdminRewardManagementScreenState> _rewardScreenKey =
+      GlobalKey();
+
   void _switchTab(int index) {
     setState(() {
       _selectedIndex = index;
+    });
+  }
+
+  // [2] ฟังก์ชันพิเศษสำหรับ Deep Link ไปที่ Requests Tab
+  void _navigateToPendingRequests() {
+    setState(() {
+      _selectedIndex = 2; // 1. สลับไปหน้า Rewards (Index 2)
+    });
+
+    // 2. สั่งให้หน้า Rewards สลับไป Tab "Requests" (ต้องรอเฟรมถัดไปนิดนึงเพื่อให้ Widget สร้างเสร็จ)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _rewardScreenKey.currentState?.switchToRequestsTab();
     });
   }
 
@@ -29,9 +44,14 @@ class _AdminMainScreenState extends State<AdminMainScreen> {
     const Color primaryColor = Color(0xFF4A80FF);
 
     final List<Widget> screens = [
-      AdminDashboardScreen(onSwitchTab: _switchTab),
+      // [3] ส่ง Callback ไปให้ Dashboard
+      AdminDashboardScreen(
+        onSwitchTab: _switchTab,
+        onGoToRequests: _navigateToPendingRequests,
+      ),
       const AdminEmployeeListScreen(),
-      const AdminRewardManagementScreen(),
+      // [4] ผูก Key ใส่หน้า Rewards
+      AdminRewardManagementScreen(key: _rewardScreenKey),
       const AdminProfileScreen(),
     ];
 

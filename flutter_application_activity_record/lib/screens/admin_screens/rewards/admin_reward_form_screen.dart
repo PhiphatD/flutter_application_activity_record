@@ -4,6 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../services/admin_service.dart';
+import '../../../widgets/custom_confirm_dialog.dart';
+import '../../../widgets/auto_close_success_dialog.dart';
 
 class AdminRewardFormScreen extends StatefulWidget {
   final Map<String, dynamic>? reward;
@@ -15,18 +17,21 @@ class AdminRewardFormScreen extends StatefulWidget {
 
 class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
   final _formKey = GlobalKey<FormState>();
+
+  // Controllers
   final _nameCtrl = TextEditingController();
   final _pointsCtrl = TextEditingController();
   final _stockCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _instructionCtrl = TextEditingController();
-
-  // Image State
   final _urlInputCtrl = TextEditingController();
-  List<String> _imageUrls = []; // รูปที่เป็น URL อยู่แล้ว (จาก DB หรือกรอกเอง)
-  List<File> _newImages = []; // รูปใหม่ที่เลือกจากเครื่อง (รออัปโหลด)
 
-  String _selectedType = "Physical";
+  // Data State
+  List<String> _imageUrls = [];
+  List<File> _newImages = [];
+
+  // Dropdown Data
+  String _selectedType = "Physical"; // Default Value
   final List<String> _types = ["Physical", "Digital", "Privilege"];
 
   bool _isSaving = false;
@@ -37,25 +42,27 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
   void initState() {
     super.initState();
     if (widget.reward != null) {
-      final r = widget.reward!;
-      _nameCtrl.text = r['name'];
-      _pointsCtrl.text = r['pointCost'].toString();
-      _stockCtrl.text = r['stock'].toString();
-      _descCtrl.text = r['description'] ?? '';
-      _selectedType = r['prizeType'] ?? "Physical";
-      _instructionCtrl.text = r['pickupInstruction'] ?? "";
-
-      // Load existing images
-      if (r['images'] != null) {
-        _imageUrls = List<String>.from(r['images']);
-      } else if (r['image'] != null && r['image'].toString().isNotEmpty) {
-        // Legacy support
-        _imageUrls.add(r['image']);
-      }
+      _loadExistingData();
     }
   }
 
-  // ฟังก์ชันเพิ่ม URL
+  void _loadExistingData() {
+    final r = widget.reward!;
+    _nameCtrl.text = r['name'];
+    _pointsCtrl.text = r['pointCost'].toString();
+    _stockCtrl.text = r['stock'].toString();
+    _descCtrl.text = r['description'] ?? '';
+    _selectedType = r['prizeType'] ?? "Physical";
+    _instructionCtrl.text = r['pickupInstruction'] ?? "";
+
+    if (r['images'] != null) {
+      _imageUrls = List<String>.from(r['images']);
+    } else if (r['image'] != null && r['image'].toString().isNotEmpty) {
+      _imageUrls.add(r['image']);
+    }
+  }
+
+  // --- Image Logic ---
   void _addUrlImage() {
     if (_urlInputCtrl.text.isNotEmpty) {
       if (_totalImages >= 10) {
@@ -69,26 +76,23 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
     }
   }
 
-  // ฟังก์ชันเลือกรูปจากเครื่อง
   Future<void> _pickImages() async {
     if (_totalImages >= 10) {
       _showError("Maximum 10 images allowed.");
       return;
     }
-
     final List<XFile> picked = await _picker.pickMultiImage(
-      limit: 10 - _totalImages, // จำกัดจำนวนที่เลือกได้
+      limit: 10 - _totalImages,
     );
-
-    if (picked.isNotEmpty) {
+    if (picked.isNotEmpty)
       setState(() {
         _newImages.addAll(picked.map((e) => File(e.path)));
       });
-    }
   }
 
   int get _totalImages => _imageUrls.length + _newImages.length;
 
+  // --- Submit Logic ---
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     if (_totalImages == 0) {
@@ -99,31 +103,26 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
     setState(() => _isSaving = true);
 
     try {
-      // 1. Upload New Images First
+      // 1. Upload Images
       List<String> finalImages = List.from(_imageUrls);
-
       for (var file in _newImages) {
         String? uploadedUrl = await _service.uploadImage(file);
-        if (uploadedUrl != null) {
-          finalImages.add(uploadedUrl);
-        }
+        if (uploadedUrl != null) finalImages.add(uploadedUrl);
       }
 
-      // 2. Prepare Payload
       final prefs = await SharedPreferences.getInstance();
       final adminId = prefs.getString('empId') ?? '';
 
       final data = {
-        "name": _nameCtrl.text,
+        "name": _nameCtrl.text.trim(),
         "point_cost": int.parse(_pointsCtrl.text),
         "stock": int.parse(_stockCtrl.text),
-        "description": _descCtrl.text,
-        "images": finalImages, // ส่งเป็น List
+        "description": _descCtrl.text.trim(),
+        "images": finalImages,
         "prize_type": _selectedType,
-        "pickup_instruction": _instructionCtrl.text,
+        "pickup_instruction": _instructionCtrl.text.trim(),
       };
 
-      // 3. Call API
       bool success;
       if (widget.reward == null) {
         success = await _service.createReward(adminId, data);
@@ -137,13 +136,17 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
 
       if (mounted) {
         if (success) {
-          Navigator.pop(context, true);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Saved successfully"),
-              backgroundColor: Colors.green,
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => const AutoCloseSuccessDialog(
+              title: "Saved Successfully",
+              subtitle: "Reward data has been updated.",
+              icon: Icons.check_circle,
+              color: Colors.green,
             ),
           );
+          Navigator.pop(context, true);
         } else {
           _showError("Failed to save reward.");
         }
@@ -164,42 +167,39 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
   void _confirmDelete() {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Delete Reward?"),
-        content: const Text("This item will be hidden from employees."),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel"),
-          ),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(ctx); // ปิด Dialog
-              setState(() => _isSaving = true);
+      builder: (ctx) => CustomConfirmDialog.danger(
+        title: "Delete Reward?",
+        subtitle: "This item will be hidden. Cannot undo.",
+        confirmText: "Yes, Delete",
+        onConfirm: () async {
+          Navigator.pop(ctx);
+          setState(() => _isSaving = true);
+          final prefs = await SharedPreferences.getInstance();
+          final adminId = prefs.getString('empId') ?? '';
+          final success = await _service.deleteReward(
+            adminId,
+            widget.reward!['id'],
+          );
 
-              final prefs = await SharedPreferences.getInstance();
-              final adminId = prefs.getString('empId') ?? '';
-
-              // เรียก Service ลบ
-              final success = await _service.deleteReward(
-                adminId,
-                widget.reward!['id'],
+          if (mounted) {
+            if (success) {
+              await showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (_) => const AutoCloseSuccessDialog(
+                  title: "Deleted",
+                  subtitle: "Reward removed.",
+                  icon: Icons.delete,
+                  color: Colors.red,
+                ),
               );
-
-              if (mounted) {
-                if (success) {
-                  Navigator.pop(context, true); // กลับหน้าหลักและรีเฟรช
-                } else {
-                  setState(() => _isSaving = false);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Failed to delete")),
-                  );
-                }
-              }
-            },
-            child: const Text("Delete", style: TextStyle(color: Colors.red)),
-          ),
-        ],
+              Navigator.pop(context, true);
+            } else {
+              setState(() => _isSaving = false);
+              _showError("Failed to delete");
+            }
+          }
+        },
       ),
     );
   }
@@ -207,8 +207,11 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.reward != null;
+    // [CORE FIX] ใช้ MediaQuery เพื่อหาพื้นที่ Safe Area ด้านล่าง
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
         title: Text(
           isEdit ? "Edit Reward" : "New Reward",
@@ -228,8 +231,9 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
             ),
         ],
       ),
+      // [CORE FIX] ปรับ Bottom Bar ให้รองรับ Safe Area
       bottomNavigationBar: Container(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.fromLTRB(20, 16, 20, 16 + bottomPadding),
         decoration: BoxDecoration(
           color: Colors.white,
           boxShadow: [
@@ -249,6 +253,7 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
+              elevation: 0,
             ),
             child: _isSaving
                 ? const CircularProgressIndicator(color: Colors.white)
@@ -257,6 +262,7 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
                     style: GoogleFonts.poppins(
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
+                      fontSize: 16,
                     ),
                   ),
           ),
@@ -278,7 +284,10 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
               _buildCardForm([
                 _buildTextField("Reward Name", _nameCtrl, required: true),
                 const SizedBox(height: 16),
+
+                // Row for Points & Stock
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: _buildTextField(
@@ -300,14 +309,11 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  value: _selectedType,
-                  items: _types
-                      .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                      .toList(),
-                  onChanged: (v) => setState(() => _selectedType = v!),
-                  decoration: _inputDecoration("Type"),
-                ),
+
+                // [NEW UI] Modern Dropdown for Type
+                _buildModernDropdown("Type", _selectedType, _types, (val) {
+                  if (val != null) setState(() => _selectedType = val);
+                }),
               ]),
 
               const SizedBox(height: 24),
@@ -321,6 +327,9 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
                   hint: "e.g. Contact HR at 2nd Floor",
                 ),
               ]),
+
+              // เพิ่มพื้นที่ว่างด้านล่างกันตกขอบ
+              const SizedBox(height: 40),
             ],
           ),
         ),
@@ -328,11 +337,11 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
     );
   }
 
-  // [NEW UI] ส่วนจัดการรูปภาพ (แสดงรูป + ปุ่มเพิ่ม)
+  // --- UI Helpers ---
+
   Widget _buildImageManager() {
     return Column(
       children: [
-        // Input URL
         Row(
           children: [
             Expanded(
@@ -362,8 +371,6 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
           ],
         ),
         const SizedBox(height: 16),
-
-        // Image Grid
         if (_totalImages > 0)
           GridView.builder(
             shrinkWrap: true,
@@ -376,13 +383,11 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
             ),
             itemCount: _totalImages,
             itemBuilder: (context, index) {
-              // Logic: แสดง URL ก่อน แล้วตามด้วย File
               final bool isUrl = index < _imageUrls.length;
               final imageProvider = isUrl
                   ? NetworkImage(_imageUrls[index])
                   : FileImage(_newImages[index - _imageUrls.length])
                         as ImageProvider;
-
               return Stack(
                 children: [
                   Container(
@@ -399,15 +404,12 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
                     top: 4,
                     right: 4,
                     child: GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          if (isUrl) {
-                            _imageUrls.removeAt(index);
-                          } else {
-                            _newImages.removeAt(index - _imageUrls.length);
-                          }
-                        });
-                      },
+                      onTap: () => setState(() {
+                        if (isUrl)
+                          _imageUrls.removeAt(index);
+                        else
+                          _newImages.removeAt(index - _imageUrls.length);
+                      }),
                       child: Container(
                         padding: const EdgeInsets.all(4),
                         decoration: const BoxDecoration(
@@ -422,7 +424,7 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
                       ),
                     ),
                   ),
-                  if (!isUrl) // Badge for New Upload
+                  if (!isUrl)
                     Positioned(
                       bottom: 4,
                       left: 4,
@@ -454,10 +456,7 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
             height: 100,
             width: double.infinity,
             decoration: BoxDecoration(
-              border: Border.all(
-                color: Colors.grey.shade300,
-                style: BorderStyle.solid,
-              ),
+              border: Border.all(color: Colors.grey.shade300),
               borderRadius: BorderRadius.circular(12),
               color: Colors.white,
             ),
@@ -478,12 +477,15 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
   }
 
   Widget _buildSectionTitle(String title) {
-    return Text(
-      title,
-      style: GoogleFonts.poppins(
-        fontSize: 16,
-        fontWeight: FontWeight.w600,
-        color: Colors.black87,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12, left: 4),
+      child: Text(
+        title,
+        style: GoogleFonts.poppins(
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          color: Colors.black87,
+        ),
       ),
     );
   }
@@ -502,22 +504,7 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
     );
   }
 
-  InputDecoration _inputDecoration(String label, {String? hint}) {
-    return InputDecoration(
-      labelText: label,
-      hintText: hint,
-      hintStyle: GoogleFonts.poppins(color: Colors.grey[400]),
-      labelStyle: GoogleFonts.poppins(color: Colors.grey[600]),
-      filled: true,
-      fillColor: Colors.grey[50],
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide.none,
-      ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-    );
-  }
-
+  // [NEW] Modern TextField Style (Reuse from Employee Edit)
   Widget _buildTextField(
     String label,
     TextEditingController ctrl, {
@@ -526,14 +513,104 @@ class _AdminRewardFormScreenState extends State<AdminRewardFormScreen> {
     bool required = false,
     String? hint,
   }) {
-    return TextFormField(
-      controller: ctrl,
-      keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-      maxLines: maxLines,
-      validator: required
-          ? (v) => v == null || v.isEmpty ? "Required" : null
-          : null,
-      decoration: _inputDecoration(label, hint: hint),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (label.isNotEmpty) ...[
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: Colors.grey[600],
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 6),
+        ],
+        TextFormField(
+          controller: ctrl,
+          keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+          maxLines: maxLines,
+          validator: required
+              ? (v) => v == null || v.isEmpty ? "Required" : null
+              : null,
+          style: GoogleFonts.poppins(fontSize: 14),
+          decoration: InputDecoration(
+            hintText: hint,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 14,
+            ),
+            filled: true,
+            fillColor: const Color(0xFFF9FAFB),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: Colors.grey.shade200),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF4A80FF)),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // [NEW] Modern Dropdown Widget
+  Widget _buildModernDropdown(
+    String label,
+    String value,
+    List<String> items,
+    Function(String?) onChanged,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 12,
+            color: Colors.grey[600],
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade300),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: items.contains(value) ? value : null,
+              isExpanded: true,
+              icon: const Icon(
+                Icons.keyboard_arrow_down_rounded,
+                color: Colors.grey,
+              ),
+              style: GoogleFonts.poppins(color: Colors.black87, fontSize: 14),
+              items: items
+                  .map(
+                    (e) => DropdownMenuItem(
+                      value: e,
+                      child: Text(e, style: GoogleFonts.poppins(fontSize: 14)),
+                    ),
+                  )
+                  .toList(),
+              onChanged: onChanged,
+              dropdownColor: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

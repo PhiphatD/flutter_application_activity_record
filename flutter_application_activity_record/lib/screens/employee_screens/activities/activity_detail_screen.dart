@@ -83,7 +83,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
             _activityData = act;
             _sessions = data['sessions'] ?? [];
 
-            // Auto-select first session if available
+            // Auto-select first session logic (Important since UI is removed)
             if (_sessions.isNotEmpty) {
               _selectedSessionId = _sessions[0]['sessionId'];
             }
@@ -123,7 +123,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
   }
 
   Map<String, String> _getSelectedSessionDetails() {
-    // Fallback to first session if none selected but sessions exist
+    // Fallback: Always use the first session if none selected
     if (_selectedSessionId == null && _sessions.isNotEmpty) {
       _selectedSessionId = _sessions[0]['sessionId'];
     }
@@ -148,7 +148,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
   }
 
   Future<void> _handleRegister() async {
-    // Ensure a session is selected (fallback to first one)
+    // Auto-select first session if needed
     if (_selectedSessionId == null && _sessions.isNotEmpty) {
       _selectedSessionId = _sessions[0]['sessionId'];
     }
@@ -230,7 +230,6 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
   }
 
   Future<void> _handleUnregister() async {
-    // Ensure a session is selected for cancellation (fallback to first one)
     if (_selectedSessionId == null && _sessions.isNotEmpty) {
       _selectedSessionId = _sessions[0]['sessionId'];
     }
@@ -311,8 +310,8 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     }
   }
 
-  // Helper function to handle empty strings and nulls
   String _display(String? value) {
+    // Ensure we return "-" if value is null or empty
     if (value == null || value.trim().isEmpty || value == "null") return "-";
     return value;
   }
@@ -356,12 +355,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                       top: Radius.circular(24),
                     ),
                   ),
-                  padding: const EdgeInsets.fromLTRB(
-                    24,
-                    32,
-                    24,
-                    120,
-                  ), // Bottom padding for action bar
+                  padding: const EdgeInsets.fromLTRB(24, 32, 24, 120),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -369,13 +363,16 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                       _buildHeader(act),
                       const SizedBox(height: 24),
 
-                      // --- REMOVED SESSION SELECTOR UI HERE ---
+                      // [REMOVED] Session Selector UI (Gone as requested)
+                      // Just a Divider to separate
+                      const Divider(),
+                      const SizedBox(height: 24),
 
                       // Date & Location
                       _buildTimeLocationInfo(act),
                       const SizedBox(height: 24),
 
-                      // Detail Grid (Always visible now)
+                      // Detail Grid (Expanded)
                       Wrap(
                         spacing: 12,
                         runSpacing: 12,
@@ -405,21 +402,26 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                             "Contact",
                             _display(act.organizerContact),
                           ),
+                          // [ADDED] Dept Card
+                          _buildInfoCard(
+                            Icons.domain,
+                            "Dept",
+                            _display(act.department),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 24),
 
-                      // Cost & Max (Always visible)
+                      // Cost & Max (Removed Highlight)
                       Row(
                         children: [
                           Expanded(
                             child: _buildSection(
                               "Cost",
-                              _display(
-                                act.participationFee,
-                              ), // Use _display helper
+                              _display(act.participationFee),
                               Icons.attach_money,
-                              isHighlight: true,
+                              isHighlight:
+                                  false, // [UPDATED] No Green Highlight
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -433,7 +435,6 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      // Condition (Always visible)
                       _buildSection(
                         "Condition",
                         _display(act.condition),
@@ -495,7 +496,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
             ],
           ),
 
-          // 3. Bottom Action Bar (Register/Cancel)
+          // 3. Bottom Action Bar
           Positioned(left: 0, right: 0, bottom: 0, child: _buildBottomBar(act)),
         ],
       ),
@@ -523,7 +524,6 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
         ),
       ),
       actions: [
-        // Favorite Button on AppBar
         Container(
           margin: const EdgeInsets.all(8),
           decoration: const BoxDecoration(
@@ -642,10 +642,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     );
   }
 
-  // --- REMOVED: _buildSessionSelector() ---
-
   Widget _buildTimeLocationInfo(Activity act) {
-    // Using first session date for display if multiple (as fallback)
     String dateDisplay = DateFormat('d MMM y').format(act.activityDate);
     String timeDisplay = "${act.startTime} - ${act.endTime}";
 
@@ -724,7 +721,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
   }
 
   Widget _buildInfoCard(IconData icon, String label, String value) {
-    // MODIFIED: Always show the card. The value is already processed by _display().
+    // Show even if empty (will show "-")
     final width = (MediaQuery.of(context).size.width - 48 - 12) / 2;
     return Container(
       width: width,
@@ -776,23 +773,17 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     IconData icon, {
     bool isHighlight = false,
   }) {
-    // MODIFIED: Always show the section.
+    // Removed green highlight logic as requested. Now using standard colors.
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isHighlight ? const Color(0xFFF0FDF4) : Colors.grey[50],
+        color: Colors.grey[50], // Standard grey bg
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isHighlight ? Colors.green.shade200 : Colors.grey.shade200,
-        ),
+        border: Border.all(color: Colors.grey.shade200), // Standard grey border
       ),
       child: Row(
         children: [
-          Icon(
-            icon,
-            size: 20,
-            color: isHighlight ? Colors.green[700] : Colors.grey[600],
-          ),
+          Icon(icon, size: 20, color: Colors.grey[600]), // Standard grey icon
           const SizedBox(width: 12),
           Expanded(
             child: Column(

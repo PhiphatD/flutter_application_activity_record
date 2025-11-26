@@ -36,6 +36,7 @@ dependencies:
   dotted_border: ^2.0.0
   animated_custom_dropdown: ^3.1.1
   syncfusion_flutter_datepicker: ^28.1.38
+  flutter_launcher_icons: ^0.13.1
   # [NEW] WebSocket
 dev_dependencies:
   flutter_test:
@@ -82,3 +83,10 @@ fonts:
         weight: 600
       - asset: assets/fonts/Kanit-Bold.ttf
         weight: 700
+
+flutter_icons:
+  android: "ic_launcher"
+  ios: true
+  image_path: "assets/images/login_ellipse.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/login_ellipse.png"

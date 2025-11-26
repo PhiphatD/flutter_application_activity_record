@@ -141,6 +141,42 @@ class AdminService {
     }
   }
 
+  // [NEW] สร้างพนักงานใหม่
+  Future<bool> createEmployee(String adminId, Map<String, dynamic> data) async {
+    try {
+      final response = await http.post(
+        Uri.parse('${Config.apiUrl}/admin/employees?admin_id=$adminId'),
+        headers: {"Content-Type": "application/json"},
+        body: json.encode(data),
+      );
+
+      if (response.statusCode == 200) {
+        return true;
+      } else {
+        final err = json.decode(utf8.decode(response.bodyBytes));
+        print("Create Failed: ${err['detail']}");
+        return false;
+      }
+    } catch (e) {
+      print("Create Emp Error: $e");
+      return false;
+    }
+  }
+
+  Future<List<String>> getTitles() async {
+    try {
+      final response = await http.get(Uri.parse('${Config.apiUrl}/titles'));
+      if (response.statusCode == 200) {
+        final List data = json.decode(utf8.decode(response.bodyBytes));
+        return data.map<String>((e) => e.toString()).toList();
+      }
+      return [];
+    } catch (e) {
+      print("Error fetching titles: $e");
+      return [];
+    }
+  }
+
   // [NEW] อัปเดตพนักงาน
   Future<bool> updateEmployee(String empId, Map<String, dynamic> data) async {
     try {

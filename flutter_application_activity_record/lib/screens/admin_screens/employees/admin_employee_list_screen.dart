@@ -177,6 +177,191 @@ class _AdminEmployeeListScreenState extends State<AdminEmployeeListScreen> {
     );
   }
 
+  void _showAddOptions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true, // ให้ Content กำหนดความสูงเอง
+      backgroundColor: Colors.transparent, // เพื่อให้เห็นมุมโค้งด้านบนชัดเจน
+      builder: (context) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          child: SafeArea(
+            // [CRITICAL] ห่อด้วย SafeArea เพื่อกันชนปุ่ม Home ด้านล่าง
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 1. Drag Handle (แถบจับด้านบน)
+                Center(
+                  child: Container(
+                    width: 48,
+                    height: 5,
+                    margin: const EdgeInsets.only(bottom: 24, top: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[300],
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+
+                // 2. Header
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    "Add Employee",
+                    style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xFF1F2937),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    "Choose how you want to add new members",
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      color: Colors.grey[500],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+
+                // 3. Option 1: Add Manually (Card Style)
+                _buildActionCard(
+                  context,
+                  title: "Add Manually",
+                  subtitle: "Fill in details form directly",
+                  icon: Icons.person_add_rounded,
+                  color: const Color(0xFF4A80FF), // สีฟ้า Theme หลัก
+                  onTap: () {
+                    Navigator.pop(context);
+                    _navigateToAdd();
+                  },
+                ),
+
+                const SizedBox(height: 16),
+
+                // 4. Option 2: Import CSV (Card Style)
+                _buildActionCard(
+                  context,
+                  title: "Import from CSV",
+                  subtitle: "Upload bulk data via file",
+                  icon: Icons.upload_file_rounded,
+                  color: Colors.green, // สีเขียวสื่อถึง Excel/CSV
+                  onTap: () {
+                    Navigator.pop(context);
+                    _navigateToImport();
+                  },
+                ),
+
+                // เว้นระยะด้านล่างเพิ่มอีกนิดให้นิ้วกดสะดวก
+                const SizedBox(height: 24),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _navigateToAdd() async {
+    // ส่ง null ไปเพื่อให้เป็น Create Mode
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const AdminEmployeeEditScreen(employeeData: null),
+      ),
+    );
+    if (result == true) _fetchEmployees();
+  }
+
+  void _navigateToImport() {
+    // Code เดิมของปุ่ม Import
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AdminEmployeeImportScreen()),
+    ).then((res) {
+      if (res == true) _fetchEmployees();
+    });
+  }
+
+  Widget _buildActionCard(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade200), // ขอบบางๆ
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.03),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            // Icon Box
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1), // พื้นหลังสีจางตาม Theme
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color, size: 28),
+            ),
+            const SizedBox(width: 16),
+
+            // Texts
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.poppins(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: const Color(0xFF1F2937),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: Colors.grey[500],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Arrow Icon
+            Icon(Icons.chevron_right_rounded, color: Colors.grey[400]),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _navigateToEdit(dynamic emp) async {
     final result = await Navigator.push(
       context,
@@ -259,26 +444,10 @@ class _AdminEmployeeListScreenState extends State<AdminEmployeeListScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       // [FAB] ปุ่ม Import CSV
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => const AdminEmployeeImportScreen(),
-            ),
-          ).then((res) {
-            if (res == true) _fetchEmployees(); // Refresh ถ้า Import สำเร็จ
-          });
-        },
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _showAddOptions(context),
         backgroundColor: const Color(0xFF4A80FF),
-        icon: const Icon(Icons.file_upload_outlined, color: Colors.white),
-        label: Text(
-          "Import CSV",
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-        ),
+        child: const Icon(Icons.add, color: Colors.white),
       ),
       body: Column(
         children: [
@@ -369,54 +538,78 @@ class _AdminEmployeeListScreenState extends State<AdminEmployeeListScreen> {
 
   // [UPDATED] ปรับดีไซน์ Card ให้เด้งและชัดเจนขึ้น
   Widget _buildEmployeeCard(dynamic emp) {
-    // Avatar Logic
+    // 1. Gender Logic (เหมือนเดิม)
     String gender = "male";
     final title = (emp['title'] ?? "").toString().toLowerCase();
     if (title.contains("ms") ||
         title.contains("mrs") ||
         title.contains("miss") ||
-        title.contains("นาง")) {
+        title.contains("นาง") || // เพิ่มภาษาไทยเผื่อไว้
+        title.contains("น.ส.")) {
       gender = "female";
     }
-    final avatarUrl =
-        "https://avatar.iran.liara.run/public/job/operator/$gender?username=${emp['id']}";
+
+    // 2. Role Logic (เพิ่มใหม่ตาม Requirement)
+    final role = (emp['role'] ?? "employee").toString().toLowerCase();
+    String avatarUrl;
+
+    if (role == 'admin') {
+      // Admin -> Operator Style (ใส่หูฟัง)
+      avatarUrl =
+          "https://avatar.iran.liara.run/public/job/operator/$gender?username=${emp['id']}";
+    } else if (role == 'organizer') {
+      // Organizer -> Astronomer Style (นักดาราศาสตร์)
+      avatarUrl =
+          "https://avatar.iran.liara.run/public/job/astronomer/$gender?username=${emp['id']}";
+    } else {
+      if (gender == "male") {
+        avatarUrl =
+            "https://avatar.iran.liara.run/public/boy?username=${emp['id']}";
+      } else {
+        avatarUrl =
+            "https://avatar.iran.liara.run/public/girl?username=${emp['id']}";
+      }
+    }
 
     return GestureDetector(
       onTap: () => _navigateToEdit(emp),
       child: Container(
-        margin: const EdgeInsets.only(
-          bottom: 12,
-          left: 4,
-          right: 4,
-        ), // เพิ่ม margin ข้างนิดหน่อยให้เงาไม่ขาด
+        margin: const EdgeInsets.only(bottom: 12, left: 4, right: 4),
         decoration: BoxDecoration(
-          color: Colors.white, // [FIX] สีขาวชัดเจน
+          color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          // [FIX] เพิ่มขอบบางๆ ให้ตัดกับพื้นหลัง
           border: Border.all(color: Colors.grey.shade200),
-          // [FIX] ปรับเงาให้เข้มขึ้นและฟุ้งขึ้น
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.08), // เพิ่มความเข้มเงา
-              blurRadius: 12, // เพิ่มความฟุ้ง
-              offset: const Offset(0, 4), // ทิศทางเงาลงล่าง
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
         child: Padding(
-          padding: const EdgeInsets.all(16.0), // เพิ่ม Padding ภายในให้ดูโปร่ง
+          padding: const EdgeInsets.all(16.0),
           child: Row(
             children: [
-              // Avatar
+              // Avatar (ใช้ avatarUrl ที่คำนวณใหม่)
               Container(
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: Colors.grey.shade100, width: 2),
+                  border: Border.all(
+                    // [Optional] เปลี่ยนสีขอบตาม Role ด้วยก็ได้
+                    color: role == 'admin'
+                        ? Colors.red.shade100
+                        : (role == 'organizer'
+                              ? Colors.orange.shade100
+                              : Colors.blue.shade100),
+                    width: 2,
+                  ),
                 ),
                 child: CircleAvatar(
                   radius: 26,
                   backgroundColor: Colors.grey.shade50,
-                  backgroundImage: NetworkImage(avatarUrl),
+                  // ใช้ CachedNetworkImageProvider เพื่อประสิทธิภาพที่ดีกว่า NetworkImage ธรรมดา
+                  backgroundImage: CachedNetworkImageProvider(avatarUrl),
                 ),
               ),
               const SizedBox(width: 16),

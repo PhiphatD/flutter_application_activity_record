@@ -93,6 +93,19 @@ class PrizeResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# 1. เพิ่ม Schema นี้ต่อจาก EmployeeUpdateRequest
+class EmployeeCreateRequest(BaseModel):
+    title: str
+    name: str
+    phone: str
+    email: str
+    department_id: str
+    position: str
+    role: str
+    status: str = "Active"
+    start_date: str
+    password: str = "123456" # Default Password
+
 # [UPDATED] รองรับรูปภาพหลายรูป (List)
 class MyRedemptionResponse(BaseModel):
     redeemId: str
@@ -2461,6 +2474,7 @@ async def redeem_reward(req: RedeemRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Insufficient Points")
         
     try:
+        # --- 1. ตัดแต้มและสต็อก ---
         emp_points.TOTAL_POINTS -= prize.PRIZE_POINTS
         prize.STOCK -= 1
         
@@ -2500,27 +2514,51 @@ async def redeem_reward(req: RedeemRequest, db: Session = Depends(get_db)):
             TXN_DATE=datetime.now()
         )
         db.add(new_txn)
+
+        # --- 2. ส่วนแจ้งเตือน Admin (DEBUG & LOGIC ใหม่) ---
+        # [ระวัง: บรรทัดข้างล่างต้องย่อหน้าเท่ากับ db.add ด้านบน]
+        current_prize_type = str(prize.PRIZE_TYPE).strip().lower()
+        print(f"DEBUG: Redeeming {prize.PRIZE_NAME} (Type: {current_prize_type}, Status: {status})")
+
+        # เตรียมรายชื่อ Admin
+        all_employees = db.query(models.Employee).all()
+        admins = [e for e in all_employees if str(e.EMP_ROLE).strip().lower() == 'admin']
         
-        # [LOGIC 1] แจ้งเตือน Admin: มีคำขอแลกของรางวัลใหม่ (New Redemption Request)
-        if prize.PRIZE_TYPE == 'Physical' and status == 'Pending':
-            # หา Admin ทุกคนในระบบ
-            admins = db.query(models.Employee).filter(models.Employee.EMP_ROLE == 'admin').all()
+        # CASE A: ของที่ต้องดำเนินการ (Physical = ส่งของ, Digital = ส่งโค้ด)
+        # เงื่อนไข: เป็น Physical หรือ Digital และสถานะต้องเป็น Pending
+        if (current_prize_type == 'physical' or current_prize_type == 'digital') and status == 'Pending':
+            print(f"DEBUG: Notify {len(admins)} admins for Pending Request")
             for admin in admins:
                 create_notification_internal(
                     db,
                     emp_id=admin.EMP_ID,
                     title="มีคำขอแลกรางวัลใหม่ 🎁",
-                    message=f"พนักงาน {req.emp_id} ขอแลก '{prize.PRIZE_NAME}'",
+                    # เพิ่ม Type ในข้อความเพื่อให้ Admin รู้ทันทีว่าต้องทำอะไร
+                    message=f"[{prize.PRIZE_TYPE}] พนักงาน {req.emp_id} ขอแลก '{prize.PRIZE_NAME}'",
                     notif_type="Reward",
-                    target_role="Admin",  # ส่งให้ Admin เท่านั้น
+                    target_role="Admin",
                     ref_id=new_redeem_id,
-                    route_path="/admin/redemptions" # พาไปหน้าจัดการคำขอ
+                    route_path="/admin/redemptions"
+                )
+                
+        # CASE B: สิทธิพิเศษ (Privilege)
+        # เงื่อนไข: เป็น Privilege (ซึ่งปกติจะ Auto-Complete) -> แจ้งเพื่อทราบ
+        elif current_prize_type == 'privilege':
+            print(f"DEBUG: Notify {len(admins)} admins for Privilege Usage")
+            for admin in admins:
+                create_notification_internal(
+                    db,
+                    emp_id=admin.EMP_ID,
+                    title="มีการใช้สิทธิ์รางวัล ✨",
+                    message=f"พนักงาน {req.emp_id} ได้ใช้สิทธิ์ '{prize.PRIZE_NAME}' เรียบร้อยแล้ว",
+                    notif_type="Reward", # หรือจะใช้ System ก็ได้ถ้าไม่อยากให้เด่นมาก
+                    target_role="Admin",
+                    ref_id=new_redeem_id,
+                    route_path="/admin/redemptions" # กดไปดูประวัติได้
                 )
 
-        # [LOGIC 2] แจ้งเตือน Admin: ของใกล้หมด (Stock Low Warning)
-        # กำหนดเกณฑ์ Safety Stock เช่น ต่ำกว่า 5 ชิ้น
+        # [LOGIC เดิม] Stock Low Warning
         if prize.STOCK < 5: 
-            admins = db.query(models.Employee).filter(models.Employee.EMP_ROLE == 'admin').all()
             for admin in admins:
                 create_notification_internal(
                     db,
@@ -2533,6 +2571,7 @@ async def redeem_reward(req: RedeemRequest, db: Session = Depends(get_db)):
                     route_path="/admin/rewards"
                 )
         
+        # --- 3. Commit ---
         db.commit()
         await manager.broadcast("REFRESH_REWARDS")
         await manager.send_personal_message("REFRESH_NOTIFICATIONS", req.emp_id)
@@ -2547,7 +2586,6 @@ async def redeem_reward(req: RedeemRequest, db: Session = Depends(get_db)):
         db.rollback()
         print(f"Redeem Error: {e}")
         raise HTTPException(status_code=500, detail=f"Transaction failed: {str(e)}")
-
 @app.post("/rewards/cancel")
 async def cancel_redemption(req: CancelRedeemRequest, db: Session = Depends(get_db)):
     redeem = db.query(models.Redeem).filter(
@@ -2606,6 +2644,7 @@ def get_all_employees(db: Session = Depends(get_db)):
         results.append({
             "id": e.EMP_ID,
             "name": e.EMP_NAME_EN,
+            "title": e.EMP_TITLE_EN,
             "position": e.EMP_POSITION,
             "phone": e.EMP_PHONE,
             "email": e.EMP_EMAIL,
@@ -3088,3 +3127,68 @@ async def create_system_announcement(req: AnnouncementRequest, db: Session = Dep
     await manager.broadcast("REFRESH_NOTIFICATIONS")
     
     return {"message": f"Announcement sent to {count} employees"}
+
+
+
+@app.get("/titles")
+def get_titles(db: Session = Depends(get_db)):
+    # ดึงข้อมูลจากคอลัมน์ EMP_TITLE_EN แบบไม่ซ้ำกัน (Distinct)
+    titles = db.query(models.Employee.EMP_TITLE_EN).distinct().all()
+    # กรองค่า None หรือค่าว่างออก แล้วคืนกลับเป็น List
+    return [t[0] for t in titles if t[0] and t[0].strip()]
+
+
+@app.post("/admin/employees")
+def create_employee(req: EmployeeCreateRequest, admin_id: str = Query(...), db: Session = Depends(get_db)):
+    # Check Permission
+    get_admin_company_id_and_check(admin_id, db)
+    
+    # Check Email Duplicate
+    if db.query(models.Employee).filter(models.Employee.EMP_EMAIL == req.email).first():
+        raise HTTPException(status_code=400, detail="Email already exists")
+
+    try:
+        # Generate ID
+        new_id = generate_id("E")
+        while db.query(models.Employee).filter(models.Employee.EMP_ID == new_id).first():
+            new_id = generate_id("E")
+            
+        # Resolve Department
+        admin = db.query(models.Employee).filter(models.Employee.EMP_ID == admin_id).first()
+        final_dep_id = resolve_department_id(db, req.department_id, admin.COMPANY_ID)
+
+        # Create Employee
+        new_emp = models.Employee(
+            EMP_ID=new_id,
+            COMPANY_ID=admin.COMPANY_ID,
+            EMP_TITLE_EN=req.title,
+            EMP_NAME_EN=req.name,
+            EMP_POSITION=req.position,
+            DEP_ID=final_dep_id,
+            EMP_PHONE=req.phone,
+            EMP_EMAIL=req.email,
+            EMP_PASSWORD=get_password_hash(req.password),
+            EMP_STARTDATE=parse_date_str(req.start_date),
+            EMP_STATUS=req.status,
+            EMP_ROLE=req.role
+        )
+        db.add(new_emp)
+        
+        # If Organizer, create profile
+        if req.role.lower() == 'organizer':
+             new_org = models.Organizer(
+                ORG_ID=generate_id("O"),
+                EMP_ID=new_id,
+                ORG_CONTACT_INFO=req.phone,
+                ORG_UNIT=req.department_id, # Use raw name as unit
+                ORG_NOTE="Manual Created"
+            )
+             db.add(new_org)
+
+        db.commit()
+        return {"message": "Employee created successfully", "id": new_id}
+
+    except Exception as e:
+        db.rollback()
+        print(f"Create Emp Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

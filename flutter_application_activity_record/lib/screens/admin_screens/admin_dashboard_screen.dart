@@ -8,8 +8,13 @@ import '../../widgets/admin_header.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   final Function(int) onSwitchTab;
+  final VoidCallback onGoToRequests; // [1] เพิ่มตัวแปรนี้
 
-  const AdminDashboardScreen({super.key, required this.onSwitchTab});
+  const AdminDashboardScreen({
+    super.key,
+    required this.onSwitchTab,
+    required this.onGoToRequests, // [2] รับค่าเข้ามา
+  });
 
   @override
   State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
@@ -102,7 +107,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                   "${_stats['pendingRequests']}",
                                   Icons.notifications_active,
                                   Colors.orange,
-                                  onTap: () => widget.onSwitchTab(2),
+                                  onTap: widget
+                                      .onGoToRequests, // [3] ผูกกับฟังก์ชันนี้
                                 ),
                                 _buildStatCard(
                                   "Total Rewards",

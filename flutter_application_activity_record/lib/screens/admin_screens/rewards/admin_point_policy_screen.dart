@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../services/admin_service.dart';
 import 'package:calendar_date_picker2/calendar_date_picker2.dart';
+import '../../../widgets/custom_confirm_dialog.dart'; //
+import '../../../widgets/auto_close_success_dialog.dart'; //
 
 class AdminPointPolicyScreen extends StatefulWidget {
   const AdminPointPolicyScreen({super.key});
@@ -73,8 +75,30 @@ class _AdminPointPolicyScreenState extends State<AdminPointPolicyScreen> {
     }
   }
 
-  Future<void> _savePolicy() async {
+  // [NEW] ฟังก์ชันใหม่: ตรวจสอบ Form และแสดง Dialog ยืนยันก่อน
+  void _confirmSave() {
+    // 1. Validate ก่อน ถ้าไม่ผ่านไม่ต้องโชว์ Dialog
     if (!_formKey.currentState!.validate()) return;
+
+    // 2. แสดง Dialog ยืนยัน (ใช้ CustomConfirmDialog.success ธีมสีฟ้า)
+    showDialog(
+      context: context,
+      builder: (ctx) => CustomConfirmDialog.success(
+        title: "Confirm Update",
+        subtitle:
+            "Are you sure you want to update the point policy configuration?",
+        confirmText: "Yes, Update",
+        onConfirm: () {
+          Navigator.pop(ctx); // ปิด Dialog ยืนยัน
+          _executeSave(); // เรียกฟังก์ชันบันทึกจริง
+        },
+      ),
+    );
+  }
+
+  // [RENAMED] เปลี่ยนชื่อจาก _savePolicy เป็น _executeSave (Logic เดิม)
+  Future<void> _executeSave() async {
+    // ตัด validate ออก เพราะทำใน _confirmSave แล้ว
     if (_isSaving) return;
 
     setState(() => _isSaving = true);
@@ -88,15 +112,18 @@ class _AdminPointPolicyScreenState extends State<AdminPointPolicyScreen> {
       };
 
       await _service.updatePointPolicy(_adminId, payload);
-
-      // [NEW] โหลดข้อมูลใหม่ทันทีหลังจาก Save เสร็จ เพื่ออัปเดต Card ด้านบน
       await _loadPolicy();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Policy updated successfully!'),
-            backgroundColor: Colors.green,
+        // Success Dialog (Auto Close) เหมือนเดิม
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const AutoCloseSuccessDialog(
+            title: "Policy Updated",
+            subtitle: "Configuration saved successfully.",
+            icon: Icons.check_circle,
+            color: Colors.green,
           ),
         );
       }
@@ -115,60 +142,51 @@ class _AdminPointPolicyScreenState extends State<AdminPointPolicyScreen> {
   void _confirmRunBatch() {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("⚠️ Danger Zone"),
-        content: Text(
-          "Are you sure you want to expire points NOW?\n\n"
-          "System will check expiry date: ${_currentPolicy?['end_date'] ?? 'Unknown'}\n"
-          "Any points expired before today will be removed.",
-          style: GoogleFonts.poppins(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              Navigator.pop(ctx);
-              setState(() => _isLoading = true);
-              try {
-                final result = await _service.triggerExpiryBatch(_adminId);
-                if (mounted) {
-                  showDialog(
-                    context: context,
-                    builder: (_) => AlertDialog(
-                      title: const Text("Batch Complete"),
-                      content: Text(
-                        "Processed: ${result['processed_users']} users\n"
-                        "Points Removed: ${result['total_points_removed']}",
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text("OK"),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text("Error: $e"),
-                      backgroundColor: Colors.red,
-                    ),
-                  );
-                }
-              } finally {
-                if (mounted) setState(() => _isLoading = false);
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text("CONFIRM", style: TextStyle(color: Colors.white)),
-          ),
-        ],
+      builder: (ctx) => CustomConfirmDialog.danger(
+        title: "Run Expiry Batch?",
+        subtitle:
+            "System will expire points based on End Date: ${_currentPolicy?['end_date'] ?? 'Unknown'}\nThis action cannot be undone.",
+        confirmText: "Run Batch",
+        onConfirm: () async {
+          Navigator.pop(ctx); // ปิด Dialog ยืนยัน
+
+          setState(() => _isLoading = true); // Loading เดิม
+
+          try {
+            final result = await _service.triggerExpiryBatch(
+              _adminId,
+            ); // Logic เดิม
+
+            if (mounted) {
+              // [UPDATED] แสดงผลลัพธ์ด้วย AutoCloseSuccessDialog (สีส้ม/แดง ให้เข้ากับธีมลบ)
+              // เพิ่มเวลาเป็น 4 วินาที เพื่อให้อ่านยอดตัวเลขทัน
+              await showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (_) => AutoCloseSuccessDialog(
+                  title: "Batch Complete",
+                  subtitle:
+                      "Processed: ${result['processed_users']} users\n"
+                      "Removed: ${result['total_points_removed']} points",
+                  icon: Icons.delete_sweep,
+                  color: Colors.orange,
+                  duration: const Duration(seconds: 4),
+                ),
+              );
+            }
+          } catch (e) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text("Error: $e"),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+          } finally {
+            if (mounted) setState(() => _isLoading = false);
+          }
+        },
       ),
     );
   }
@@ -386,7 +404,7 @@ class _AdminPointPolicyScreenState extends State<AdminPointPolicyScreen> {
               width: double.infinity,
               height: 50,
               child: ElevatedButton(
-                onPressed: _isSaving ? null : _savePolicy,
+                onPressed: _isSaving ? null : _confirmSave,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF4A80FF),
                   shape: RoundedRectangleBorder(
