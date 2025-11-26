@@ -359,51 +359,7 @@ class TargetCountRequest(BaseModel):
     positions: list[str] = []
     admin_id: str | None = None
 
-@app.post("/activities/count-target")
-def count_target_audience(req: TargetCountRequest, db: Session = Depends(get_db)):
-    try:
-        # 1. Find Company ID
-        company_id = None
-        if req.admin_id:
-             admin = db.query(models.Employee).filter(models.Employee.EMP_ID == req.admin_id).first()
-             if admin: company_id = admin.COMPANY_ID
-        
-        # 2. Query all active employees in company
-        query = db.query(models.Employee).filter(models.Employee.EMP_STATUS == 'Active')
-        if company_id:
-            query = query.filter(models.Employee.COMPANY_ID == company_id)
-            
-        all_employees = query.all()
-        
-        # 3. Count based on criteria
-        if req.type == 'all':
-            return {"count": len(all_employees)}
-            
-        # Specific Group Logic
-        count = 0
-        target_depts = [d.strip() for d in req.departments]
-        target_positions = [p.strip() for p in req.positions]
-        
-        for emp in all_employees:
-            emp_dept = emp.department.DEP_NAME.strip() if emp.department else ""
-            emp_pos = emp.EMP_POSITION.strip()
-            
-            is_match = False
-            # Dept Match
-            if target_depts and emp_dept in target_depts:
-                is_match = True
-            # Position Match
-            elif target_positions and emp_pos in target_positions:
-                is_match = True
-                
-            if is_match:
-                count += 1
-                
-        return {"count": count}
-        
-    except Exception as e:
-        print(f"Count Error: {e}")
-        return {"count": 0}
+
     
 # --- Helper Functions ---
 
@@ -1197,7 +1153,52 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
         })
         
     return results
-
+@app.post("/activities/count-target")
+def count_target_audience(req: TargetCountRequest, db: Session = Depends(get_db)):
+    try:
+        # 1. Find Company ID
+        company_id = None
+        if req.admin_id:
+             admin = db.query(models.Employee).filter(models.Employee.EMP_ID == req.admin_id).first()
+             if admin: company_id = admin.COMPANY_ID
+        
+        # 2. Query all active employees in company
+        query = db.query(models.Employee).filter(models.Employee.EMP_STATUS == 'Active')
+        if company_id:
+            query = query.filter(models.Employee.COMPANY_ID == company_id)
+            
+        all_employees = query.all()
+        
+        # 3. Count based on criteria
+        if req.type == 'all':
+            return {"count": len(all_employees)}
+            
+        # Specific Group Logic
+        count = 0
+        target_depts = [d.strip() for d in req.departments]
+        target_positions = [p.strip() for p in req.positions]
+        
+        for emp in all_employees:
+            emp_dept = emp.department.DEP_NAME.strip() if emp.department else ""
+            emp_pos = emp.EMP_POSITION.strip()
+            
+            is_match = False
+            # Dept Match
+            if target_depts and emp_dept in target_depts:
+                is_match = True
+            # Position Match
+            elif target_positions and emp_pos in target_positions:
+                is_match = True
+                
+            if is_match:
+                count += 1
+                
+        return {"count": count}
+        
+    except Exception as e:
+        print(f"Count Error: {e}")
+        return {"count": 0}
+        
 @app.get("/activities/{act_id}", response_model=ActivityDetailResponse)
 def get_activity_detail(
     act_id: str, 
