@@ -377,13 +377,22 @@ class _CreateActivityScreenState extends State<CreateActivityScreen> {
         try {
           final criteria = jsonDecode(act['ACT_TARGET_CRITERIA']);
           _targetType = criteria['type'] ?? 'all';
+
           if (_targetType == 'specific') {
-            _selectedTargetDepts = List<String>.from(
-              criteria['departments'] ?? [],
-            );
-            _selectedTargetPositions = List<String>.from(
-              criteria['positions'] ?? [],
-            );
+            // 1. ดึงข้อมูลดิบมาก่อน
+            final rawDepts = List<String>.from(criteria['departments'] ?? []);
+            final rawPositions = List<String>.from(criteria['positions'] ?? []);
+
+            // 2. [FIX] กรองเอาเฉพาะค่าที่มีอยู่ใน Master List (_dbDepartments) เท่านั้น
+            // เพื่อป้องกัน Error: Initial items must match items list
+            _selectedTargetDepts = rawDepts
+                .where((d) => _dbDepartments.contains(d))
+                .toList();
+
+            // 3. [FIX] ทำเหมือนกันกับ Positions
+            _selectedTargetPositions = rawPositions
+                .where((p) => _dbPositions.contains(p))
+                .toList();
           }
         } catch (_) {}
       }

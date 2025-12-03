@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../backend_api/config.dart';
 
 class AdminService {
@@ -9,16 +10,24 @@ class AdminService {
 
   Future<Map<String, dynamic>> getStats() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/stats'));
+      // 1. ดึง ID แอดมินจากเครื่อง
+      final prefs = await SharedPreferences.getInstance();
+      final adminId = prefs.getString('empId') ?? '';
+
+      // 2. ส่งไปกับ Query Param
+      final response = await http.get(
+        Uri.parse('$baseUrl/stats?admin_id=$adminId'),
+      );
 
       if (response.statusCode == 200) {
-        return json.decode(response.body);
+        return json.decode(
+          utf8.decode(response.bodyBytes),
+        ); // ใช้ utf8.decode เพื่อรองรับภาษาไทยถ้ามี
       } else {
         throw Exception('Failed to load admin stats');
       }
     } catch (e) {
       print("Error fetching admin stats: $e");
-      // Return default values on error to prevent UI crash
       return {
         "totalEmployees": 0,
         "pendingRequests": 0,
@@ -30,7 +39,12 @@ class AdminService {
 
   Future<List<dynamic>> getAllRedemptions() async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/redemptions'));
+      final prefs = await SharedPreferences.getInstance();
+      final adminId = prefs.getString('empId') ?? '';
+
+      final response = await http.get(
+        Uri.parse('$baseUrl/redemptions?admin_id=$adminId'),
+      );
       if (response.statusCode == 200) {
         return json.decode(utf8.decode(response.bodyBytes));
       }
@@ -95,9 +109,13 @@ class AdminService {
   // [REAL API] ดึงรายชื่อพนักงานทั้งหมด
   Future<List<dynamic>> getAllEmployees() async {
     try {
-      // Backend route: /admin/employees
-      // baseUrl already includes /admin, so we just use /employees
-      final response = await http.get(Uri.parse('$baseUrl/employees'));
+      final prefs = await SharedPreferences.getInstance();
+      final adminId = prefs.getString('empId') ?? '';
+
+      // ส่ง admin_id ไปด้วย
+      final response = await http.get(
+        Uri.parse('$baseUrl/employees?admin_id=$adminId'),
+      );
 
       if (response.statusCode == 200) {
         return json.decode(utf8.decode(response.bodyBytes));
@@ -197,9 +215,12 @@ class AdminService {
   // [REAL API] ลบพนักงาน
   Future<bool> deleteEmployee(String empId) async {
     try {
-      // Backend route: DELETE /admin/employees/{emp_id}
+      final prefs = await SharedPreferences.getInstance();
+      final adminId = prefs.getString('empId') ?? '';
+
+      // ส่ง admin_id ผ่าน Query Param
       final response = await http.delete(
-        Uri.parse('$baseUrl/employees/$empId'),
+        Uri.parse('$baseUrl/employees/$empId?admin_id=$adminId'),
       );
 
       if (response.statusCode == 200) {

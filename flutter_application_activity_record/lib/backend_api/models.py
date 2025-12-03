@@ -115,6 +115,7 @@ class ActivitySession(Base):
 
     activity = relationship("Activity", back_populates="sessions")
 
+
 # --- 7. ตารางลงทะเบียน ---
 class Registration(Base):
     __tablename__ = "REGISTRATION"

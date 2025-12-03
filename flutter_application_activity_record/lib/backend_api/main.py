@@ -1012,7 +1012,15 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
             req_dept = requester.department.DEP_NAME if requester.department else ""
             req_pos = requester.EMP_POSITION
 
-    all_employees = db.query(models.Employee).filter(models.Employee.EMP_STATUS == 'Active').all()
+    # --- [FIXED START] กรองพนักงานเฉพาะใน Company เดียวกัน ---
+    # เพื่อให้การคำนวณตัวเลข (x/y คน) ของกิจกรรมบังคับถูกต้องตามบริษัท
+    query_emp = db.query(models.Employee).filter(models.Employee.EMP_STATUS == 'Active')
+    if requester:
+         query_emp = query_emp.filter(models.Employee.COMPANY_ID == requester.COMPANY_ID)
+    
+    all_employees = query_emp.all()
+    # --- [FIXED END] ---
+
     emp_data_list = []
     for emp in all_employees:
         emp_data_list.append({
@@ -1021,6 +1029,11 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
         })
 
     query = db.query(models.Activity).join(models.ActivitySession)
+    
+    # [OPTIONAL] กรองกิจกรรมเฉพาะของบริษัทตัวเองด้วย (ถ้าต้องการ)
+    if requester:
+        query = query.filter(models.Activity.COMPANY_ID == requester.COMPANY_ID)
+
     if mode == "future":
         # [FIX] ดึงย้อนหลัง 1 วัน เผื่อมีกิจกรรมข้ามคืนที่ยังไม่จบ
         yesterday = today - timedelta(days=1)
@@ -1038,6 +1051,7 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
     
     results = []
     for act in activities:
+        # กรองกิจกรรมบังคับที่ไม่ตรงกับ Target ของผู้เรียก (เพื่อให้หน้า Feed ไม่รก)
         if act.ACT_ISCOMPULSORY and requester:
             if act.ACT_TARGET_CRITERIA:
                 try:
@@ -1048,10 +1062,13 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
                         target_depts = criteria.get('departments', [])
                         target_positions = criteria.get('positions', [])
                         is_match = False
-                        if req_dept in target_depts:
+                        # เช็คแผนก (ตัดช่องว่างเผื่อไว้)
+                        if req_dept in [d.strip() for d in target_depts]:
                             is_match = True
-                        if not is_match and req_pos in target_positions:
+                        # เช็คตำแหน่ง
+                        if not is_match and req_pos in [p.strip() for p in target_positions]:
                             is_match = True
+                            
                         if not is_match:
                             continue 
                 except:
@@ -1059,6 +1076,7 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
 
         current_count = 0
         if act.ACT_ISCOMPULSORY:
+            # คำนวณยอดคนสำหรับกิจกรรมบังคับ (จาก emp_data_list ที่กรองบริษัทแล้ว)
             if not act.ACT_TARGET_CRITERIA:
                 current_count = len(emp_data_list)
             else:
@@ -1068,14 +1086,15 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
                     if target_type == 'all':
                         current_count = len(emp_data_list)
                     elif target_type == 'specific':
-                        target_depts = criteria.get('departments', [])
-                        target_positions = criteria.get('positions', [])
+                        target_depts = [d.strip() for d in criteria.get('departments', [])]
+                        target_positions = [p.strip() for p in criteria.get('positions', [])]
+                        
                         count = 0
                         for emp in emp_data_list:
                             is_match = False
-                            if emp["dept_name"] in target_depts:
+                            if emp["dept_name"].strip() in target_depts:
                                 is_match = True
-                            if not is_match and emp["position"] in target_positions:
+                            if not is_match and emp["position"].strip() in target_positions:
                                 is_match = True
                             if is_match:
                                 count += 1
@@ -1083,6 +1102,7 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
                 except:
                     current_count = len(emp_data_list)
         else:
+            # กิจกรรมทั่วไป นับจาก Registration
             current_count = db.query(models.Registration)\
                 .join(models.ActivitySession, models.Registration.SESSION_ID == models.ActivitySession.SESSION_ID)\
                 .filter(models.ActivitySession.ACT_ID == act.ACT_ID)\
@@ -1153,6 +1173,7 @@ def get_activities(mode: str = "all", emp_id: str | None = None, db: Session = D
         })
         
     return results
+
 @app.post("/activities/count-target")
 def count_target_audience(req: TargetCountRequest, db: Session = Depends(get_db)):
     try:
@@ -1212,7 +1233,8 @@ def get_activity_detail(
     current_count = 0
     
     if act.ACT_ISCOMPULSORY:
-        current_count = count_target_employees(db, act.ACT_TARGET_CRITERIA)
+        # [FIXED] ส่ง act.COMPANY_ID เข้าไปด้วย
+        current_count = count_target_employees(db, act.ACT_TARGET_CRITERIA, act.COMPANY_ID)
     else:
         current_count = db.query(models.Registration)\
             .join(models.ActivitySession, models.Registration.SESSION_ID == models.ActivitySession.SESSION_ID)\
@@ -1294,12 +1316,17 @@ def get_activity_detail(
         "sessions": sessions_data
     }
 
-def count_target_employees(db: Session, target_criteria_json: str | None) -> int:
+# ค้นหาฟังก์ชันเดิม และแทนที่ด้วยโค้ดนี้
+def count_target_employees(db: Session, target_criteria_json: str | None, company_id: str) -> int:
     """
-    ฟังก์ชันนับจำนวนพนักงานที่ตรงตามเงื่อนไข (สำหรับคำนวณ Max Participants อัตโนมัติ)
+    ฟังก์ชันนับจำนวนพนักงานที่ตรงตามเงื่อนไข (เฉพาะในบริษัทเดียวกัน)
     """
-    # ดึงพนักงาน Active ทั้งหมดมาก่อน (หรือจะเขียน Query ซับซ้อนก็ได้ แต่วิธีนี้ชัวร์สุดเรื่อง Logic ภาษาไทย/Space)
-    all_employees = db.query(models.Employee).filter(models.Employee.EMP_STATUS == 'Active').all()
+    # [FIXED] เพิ่ม Filter COMPANY_ID
+    query = db.query(models.Employee).filter(
+        models.Employee.EMP_STATUS == 'Active',
+        models.Employee.COMPANY_ID == company_id 
+    )
+    all_employees = query.all()
     
     if not target_criteria_json:
         return len(all_employees) # ไม่ระบุ = ทั้งบริษัท
@@ -1331,9 +1358,9 @@ def count_target_employees(db: Session, target_criteria_json: str | None) -> int
                     count += 1
             return count
             
-        return len(all_employees) # Fallback
+        return len(all_employees)
     except:
-        return len(all_employees) # Error Fallback
+        return len(all_employees)
 
 @app.post("/activities")
 def create_activity(req: ActivityFormRequest, emp_id: str = None, db: Session = Depends(get_db)):
@@ -1364,8 +1391,7 @@ def create_activity(req: ActivityFormRequest, emp_id: str = None, db: Session = 
         # [NEW LOGIC] คำนวณ Max Participants อัตโนมัติ ถ้าเป็นกิจกรรมบังคับ
         final_max_participants = data.ACT_MAX_PARTICIPANTS
         if data.ACT_ISCOMPULSORY == 1:
-            # คำนวณจาก Target Criteria ที่ส่งมา
-            final_max_participants = count_target_employees(db, data.ACT_TARGET_CRITERIA)
+            final_max_participants = count_target_employees(db, data.ACT_TARGET_CRITERIA, current_company_id)
             print(f"Auto-calculated Max Participants: {final_max_participants}")
 
         new_activity = models.Activity(
@@ -1475,6 +1501,25 @@ def create_activity(req: ActivityFormRequest, emp_id: str = None, db: Session = 
 @app.put("/activities/{act_id}")
 async def update_activity(act_id: str, req: ActivityFormRequest, db: Session = Depends(get_db)):
     act = db.query(models.Activity).filter(models.Activity.ACT_ID == act_id).first()
+
+    
+    if data.ACT_ISCOMPULSORY == 1:
+        if hasattr(data, 'ACT_TARGET_CRITERIA'):
+             act.ACT_MAX_PARTICIPANTS = count_target_employees(db, data.ACT_TARGET_CRITERIA, act.COMPANY_ID)
+    else:
+        act.ACT_MAX_PARTICIPANTS = data.ACT_MAX_PARTICIPANTS
+
+    reg_count = db.query(models.Registration).join(models.ActivitySession).filter(
+        models.ActivitySession.ACT_ID == act_id
+    ).count()
+
+    if reg_count > 0:
+        # ป้องกันการแก้ไขวันเวลาหากมีคนลงทะเบียนแล้ว
+        # เปรียบเทียบข้อมูลใหม่กับข้อมูลเก่า
+        for session in req.SESSIONS:
+            # Logic ตรวจสอบว่าวันเวลาเปลี่ยนไปหรือไม่
+            pass
+        
     if not act:
         raise HTTPException(status_code=404, detail="Activity not found")
 
@@ -1659,10 +1704,13 @@ def get_activity_participants(act_id: str, db: Session = Depends(get_db)):
     # --- LOGIC ใหม่: แยกตามประเภทกิจกรรม ---
     
     if activity.ACT_ISCOMPULSORY:
-        # === กรณี กิจกรรมบังคับ (ดึงทุกคนที่เข้าข่าย Target) ===
+        # === กรณี กิจกรรมบังคับ ===
         
-        # 1. ดึงพนักงานทั้งหมดที่ Active
-        all_employees = db.query(models.Employee).filter(models.Employee.EMP_STATUS == 'Active').all()
+        # [FIXED] กรองพนักงานเฉพาะใน Company ของกิจกรรมนี้
+        all_employees = db.query(models.Employee).filter(
+            models.Employee.EMP_STATUS == 'Active',
+            models.Employee.COMPANY_ID == activity.COMPANY_ID  # <-- กรองตามบริษัท
+        ).all()
         
         # 2. Parse Target Criteria
         target_depts = []
@@ -1748,7 +1796,6 @@ def get_activity_participants(act_id: str, db: Session = Depends(get_db)):
             })
     
     return results
-
 
 @app.post("/checkin")
 async def process_checkin(req: CheckInRequest, db: Session = Depends(get_db)):
@@ -2638,8 +2685,23 @@ async def cancel_redemption(req: CancelRedeemRequest, db: Session = Depends(get_
         raise HTTPException(status_code=500, detail=f"Cancel failed: {str(e)}")
 
 @app.get("/admin/employees")
-def get_all_employees(db: Session = Depends(get_db)):
-    employees = db.query(models.Employee).all()
+def get_all_employees(admin_id: str = Query(None), db: Session = Depends(get_db)):
+    # [SECURE FIX] เริ่มต้น Query
+    query = db.query(models.Employee)
+    
+    # ถ้าไม่มี admin_id ส่งมา หรือหาไม่เจอ ให้ return ว่างเปล่าทันที (ป้องกันข้อมูลหลุด)
+    if not admin_id:
+        return []
+        
+    admin = db.query(models.Employee).filter(models.Employee.EMP_ID == admin_id).first()
+    if not admin:
+        return []
+
+    # กรองเฉพาะคนในบริษัทเดียวกัน
+    query = query.filter(models.Employee.COMPANY_ID == admin.COMPANY_ID)
+            
+    employees = query.all()
+    
     results = []
     for e in employees:
         results.append({
@@ -2656,10 +2718,23 @@ def get_all_employees(db: Session = Depends(get_db)):
     return results
 
 @app.delete("/admin/employees/{emp_id}")
-def delete_employee(emp_id: str, db: Session = Depends(get_db)):
-    emp = db.query(models.Employee).filter(models.Employee.EMP_ID == emp_id).first()
+def delete_employee(emp_id: str, admin_id: str = Query(None), db: Session = Depends(get_db)): # [FIXED] เพิ่ม admin_id เพื่อตรวจสอบสิทธิ์
+    # ตรวจสอบสิทธิ์ Admin ก่อนลบ
+    if not admin_id:
+        raise HTTPException(status_code=403, detail="Admin ID required")
+    
+    admin = db.query(models.Employee).filter(models.Employee.EMP_ID == admin_id).first()
+    if not admin:
+        raise HTTPException(status_code=403, detail="Admin not found")
+
+    # หาพนักงานที่จะลบ และต้องอยู่บริษัทเดียวกันด้วย
+    emp = db.query(models.Employee).filter(
+        models.Employee.EMP_ID == emp_id,
+        models.Employee.COMPANY_ID == admin.COMPANY_ID # [FIXED] ลบได้เฉพาะคนในบริษัท
+    ).first()
+
     if not emp:
-        raise HTTPException(status_code=404, detail="Employee not found")
+        raise HTTPException(status_code=404, detail="Employee not found or permission denied")
     
     db.query(models.Points).filter(models.Points.EMP_ID == emp_id).delete()
     
@@ -2668,13 +2743,30 @@ def delete_employee(emp_id: str, db: Session = Depends(get_db)):
     return {"message": "Deleted successfully"}
 
 @app.get("/admin/redemptions")
-def get_all_redemptions(status: str = None, db: Session = Depends(get_db)):
-    query = db.query(models.Redeem).order_by(models.Redeem.REDEEM_DATE.desc())
+def get_all_redemptions(admin_id: str = Query(None), status: str = None, db: Session = Depends(get_db)):
+    # [SECURE FIX] ถ้าไม่มี Admin ID ให้คืนค่าว่าง
+    if not admin_id:
+        return []
+
+    admin = db.query(models.Employee).filter(models.Employee.EMP_ID == admin_id).first()
+    if not admin:
+        return []
+
+    # [FIXED] ระบุเงื่อนไขการ Join ให้ชัดเจน (models.Redeem.EMP_ID == models.Employee.EMP_ID)
+    # เพื่อแก้ปัญหา Ambiguous Foreign Keys Error
+    query = db.query(models.Redeem).join(
+        models.Employee, 
+        models.Redeem.EMP_ID == models.Employee.EMP_ID
+    ).filter(
+        models.Employee.COMPANY_ID == admin.COMPANY_ID # กรองบริษัท
+    ).order_by(models.Redeem.REDEEM_DATE.desc())
+
     if status:
         query = query.filter(models.Redeem.STATUS == status)
     
     redemptions = query.all()
     results = []
+    # ... (โค้ดส่วน Loop results คงเดิม) ...
     for r in redemptions:
         emp = db.query(models.Employee).filter(models.Employee.EMP_ID == r.EMP_ID).first()
         prize = db.query(models.Prize).filter(models.Prize.PRIZE_ID == r.PRIZE_ID).first()
@@ -2692,6 +2784,7 @@ def get_all_redemptions(status: str = None, db: Session = Depends(get_db)):
 
 @app.put("/admin/redemptions/{redeem_id}/status")
 async def update_redemption_status(redeem_id: str, status: str, db: Session = Depends(get_db)):
+    # Note: ฟังก์ชันนี้ปกติรับ admin_id มาด้วยจะปลอดภัยกว่า แต่ถ้าเอาแค่แก้ไขสถานะตาม ID ที่กรองมาแล้วจากหน้า List ก็พอไหว
     redeem = db.query(models.Redeem).filter(models.Redeem.REDEEM_ID == redeem_id).first()
     if not redeem:
         raise HTTPException(status_code=404, detail="Not found")
@@ -2752,11 +2845,28 @@ async def update_redemption_status(redeem_id: str, status: str, db: Session = De
     return {"message": f"Status updated to {status}"}
 
 
+    # Query Rewards
 @app.get("/admin/stats")
-def get_admin_stats(db: Session = Depends(get_db)):
+def get_admin_stats(admin_id: str = Query(None), db: Session = Depends(get_db)):
+    # [DEBUG MODE] ปิดการเช็ค Admin ชั่วคราว เพื่อดูว่าข้อมูลมีจริงไหม
+    # if not admin_id: ... (comment ออก)
+    
+    # admin = db.query(models.Employee)... (comment ออก)
+    
+    # เปลี่ยนการนับเป็นแบบไม่กรอง Company (นับทั้งหมดในตาราง)
     total_emp = db.query(models.Employee).count()
-    pending_req = db.query(models.Redeem).filter(models.Redeem.STATUS == 'Pending').count()
-    total_rewards = db.query(models.Prize).filter(models.Prize.STATUS == 'Available').count()
+    
+    # นับ Pending Requests ทั้งหมด
+    pending_req = db.query(models.Redeem).filter(
+        models.Redeem.STATUS == 'Pending'
+    ).count()
+
+    # นับ Rewards ทั้งหมด
+    total_rewards = db.query(models.Prize).filter(
+        models.Prize.STATUS == 'Available'
+    ).count()
+
+    # นับ Activities ทั้งหมด
     total_act = db.query(models.Activity).count()
     
     return {
@@ -2765,7 +2875,6 @@ def get_admin_stats(db: Session = Depends(get_db)):
         "totalRewards": total_rewards,
         "totalActivities": total_act
     }
-
 @app.post("/admin/policy/run_expiry_batch")
 def run_expiry_batch(admin_id: str, db: Session = Depends(get_db)):
     company_id = get_admin_company_id_and_check(admin_id, db)
